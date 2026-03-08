@@ -1,4 +1,4 @@
-package pbdbos
+package pocketflow
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-// Runtime is the core DBOS-style durable execution runtime for PocketBase.
+// Runtime is the core durable execution runtime for PocketBase.
 // Create with New(), register workflows before Launch(), then Shutdown() when done.
 type Runtime struct {
 	ctx           context.Context
@@ -83,7 +83,7 @@ func New(app core.App, config Config) *Runtime {
 	}
 
 	rt.queueRunner = newQueueRunner(rt.logger)
-	newWorkflowQueue(rt, _DBOS_INTERNAL_QUEUE_NAME)
+	newWorkflowQueue(rt, _PF_INTERNAL_QUEUE_NAME)
 
 	return rt
 }
@@ -91,7 +91,7 @@ func New(app core.App, config Config) *Runtime {
 // Launch starts the runtime: ensures collections, launches sysdb, starts queue runner, and recovers pending workflows.
 func (rt *Runtime) Launch() error {
 	if rt.launched.Load() {
-		return fmt.Errorf("pbdbos: runtime is already launched")
+		return fmt.Errorf("pocketflow: runtime is already launched")
 	}
 
 	rt.applicationID = rt.app.Settings().Meta.AppName
@@ -102,7 +102,7 @@ func (rt *Runtime) Launch() error {
 	// to avoid racing between recovery and dequeue
 	handles, err := recoverPendingWorkflows(rt, []string{rt.executorID})
 	if err != nil {
-		return fmt.Errorf("pbdbos: failed to recover workflows: %w", err)
+		return fmt.Errorf("pocketflow: failed to recover workflows: %w", err)
 	}
 	if len(handles) > 0 {
 		rt.logger.Info("recovered pending workflows", "count", len(handles))
@@ -116,7 +116,7 @@ func (rt *Runtime) Launch() error {
 
 	// Register garbage collection cron job if retention is positive
 	if rt.config.GCRetention > 0 {
-		if err := rt.app.Cron().Add("pbdbos_gc", rt.config.GCSchedule, func() {
+		if err := rt.app.Cron().Add("pocketflow_gc", rt.config.GCSchedule, func() {
 			if !rt.launched.Load() {
 				return
 			}
@@ -127,19 +127,19 @@ func (rt *Runtime) Launch() error {
 				rt.logger.Error("workflow garbage collection failed", "error", err)
 			}
 		}); err != nil {
-			return fmt.Errorf("pbdbos: failed to register GC cron job: %w", err)
+			return fmt.Errorf("pocketflow: failed to register GC cron job: %w", err)
 		}
 	}
 
-	rt.logger.Info("pbdbos launched", "app_name", rt.applicationID, "executor_id", rt.executorID)
+	rt.logger.Info("pocketflow launched", "app_name", rt.applicationID, "executor_id", rt.executorID)
 	return nil
 }
 
 // Shutdown gracefully stops the runtime.
 func (rt *Runtime) Shutdown(timeout time.Duration) {
-	rt.logger.Debug("pbdbos shutting down")
+	rt.logger.Debug("pocketflow shutting down")
 
-	rt.ctxCancelFunc(errors.New("pbdbos shutdown"))
+	rt.ctxCancelFunc(errors.New("pocketflow shutdown"))
 
 	// Wait for workflows
 	done := make(chan struct{})

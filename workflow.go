@@ -1,4 +1,4 @@
-package pbdbos
+package pocketflow
 
 import (
 	"context"
@@ -17,9 +17,9 @@ import (
 /******* FUNCTION TYPES *******/
 /*******************************/
 
-type dbosContextKey string
+type pfContextKey string
 
-const workflowStateKey dbosContextKey = "workflowState"
+const workflowStateKey pfContextKey = "workflowState"
 
 // Workflow is a type-safe workflow function.
 type Workflow[P any, R any] func(ctx context.Context, rt *Runtime, input P) (R, error)
@@ -323,7 +323,7 @@ func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...Work
 		entry.CronSchedule = regOpts.cronSchedule
 		rt.workflowRegistry.Store(fqn, entry)
 
-		cronJobID := fmt.Sprintf("pbdbos_sched_%s", customName)
+		cronJobID := fmt.Sprintf("pf_sched_%s", customName)
 		if err := rt.app.Cron().Add(cronJobID, regOpts.cronSchedule, func() {
 			if !rt.launched.Load() {
 				return
@@ -332,7 +332,7 @@ func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...Work
 			wfID := fmt.Sprintf("sched-%s-%s", customName, scheduledTime.UTC().Format(time.RFC3339))
 			_, err := wrapped(rt, scheduledTime,
 				WithWorkflowID(wfID),
-				WithQueue(_DBOS_INTERNAL_QUEUE_NAME),
+				WithQueue(_PF_INTERNAL_QUEUE_NAME),
 			)
 			if err != nil {
 				rt.logger.Error("failed to run scheduled workflow", "name", customName, "error", err)
@@ -516,7 +516,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 
 		// Handle workflow ID conflict — another goroutine owns this workflow ID.
 		// Wait for the existing workflow to complete and return its result.
-		if errors.Is(fnErr, &DBOSError{Code: ConflictingIDError}) {
+		if errors.Is(fnErr, &PFError{Code: ConflictingIDError}) {
 			rt.logger.Warn("workflow ID conflict, waiting for existing workflow", "workflow_id", workflowID)
 			encoded, awaitErr := retryWithResult(rt.ctx, func() (*string, error) {
 				return rt.systemDB.awaitWorkflowResult(rt.ctx, workflowID, _DB_RETRY_INTERVAL)
@@ -814,7 +814,7 @@ func Send(ctx context.Context, rt *Runtime, destinationID string, message any, t
 				Topic:           topic,
 				Message:         encoded,
 			})
-		}, WithStepName("DBOS.send"))
+		}, WithStepName("pf.send"))
 		return err
 	}
 
@@ -873,7 +873,7 @@ func SetEvent(ctx context.Context, rt *Runtime, key string, value any) error {
 			Key:          key,
 			Value:        encoded,
 		})
-	}, WithStepName("DBOS.setEvent"))
+	}, WithStepName("pf.setEvent"))
 	return err
 }
 
@@ -923,7 +923,7 @@ func Sleep(ctx context.Context, rt *Runtime, duration time.Duration) error {
 			}
 		}
 		return wakeUpTime.UnixMilli(), nil
-	}, WithStepName("DBOS.sleep"))
+	}, WithStepName("pf.sleep"))
 	if err != nil {
 		return err
 	}
@@ -996,7 +996,7 @@ func GetWorkflowSteps(rt *Runtime, workflowID string) ([]StepInfo, error) {
 	result := make([]StepInfo, len(steps))
 	for i, s := range steps {
 		result[i] = StepInfo{
-			WorkflowUUID: s.workflowUUID,
+			WorkflowID: s.workflowUUID,
 			FunctionID:   s.functionID,
 			FunctionName: s.functionName,
 		}

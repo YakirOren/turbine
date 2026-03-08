@@ -1,17 +1,13 @@
-package pbdbos
+package pocketflow
 
 import (
 	"context"
 	"log/slog"
-	"math/rand"
 	"sync"
-	"time"
 )
 
 const (
 	_DEFAULT_MAX_TASKS_PER_ITERATION = 100
-	_DEFAULT_BASE_POLLING_INTERVAL   = 1 * time.Second
-	_DEFAULT_MAX_POLLING_INTERVAL    = 30 * time.Second
 )
 
 // WorkflowQueue defines a named queue with concurrency and rate limiting options.
@@ -24,9 +20,7 @@ type WorkflowQueue struct {
 	MaxTasksPerIteration int
 	PartitionQueue       bool
 
-	listen              bool
-	basePollingInterval time.Duration
-	maxPollingInterval  time.Duration
+	listen bool
 }
 
 // QueueOption configures a workflow queue.
@@ -56,20 +50,9 @@ func WithPartitionQueue() QueueOption {
 	return func(q *WorkflowQueue) { q.PartitionQueue = true }
 }
 
-func WithQueueBasePollingInterval(d time.Duration) QueueOption {
-	return func(q *WorkflowQueue) { q.basePollingInterval = d }
-}
-
-func WithQueueMaxPollingInterval(d time.Duration) QueueOption {
-	return func(q *WorkflowQueue) { q.maxPollingInterval = d }
-}
 
 type queueRunner struct {
 	logger              *slog.Logger
-	backoffFactor       float64
-	scalebackFactor     float64
-	jitterMin           float64
-	jitterMax           float64
 	workflowQueueRegistry map[string]WorkflowQueue
 	queueGoroutinesWg   sync.WaitGroup
 	completionChan      chan struct{}
@@ -78,10 +61,6 @@ type queueRunner struct {
 func newQueueRunner(logger *slog.Logger) *queueRunner {
 	return &queueRunner{
 		logger:              logger,
-		backoffFactor:       2.0,
-		scalebackFactor:     0.5,
-		jitterMin:           0.95,
-		jitterMax:           1.05,
 		workflowQueueRegistry: make(map[string]WorkflowQueue),
 		completionChan:      make(chan struct{}, 1),
 	}
@@ -114,7 +93,7 @@ func (qr *queueRunner) run(rt *Runtime) {
 	if len(queuesToListen) == 0 {
 		queuesToListen = qr.workflowQueueRegistry
 	} else {
-		queuesToListen[_DBOS_INTERNAL_QUEUE_NAME] = qr.workflowQueueRegistry[_DBOS_INTERNAL_QUEUE_NAME]
+		queuesToListen[_PF_INTERNAL_QUEUE_NAME] = qr.workflowQueueRegistry[_PF_INTERNAL_QUEUE_NAME]
 	}
 
 	for _, q := range queuesToListen {
@@ -130,10 +109,7 @@ func (qr *queueRunner) run(rt *Runtime) {
 func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 	defer qr.queueGoroutinesWg.Done()
 	queueLogger := qr.logger.With("queue_name", queue.Name)
-	currentInterval := queue.basePollingInterval
-
 	for {
-		hasBackoffError := false
 		skipDequeue := false
 
 		partitionKeys := []string{""}
@@ -143,11 +119,7 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 			}, withRetrierLogger(queueLogger))
 			if err != nil {
 				skipDequeue = true
-				if isSQLiteRetryable(err) {
-					hasBackoffError = true
-				} else {
-					queueLogger.Error("error getting queue partitions", "error", err)
-				}
+				queueLogger.Error("error getting queue partitions", "error", err)
 			} else {
 				partitionKeys = parts
 			}
@@ -175,11 +147,7 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 					})
 				}, withRetrierLogger(queueLogger))
 				if err != nil {
-					if isSQLiteRetryable(err) {
-						hasBackoffError = true
-					} else {
-						queueLogger.Error("error dequeuing workflows", "error", err)
-					}
+					queueLogger.Error("error dequeuing workflows", "error", err)
 					continue
 				}
 
@@ -203,23 +171,15 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 			}
 		}
 
-		// Adjust polling interval
-		if hasBackoffError {
-			newInterval := time.Duration(float64(currentInterval) * qr.backoffFactor)
-			currentInterval = min(newInterval, queue.maxPollingInterval)
-		} else {
-			newInterval := time.Duration(float64(currentInterval) * qr.scalebackFactor)
-			currentInterval = max(newInterval, queue.basePollingInterval)
-		}
-
-		jitter := qr.jitterMin + rand.Float64()*(qr.jitterMax-qr.jitterMin) // #nosec G404
-		sleepDuration := time.Duration(float64(currentInterval) * jitter)
-
+		// Wait for enqueue event or shutdown
+		enqueueCh := rt.systemDB.waitForEnqueue(rt.ctx, queue.Name)
 		select {
 		case <-rt.ctx.Done():
+			rt.systemDB.stopWaitForEnqueue(queue.Name, enqueueCh)
 			queueLogger.Debug("queue goroutine stopping", "cause", context.Cause(rt.ctx))
 			return
-		case <-time.After(sleepDuration):
+		case <-enqueueCh:
+			// Workflow enqueued — immediately dequeue
 		}
 	}
 }
@@ -240,8 +200,6 @@ func newWorkflowQueue(rt *Runtime, name string, options ...QueueOption) Workflow
 	q := WorkflowQueue{
 		Name:                 name,
 		MaxTasksPerIteration: _DEFAULT_MAX_TASKS_PER_ITERATION,
-		basePollingInterval:  _DEFAULT_BASE_POLLING_INTERVAL,
-		maxPollingInterval:   _DEFAULT_MAX_POLLING_INTERVAL,
 	}
 	for _, opt := range options {
 		opt(&q)

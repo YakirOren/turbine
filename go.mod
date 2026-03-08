@@ -1,4 +1,4 @@
-module github.com/YakirOren/pbdbos
+module github.com/YakirOren/pocketflow
 
 go 1.25.7
 

@@ -1,11 +1,11 @@
-package pbdbos
+package pocketflow
 
 import (
 	"log/slog"
 	"time"
 )
 
-// Config holds configuration parameters for initializing the pbdbos plugin.
+// Config holds configuration parameters for initializing the pocketflow plugin.
 type Config struct {
 	ApplicationVersion string        // Optional: defaults to binary hash
 	ExecutorID         string        // Optional: defaults to "local"

@@ -5,20 +5,20 @@ import (
 	"log"
 	"time"
 
-	"github.com/YakirOren/pbdbos"
+	"github.com/YakirOren/pocketflow"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 )
 
 // LongRunningJob sleeps for a long time — can be cancelled and resumed.
-func LongRunningJob(ctx context.Context, rt *pbdbos.Runtime, jobID string) (string, error) {
-	if err := pbdbos.Sleep(ctx, rt, 1*time.Hour); err != nil {
+func LongRunningJob(ctx context.Context, rt *pocketflow.Runtime, jobID string) (string, error) {
+	if err := pocketflow.Sleep(ctx, rt, 1*time.Hour); err != nil {
 		return "", err
 	}
 
-	_, err := pbdbos.RunAsStep(ctx, rt, func(ctx context.Context) (bool, error) {
+	_, err := pocketflow.RunAsStep(ctx, rt, func(ctx context.Context) (bool, error) {
 		return true, nil
-	}, pbdbos.WithStepName("process"))
+	}, pocketflow.WithStepName("process"))
 	if err != nil {
 		return "", err
 	}
@@ -29,17 +29,17 @@ func LongRunningJob(ctx context.Context, rt *pbdbos.Runtime, jobID string) (stri
 func main() {
 	app := pocketbase.New()
 
-	rt := pbdbos.Register(app, pbdbos.Config{})
+	rt := pocketflow.Register(app, pocketflow.Config{})
 
-	pbdbos.RegisterWorkflow(rt, LongRunningJob)
+	pocketflow.RegisterWorkflow(rt, LongRunningJob)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		// Start a job with a deterministic ID
 		e.Router.POST("/job/{id}", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			handle, err := pbdbos.RunWorkflow(rt, LongRunningJob, id,
-				pbdbos.WithWorkflowID("job-"+id),
+			handle, err := pocketflow.RunWorkflow(rt, LongRunningJob, id,
+				pocketflow.WithWorkflowID("job-"+id),
 			)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
@@ -55,14 +55,14 @@ func main() {
 			id := re.Request.PathValue("id")
 			wfID := "job-" + id
 
-			handle := pbdbos.RetrieveWorkflow[string](rt, wfID)
+			handle := pocketflow.RetrieveWorkflow[string](rt, wfID)
 
 			status, err := handle.GetStatus()
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
 
-			steps, err := pbdbos.GetWorkflowSteps(rt, wfID)
+			steps, err := pocketflow.GetWorkflowSteps(rt, wfID)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
@@ -83,7 +83,7 @@ func main() {
 		e.Router.POST("/job/{id}/cancel", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			if err := pbdbos.CancelWorkflow(rt, "job-"+id); err != nil {
+			if err := pocketflow.CancelWorkflow(rt, "job-"+id); err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
 
@@ -94,7 +94,7 @@ func main() {
 		e.Router.POST("/job/{id}/resume", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			if err := pbdbos.ResumeWorkflow(rt, "job-"+id); err != nil {
+			if err := pocketflow.ResumeWorkflow(rt, "job-"+id); err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
 

@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/YakirOren/pbdbos"
+	"github.com/YakirOren/pocketflow"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -15,8 +15,8 @@ func Send(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-func SendEmail(ctx context.Context, rt *pbdbos.Runtime, to string) (string, error) {
-	_, err := pbdbos.RunAsStep(ctx, rt, Send, pbdbos.WithStepName("send"))
+func SendEmail(ctx context.Context, rt *pocketflow.Runtime, to string) (string, error) {
+	_, err := pocketflow.RunAsStep(ctx, rt, Send, pocketflow.WithStepName("send"))
 	if err != nil {
 		return "", err
 	}
@@ -26,21 +26,21 @@ func SendEmail(ctx context.Context, rt *pbdbos.Runtime, to string) (string, erro
 func main() {
 	app := pocketbase.New()
 
-	rt := pbdbos.Register(app, pbdbos.Config{})
+	rt := pocketflow.Register(app, pocketflow.Config{})
 
-	pbdbos.RegisterWorkflow(rt, SendEmail)
+	pocketflow.RegisterWorkflow(rt, SendEmail)
 
-	pbdbos.NewWorkflowQueue(rt, "emails",
-		pbdbos.WithWorkerConcurrency(3),
-		pbdbos.WithRateLimiter(pbdbos.RateLimiter{Limit: 10, Period: time.Minute}),
+	pocketflow.NewWorkflowQueue(rt, "emails",
+		pocketflow.WithWorkerConcurrency(3),
+		pocketflow.WithRateLimiter(pocketflow.RateLimiter{Limit: 10, Period: time.Minute}),
 	)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/send-email/{to}", func(re *core.RequestEvent) error {
 			to := re.Request.PathValue("to")
 
-			handle, err := pbdbos.RunWorkflow(rt, SendEmail, to,
-				pbdbos.WithQueue("emails"),
+			handle, err := pocketflow.RunWorkflow(rt, SendEmail, to,
+				pocketflow.WithQueue("emails"),
 			)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})

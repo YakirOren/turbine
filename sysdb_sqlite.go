@@ -1,4 +1,4 @@
-package pbdbos
+package pocketflow
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	_DBOS_INTERNAL_QUEUE_NAME = "_dbos_internal_queue"
+	_PF_INTERNAL_QUEUE_NAME = "_pf_internal_queue"
 	_DB_RETRY_INTERVAL        = 1 * time.Second
 )
 
@@ -60,7 +60,7 @@ func derefStr(s *string) string {
 func (s *sqliteSysDB) workflowExists(workflowID string) error {
 	var exists int
 	err := s.app.DB().Select("1").
-		From("dbos_workflow_status").
+		From("pf_workflow_status").
 		Where(dbx.HashExp{"id": workflowID}).
 		Limit(1).
 		Row(&exists)
@@ -117,13 +117,13 @@ func (s *sqliteSysDB) insertWorkflowStatus(ctx context.Context, input insertWork
 		recoveryIncrement = 1
 	}
 
-	query := `INSERT INTO dbos_workflow_status (
+	query := `INSERT INTO pf_workflow_status (
 		id, status, name, queue_name,
 		executor_id, application_version, application_id,
 		created_at_epoch_ms, recovery_attempts, updated_at_epoch_ms,
 		workflow_timeout_ms, workflow_deadline_epoch_ms,
 		inputs, deduplication_id, priority, queue_partition_key,
-		owner_xid, parent_workflow_uuid
+		owner_xid, parent_workflow_id
 	) VALUES(
 		{:id}, {:status}, {:name}, {:queue_name},
 		{:executor_id}, {:app_version}, {:app_id},
@@ -135,12 +135,12 @@ func (s *sqliteSysDB) insertWorkflowStatus(ctx context.Context, input insertWork
 	ON CONFLICT (id)
 	DO UPDATE SET
 		recovery_attempts = CASE
-			WHEN excluded.status != {:enqueued_status1} THEN dbos_workflow_status.recovery_attempts + {:recovery_inc}
-			ELSE dbos_workflow_status.recovery_attempts
+			WHEN excluded.status != {:enqueued_status1} THEN pf_workflow_status.recovery_attempts + {:recovery_inc}
+			ELSE pf_workflow_status.recovery_attempts
 		END,
 		updated_at_epoch_ms = excluded.updated_at_epoch_ms,
 		executor_id = CASE
-			WHEN excluded.status = {:enqueued_status2} THEN dbos_workflow_status.executor_id
+			WHEN excluded.status = {:enqueued_status2} THEN pf_workflow_status.executor_id
 			ELSE excluded.executor_id
 		END
 	RETURNING recovery_attempts, status, name, queue_name, workflow_timeout_ms, workflow_deadline_epoch_ms, owner_xid`
@@ -195,6 +195,9 @@ func (s *sqliteSysDB) insertWorkflowStatus(ctx context.Context, input insertWork
 	if queueNameReturn != "" {
 		result.queueName = &queueNameReturn
 	}
+	if result.status == WorkflowStatusEnqueued && queueNameReturn != "" {
+		s.eventBus.Notify("queue::" + queueNameReturn)
+	}
 	if err != nil {
 		if isSQLiteUniqueViolation(err) {
 			return nil, newQueueDeduplicatedError(input.status.ID, input.status.QueueName, input.status.DeduplicationID)
@@ -219,7 +222,7 @@ func (s *sqliteSysDB) insertWorkflowStatus(ctx context.Context, input insertWork
 	if result.status != WorkflowStatusSuccess && result.status != WorkflowStatusError &&
 		input.maxRetries > 0 && result.attempts > input.maxRetries+1 {
 
-		_, dlqErr := s.app.DB().NewQuery(`UPDATE dbos_workflow_status
+		_, dlqErr := s.app.DB().NewQuery(`UPDATE pf_workflow_status
 			SET status = {:status}, deduplication_id = '', queue_name = ''
 			WHERE id = {:id} AND status = {:pending}`).Bind(dbx.Params{
 			"status":  string(WorkflowStatusMaxRecoveryAttemptsExceeded),
@@ -240,13 +243,13 @@ func (s *sqliteSysDB) listWorkflows(ctx context.Context, input listWorkflowsDBIn
 		"id", "status", "name", "executor_id", "created_at_epoch_ms", "updated_at_epoch_ms",
 		"application_version", "application_id", "recovery_attempts", "queue_name",
 		"workflow_timeout_ms", "workflow_deadline_epoch_ms",
-		"deduplication_id", "priority", "queue_partition_key", "forked_from_workflow_uuid", "parent_workflow_uuid",
+		"deduplication_id", "priority", "queue_partition_key", "forked_from_workflow_id", "parent_workflow_id",
 	}
 	if input.loadInput {
 		cols = append(cols, "inputs")
 	}
 
-	q := s.app.DB().Select(cols...).From("dbos_workflow_status")
+	q := s.app.DB().Select(cols...).From("pf_workflow_status")
 
 	if len(input.status) > 0 {
 		vals := make([]any, len(input.status))
@@ -367,7 +370,7 @@ func (s *sqliteSysDB) listWorkflows(ctx context.Context, input listWorkflowsDBIn
 }
 
 func (s *sqliteSysDB) updateWorkflowOutcome(ctx context.Context, input updateWorkflowOutcomeDBInput) error {
-	_, err := s.app.DB().NewQuery(`UPDATE dbos_workflow_status
+	_, err := s.app.DB().NewQuery(`UPDATE pf_workflow_status
 		SET status = {:status}, output = {:output}, error = {:error},
 		    updated_at_epoch_ms = {:updated_at}, deduplication_id = ''
 		WHERE id = {:id}
@@ -404,7 +407,7 @@ func (s *sqliteSysDB) awaitWorkflowResult(ctx context.Context, workflowID string
 		var attempts int
 
 		err := s.app.DB().Select("status", "output", "error", "recovery_attempts").
-			From("dbos_workflow_status").
+			From("pf_workflow_status").
 			Where(dbx.HashExp{"id": workflowID}).
 			Row(&status, &outputString, &errorStr, &attempts)
 
@@ -446,7 +449,7 @@ func (s *sqliteSysDB) awaitWorkflowResult(ctx context.Context, workflowID string
 }
 
 func (s *sqliteSysDB) cancelWorkflow(ctx context.Context, input cancelWorkflowDBInput) error {
-	result, err := s.app.DB().NewQuery(`UPDATE dbos_workflow_status
+	result, err := s.app.DB().NewQuery(`UPDATE pf_workflow_status
 		SET status = {:status}, updated_at_epoch_ms = {:updated_at}
 		WHERE id = {:id}
 		  AND status NOT IN ({:success}, {:error}, {:cancelled})`).Bind(dbx.Params{
@@ -472,14 +475,14 @@ func (s *sqliteSysDB) cancelWorkflow(ctx context.Context, input cancelWorkflowDB
 }
 
 func (s *sqliteSysDB) resumeWorkflow(ctx context.Context, input resumeWorkflowDBInput) error {
-	result, err := s.app.DB().NewQuery(`UPDATE dbos_workflow_status
+	result, err := s.app.DB().NewQuery(`UPDATE pf_workflow_status
 		SET status = {:status}, queue_name = {:queue}, recovery_attempts = 0,
 		    workflow_deadline_epoch_ms = 0, deduplication_id = '',
 		    updated_at_epoch_ms = {:updated_at}
 		WHERE id = {:id}
 		  AND status NOT IN ({:success}, {:error})`).Bind(dbx.Params{
 		"status":     string(WorkflowStatusEnqueued),
-		"queue":      _DBOS_INTERNAL_QUEUE_NAME,
+		"queue":      _PF_INTERNAL_QUEUE_NAME,
 		"updated_at": time.Now().UnixMilli(),
 		"id":         input.workflowID,
 		"success":    string(WorkflowStatusSuccess),
@@ -490,6 +493,9 @@ func (s *sqliteSysDB) resumeWorkflow(ctx context.Context, input resumeWorkflowDB
 		return fmt.Errorf("failed to update workflow status to ENQUEUED: %w", err)
 	}
 	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected > 0 {
+		s.eventBus.Notify("queue::" + _PF_INTERNAL_QUEUE_NAME)
+	}
 	if rowsAffected == 0 {
 		if err := s.workflowExists(input.workflowID); err != nil {
 			return err
@@ -522,10 +528,10 @@ func (s *sqliteSysDB) forkWorkflow(ctx context.Context, input forkWorkflowDBInpu
 	// Use a transaction to ensure all fork operations are atomic
 	now := time.Now().UnixMilli()
 	err = s.app.RunInTransaction(func(txApp core.App) error {
-		_, txErr := txApp.DB().NewQuery(`INSERT INTO dbos_workflow_status (
+		_, txErr := txApp.DB().NewQuery(`INSERT INTO pf_workflow_status (
 			id, status, name, application_version, application_id,
 			queue_name, inputs, created_at_epoch_ms, updated_at_epoch_ms,
-			recovery_attempts, forked_from_workflow_uuid
+			recovery_attempts, forked_from_workflow_id
 		) VALUES (
 			{:id}, {:status}, {:name}, {:app_ver}, {:app_id},
 			{:queue}, {:inputs}, {:created_at}, {:updated_at},
@@ -536,7 +542,7 @@ func (s *sqliteSysDB) forkWorkflow(ctx context.Context, input forkWorkflowDBInpu
 			"name":        orig.Name,
 			"app_ver":     orig.ApplicationVersion,
 			"app_id":      orig.ApplicationID,
-			"queue":       _DBOS_INTERNAL_QUEUE_NAME,
+			"queue":       _PF_INTERNAL_QUEUE_NAME,
 			"inputs":      input.input,
 			"created_at":  now,
 			"updated_at":  now,
@@ -547,11 +553,11 @@ func (s *sqliteSysDB) forkWorkflow(ctx context.Context, input forkWorkflowDBInpu
 		}
 
 		if input.startStepID > 0 {
-			_, txErr = txApp.DB().NewQuery(`INSERT INTO dbos_operation_outputs
-				(id, workflow_uuid, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, ended_at_epoch_ms)
-				SELECT {:new_uuid} || '_' || function_id, workflow_uuid, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, ended_at_epoch_ms
-				FROM dbos_operation_outputs
-				WHERE workflow_uuid = {:orig_id} AND function_id < {:start_step}`).Bind(dbx.Params{
+			_, txErr = txApp.DB().NewQuery(`INSERT INTO pf_operation_outputs
+				(id, workflow_id, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, ended_at_epoch_ms)
+				SELECT {:new_uuid} || '_' || function_id, workflow_id, function_id, output, error, function_name, child_workflow_id, started_at_epoch_ms, ended_at_epoch_ms
+				FROM pf_operation_outputs
+				WHERE workflow_id = {:orig_id} AND function_id < {:start_step}`).Bind(dbx.Params{
 				"new_uuid":   newID,
 				"orig_id":    input.originalWorkflowID,
 				"start_step": input.startStepID,
@@ -560,11 +566,11 @@ func (s *sqliteSysDB) forkWorkflow(ctx context.Context, input forkWorkflowDBInpu
 				return fmt.Errorf("failed to copy operation outputs: %w", txErr)
 			}
 
-			_, txErr = txApp.DB().NewQuery(`INSERT INTO dbos_workflow_events_history
-				(id, workflow_uuid, function_id, key, value)
+			_, txErr = txApp.DB().NewQuery(`INSERT INTO pf_workflow_events_history
+				(id, workflow_id, function_id, key, value)
 				SELECT {:new_uuid} || '_' || function_id || '_' || key, {:new_id}, function_id, key, value
-				FROM dbos_workflow_events_history
-				WHERE workflow_uuid = {:orig_id} AND function_id < {:start_step}`).Bind(dbx.Params{
+				FROM pf_workflow_events_history
+				WHERE workflow_id = {:orig_id} AND function_id < {:start_step}`).Bind(dbx.Params{
 				"new_uuid":   newID,
 				"new_id":     newID,
 				"orig_id":    input.originalWorkflowID,
@@ -574,14 +580,14 @@ func (s *sqliteSysDB) forkWorkflow(ctx context.Context, input forkWorkflowDBInpu
 				return fmt.Errorf("failed to copy workflow events history: %w", txErr)
 			}
 
-			_, txErr = txApp.DB().NewQuery(`INSERT INTO dbos_workflow_events
-				(id, workflow_uuid, key, value)
+			_, txErr = txApp.DB().NewQuery(`INSERT INTO pf_workflow_events
+				(id, workflow_id, key, value)
 				SELECT {:new_uuid} || '_' || h.key, {:new_id}, h.key, h.value
-				FROM dbos_workflow_events_history h
-				WHERE h.workflow_uuid = {:orig_id} AND h.function_id < {:start_step}
+				FROM pf_workflow_events_history h
+				WHERE h.workflow_id = {:orig_id} AND h.function_id < {:start_step}
 				  AND h.function_id = (
-					SELECT MAX(h2.function_id) FROM dbos_workflow_events_history h2
-					WHERE h2.workflow_uuid = {:orig_id} AND h2.key = h.key AND h2.function_id < {:start_step}
+					SELECT MAX(h2.function_id) FROM pf_workflow_events_history h2
+					WHERE h2.workflow_id = {:orig_id} AND h2.key = h.key AND h2.function_id < {:start_step}
 				  )`).Bind(dbx.Params{
 				"new_uuid":   newID,
 				"new_id":     newID,
@@ -599,6 +605,8 @@ func (s *sqliteSysDB) forkWorkflow(ctx context.Context, input forkWorkflowDBInpu
 		return "", err
 	}
 
+	s.eventBus.Notify("queue::" + _PF_INTERNAL_QUEUE_NAME)
+
 	return newID, nil
 }
 
@@ -607,8 +615,8 @@ func (s *sqliteSysDB) forkWorkflow(ctx context.Context, input forkWorkflowDBInpu
 /*******************************/
 
 func (s *sqliteSysDB) recordOperationResult(ctx context.Context, input recordOperationResultDBInput) error {
-	_, err := s.app.DB().NewQuery(`INSERT INTO dbos_operation_outputs
-		(id, workflow_uuid, function_id, output, error, function_name, started_at_epoch_ms, ended_at_epoch_ms)
+	_, err := s.app.DB().NewQuery(`INSERT INTO pf_operation_outputs
+		(id, workflow_id, function_id, output, error, function_name, started_at_epoch_ms, ended_at_epoch_ms)
 		VALUES ({:id}, {:wf_id}, {:func_id}, {:output}, {:error}, {:func_name}, {:started_at}, {:ended_at})`).Bind(dbx.Params{
 		"id":         fmt.Sprintf("%s_%d", input.workflowUUID, input.functionID),
 		"wf_id":      input.workflowUUID,
@@ -633,7 +641,7 @@ func (s *sqliteSysDB) checkOperationExecution(ctx context.Context, input checkOp
 	// Check workflow status first
 	var workflowStatus WorkflowStatusType
 	err := s.app.DB().Select("status").
-		From("dbos_workflow_status").
+		From("pf_workflow_status").
 		Where(dbx.HashExp{"id": input.workflowUUID}).
 		Row(&workflowStatus)
 	if err != nil {
@@ -650,8 +658,8 @@ func (s *sqliteSysDB) checkOperationExecution(ctx context.Context, input checkOp
 	// Check operation outputs
 	var outputString, errorStr, functionName sql.NullString
 	err = s.app.DB().Select("output", "error", "function_name").
-		From("dbos_operation_outputs").
-		Where(dbx.HashExp{"workflow_uuid": input.workflowUUID, "function_id": input.functionID}).
+		From("pf_operation_outputs").
+		Where(dbx.HashExp{"workflow_id": input.workflowUUID, "function_id": input.functionID}).
 		Row(&outputString, &errorStr, &functionName)
 
 	if err != nil {
@@ -676,8 +684,8 @@ func (s *sqliteSysDB) checkOperationExecution(ctx context.Context, input checkOp
 
 func (s *sqliteSysDB) getWorkflowSteps(ctx context.Context, input getWorkflowStepsInput) ([]stepInfo, error) {
 	rows, err := s.app.DB().Select("function_id", "function_name", "output", "error", "started_at_epoch_ms", "ended_at_epoch_ms").
-		From("dbos_operation_outputs").
-		Where(dbx.HashExp{"workflow_uuid": input.workflowID}).
+		From("pf_operation_outputs").
+		Where(dbx.HashExp{"workflow_id": input.workflowID}).
 		OrderBy("function_id ASC").
 		Rows()
 	if err != nil {
@@ -722,8 +730,8 @@ func (s *sqliteSysDB) getWorkflowSteps(ctx context.Context, input getWorkflowSte
 /*******************************/
 
 func (s *sqliteSysDB) recordChildWorkflow(ctx context.Context, input recordChildWorkflowDBInput) error {
-	_, err := s.app.DB().NewQuery(`INSERT INTO dbos_operation_outputs
-		(id, workflow_uuid, function_id, function_name, child_workflow_id, output, error)
+	_, err := s.app.DB().NewQuery(`INSERT INTO pf_operation_outputs
+		(id, workflow_id, function_id, function_name, child_workflow_id, output, error)
 		VALUES ({:id}, {:wf_id}, {:func_id}, {:func_name}, {:child_id}, '', '')`).Bind(dbx.Params{
 		"id":        fmt.Sprintf("%s_%d", input.workflowUUID, input.functionID),
 		"wf_id":     input.workflowUUID,
@@ -744,8 +752,8 @@ func (s *sqliteSysDB) recordChildWorkflow(ctx context.Context, input recordChild
 func (s *sqliteSysDB) checkChildWorkflow(ctx context.Context, workflowUUID string, functionID int) (*string, error) {
 	var childID sql.NullString
 	err := s.app.DB().Select("child_workflow_id").
-		From("dbos_operation_outputs").
-		Where(dbx.HashExp{"workflow_uuid": workflowUUID, "function_id": functionID}).
+		From("pf_operation_outputs").
+		Where(dbx.HashExp{"workflow_id": workflowUUID, "function_id": functionID}).
 		Row(&childID)
 
 	if err != nil {
@@ -762,9 +770,9 @@ func (s *sqliteSysDB) checkChildWorkflow(ctx context.Context, workflowUUID strin
 }
 
 func (s *sqliteSysDB) recordChildGetResult(ctx context.Context, input recordChildGetResultDBInput) error {
-	_, err := s.app.DB().NewQuery(`INSERT INTO dbos_operation_outputs
-		(id, workflow_uuid, function_id, function_name, output, error, child_workflow_id)
-		VALUES ({:id}, {:wf_id}, {:func_id}, 'DBOS.getResult', {:output}, {:error}, {:child_id})
+	_, err := s.app.DB().NewQuery(`INSERT INTO pf_operation_outputs
+		(id, workflow_id, function_id, function_name, output, error, child_workflow_id)
+		VALUES ({:id}, {:wf_id}, {:func_id}, 'pf.getResult', {:output}, {:error}, {:child_id})
 		ON CONFLICT DO NOTHING`).Bind(dbx.Params{
 		"id":       fmt.Sprintf("%s_%d", input.workflowUUID, input.functionID),
 		"wf_id":    input.workflowUUID,
@@ -786,8 +794,8 @@ func (s *sqliteSysDB) recordChildGetResult(ctx context.Context, input recordChil
 
 func (s *sqliteSysDB) send(ctx context.Context, input WorkflowSendInput) error {
 	msgID := uuid.New().String()
-	_, err := s.app.DB().NewQuery(`INSERT INTO dbos_notifications
-		(id, destination_uuid, topic, message, created_at_epoch_ms, consumed)
+	_, err := s.app.DB().NewQuery(`INSERT INTO pf_notifications
+		(id, destination_id, topic, message, created_at_epoch_ms, consumed)
 		VALUES ({:id}, {:dest}, {:topic}, {:message}, {:created_at}, FALSE)`).Bind(dbx.Params{
 		"id":         msgID,
 		"dest":       input.DestinationUUID,
@@ -813,12 +821,12 @@ func (s *sqliteSysDB) recv(ctx context.Context, input recvInput) (*string, error
 	err := s.app.DB().NewQuery(`
 		WITH oldest AS (
 			SELECT id, message
-			FROM dbos_notifications
-			WHERE destination_uuid = {:dest} AND topic = {:topic} AND consumed = FALSE
+			FROM pf_notifications
+			WHERE destination_id = {:dest} AND topic = {:topic} AND consumed = FALSE
 			ORDER BY created_at_epoch_ms ASC
 			LIMIT 1
 		)
-		UPDATE dbos_notifications SET consumed = TRUE
+		UPDATE pf_notifications SET consumed = TRUE
 		WHERE id = (SELECT id FROM oldest)
 		RETURNING message`).Bind(dbx.Params{
 		"dest":  input.workflowUUID,
@@ -854,12 +862,12 @@ func (s *sqliteSysDB) recv(ctx context.Context, input recvInput) (*string, error
 			err = s.app.DB().NewQuery(`
 				WITH oldest AS (
 					SELECT id, message
-					FROM dbos_notifications
-					WHERE destination_uuid = {:dest} AND topic = {:topic} AND consumed = FALSE
+					FROM pf_notifications
+					WHERE destination_id = {:dest} AND topic = {:topic} AND consumed = FALSE
 					ORDER BY created_at_epoch_ms ASC
 					LIMIT 1
 				)
-				UPDATE dbos_notifications SET consumed = TRUE
+				UPDATE pf_notifications SET consumed = TRUE
 				WHERE id = (SELECT id FROM oldest)
 				RETURNING message`).Bind(dbx.Params{
 				"dest":  input.workflowUUID,
@@ -883,9 +891,9 @@ func (s *sqliteSysDB) recv(ctx context.Context, input recvInput) (*string, error
 }
 
 func (s *sqliteSysDB) setEvent(ctx context.Context, input WorkflowSetEventInput) error {
-	_, err := s.app.DB().NewQuery(`INSERT INTO dbos_workflow_events (id, workflow_uuid, key, value)
+	_, err := s.app.DB().NewQuery(`INSERT INTO pf_workflow_events (id, workflow_id, key, value)
 		VALUES ({:id}, {:wf_id}, {:key}, {:value})
-		ON CONFLICT (workflow_uuid, key)
+		ON CONFLICT (workflow_id, key)
 		DO UPDATE SET value = excluded.value`).Bind(dbx.Params{
 		"id":    fmt.Sprintf("%s_%s", input.WorkflowUUID, input.Key),
 		"wf_id": input.WorkflowUUID,
@@ -907,8 +915,8 @@ func (s *sqliteSysDB) setEvent(ctx context.Context, input WorkflowSetEventInput)
 func (s *sqliteSysDB) getEvent(ctx context.Context, input getEventInput) (*string, error) {
 	var value sql.NullString
 	err := s.app.DB().Select("value").
-		From("dbos_workflow_events").
-		Where(dbx.HashExp{"workflow_uuid": input.targetWorkflowUUID, "key": input.key}).
+		From("pf_workflow_events").
+		Where(dbx.HashExp{"workflow_id": input.targetWorkflowUUID, "key": input.key}).
 		Row(&value)
 
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -937,8 +945,8 @@ func (s *sqliteSysDB) getEvent(ctx context.Context, input getEventInput) (*strin
 			ch = s.eventBus.Swap(payload, ch)
 
 			err = s.app.DB().Select("value").
-				From("dbos_workflow_events").
-				Where(dbx.HashExp{"workflow_uuid": input.targetWorkflowUUID, "key": input.key}).
+				From("pf_workflow_events").
+				Where(dbx.HashExp{"workflow_id": input.targetWorkflowUUID, "key": input.key}).
 				Row(&value)
 
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -972,7 +980,7 @@ func (s *sqliteSysDB) dequeueWorkflows(ctx context.Context, input dequeueWorkflo
 	if input.workerConcurrency != nil && *input.workerConcurrency > 0 {
 		var running int
 		q := s.app.DB().Select("COUNT(*)").
-			From("dbos_workflow_status").
+			From("pf_workflow_status").
 			Where(dbx.HashExp{"queue_name": input.queueName, "status": string(WorkflowStatusPending), "executor_id": input.executorID})
 		if input.partitioned && input.partitionKey != "" {
 			q.AndWhere(dbx.HashExp{"queue_partition_key": input.partitionKey})
@@ -993,7 +1001,7 @@ func (s *sqliteSysDB) dequeueWorkflows(ctx context.Context, input dequeueWorkflo
 	if input.globalConcurrency != nil && *input.globalConcurrency > 0 {
 		var running int
 		q := s.app.DB().Select("COUNT(*)").
-			From("dbos_workflow_status").
+			From("pf_workflow_status").
 			Where(dbx.HashExp{"queue_name": input.queueName, "status": string(WorkflowStatusPending)})
 		if input.partitioned && input.partitionKey != "" {
 			q.AndWhere(dbx.HashExp{"queue_partition_key": input.partitionKey})
@@ -1015,7 +1023,7 @@ func (s *sqliteSysDB) dequeueWorkflows(ctx context.Context, input dequeueWorkflo
 		cutoff := time.Now().Add(-input.rateLimit.Period).UnixMilli()
 		var recentCount int
 		q := s.app.DB().Select("COUNT(*)").
-			From("dbos_workflow_status").
+			From("pf_workflow_status").
 			Where(dbx.And(
 				dbx.HashExp{"queue_name": input.queueName},
 				dbx.NewExp("status != {:enqueued}", dbx.Params{"enqueued": string(WorkflowStatusEnqueued)}),
@@ -1038,7 +1046,7 @@ func (s *sqliteSysDB) dequeueWorkflows(ctx context.Context, input dequeueWorkflo
 
 	// Build the subquery using the query builder
 	sub := s.app.DB().Select("id").
-		From("dbos_workflow_status").
+		From("pf_workflow_status").
 		Where(dbx.HashExp{"queue_name": input.queueName, "status": string(WorkflowStatusEnqueued)})
 	if input.partitioned && input.partitionKey != "" {
 		sub.AndWhere(dbx.HashExp{"queue_partition_key": input.partitionKey})
@@ -1063,7 +1071,7 @@ func (s *sqliteSysDB) dequeueWorkflows(ctx context.Context, input dequeueWorkflo
 	}
 
 	// Atomic UPDATE ... WHERE id IN (subquery) ... RETURNING
-	query := fmt.Sprintf(`UPDATE dbos_workflow_status
+	query := fmt.Sprintf(`UPDATE pf_workflow_status
 		SET status = {:pending}, executor_id = {:executor}, application_version = {:app_ver},
 		    updated_at_epoch_ms = {:updated_at}
 		WHERE id IN (%s)
@@ -1092,11 +1100,11 @@ func (s *sqliteSysDB) dequeueWorkflows(ctx context.Context, input dequeueWorkflo
 }
 
 func (s *sqliteSysDB) clearQueueAssignment(ctx context.Context, workflowID string) (bool, error) {
-	result, err := s.app.DB().NewQuery(`UPDATE dbos_workflow_status
+	result, err := s.app.DB().NewQuery(`UPDATE pf_workflow_status
 		SET status = {:status}, queue_name = {:queue}, updated_at_epoch_ms = {:updated_at}
 		WHERE id = {:id} AND status = {:pending}`).Bind(dbx.Params{
 		"status":     string(WorkflowStatusEnqueued),
-		"queue":      _DBOS_INTERNAL_QUEUE_NAME,
+		"queue":      _PF_INTERNAL_QUEUE_NAME,
 		"updated_at": time.Now().UnixMilli(),
 		"id":         workflowID,
 		"pending":    string(WorkflowStatusPending),
@@ -1106,13 +1114,16 @@ func (s *sqliteSysDB) clearQueueAssignment(ctx context.Context, workflowID strin
 	}
 
 	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected > 0 {
+		s.eventBus.Notify("queue::" + _PF_INTERNAL_QUEUE_NAME)
+	}
 	return rowsAffected > 0, nil
 }
 
 func (s *sqliteSysDB) getQueuePartitions(ctx context.Context, queueName string) ([]string, error) {
 	rows, err := s.app.DB().Select("queue_partition_key").
 		Distinct(true).
-		From("dbos_workflow_status").
+		From("pf_workflow_status").
 		Where(dbx.And(
 			dbx.HashExp{"queue_name": queueName},
 			dbx.NewExp("queue_partition_key IS NOT NULL"),
@@ -1135,6 +1146,14 @@ func (s *sqliteSysDB) getQueuePartitions(ctx context.Context, queueName string) 
 	return partitions, rows.Err()
 }
 
+func (s *sqliteSysDB) waitForEnqueue(ctx context.Context, queueName string) chan struct{} {
+	return s.eventBus.Wait("queue::" + queueName)
+}
+
+func (s *sqliteSysDB) stopWaitForEnqueue(queueName string, ch chan struct{}) {
+	s.eventBus.Remove("queue::"+queueName, ch)
+}
+
 /*******************************/
 /******* GARBAGE COLLECTION ********/
 /*******************************/
@@ -1142,7 +1161,7 @@ func (s *sqliteSysDB) getQueuePartitions(ctx context.Context, queueName string) 
 func (s *sqliteSysDB) garbageCollectWorkflows(ctx context.Context, input garbageCollectWorkflowsInput) error {
 	cutoffMs := input.cutoffTime.UnixMilli()
 
-	result, err := s.app.DB().NewQuery(`DELETE FROM dbos_workflow_status
+	result, err := s.app.DB().NewQuery(`DELETE FROM pf_workflow_status
 		WHERE created_at_epoch_ms < {:cutoff}
 		  AND status NOT IN ({:pending}, {:enqueued})`).Bind(dbx.Params{
 		"cutoff":   cutoffMs,

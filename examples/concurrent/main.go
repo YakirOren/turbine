@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/YakirOren/pbdbos"
+	"github.com/YakirOren/pocketflow"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -24,18 +24,18 @@ func FetchReviews(ctx context.Context) (string, error) {
 
 // ProductWorkflow fetches pricing, inventory, and reviews concurrently.
 // Each step is durable — on recovery, completed steps replay from the DB.
-func ProductWorkflow(ctx context.Context, rt *pbdbos.Runtime, productID string) (string, error) {
-	priceCh, err := pbdbos.Go(ctx, rt, FetchPricing, pbdbos.WithStepName("pricing"))
+func ProductWorkflow(ctx context.Context, rt *pocketflow.Runtime, productID string) (string, error) {
+	priceCh, err := pocketflow.Go(ctx, rt, FetchPricing, pocketflow.WithStepName("pricing"))
 	if err != nil {
 		return "", err
 	}
 
-	inventoryCh, err := pbdbos.Go(ctx, rt, FetchInventory, pbdbos.WithStepName("inventory"))
+	inventoryCh, err := pocketflow.Go(ctx, rt, FetchInventory, pocketflow.WithStepName("inventory"))
 	if err != nil {
 		return "", err
 	}
 
-	reviewsCh, err := pbdbos.Go(ctx, rt, FetchReviews, pbdbos.WithStepName("reviews"))
+	reviewsCh, err := pocketflow.Go(ctx, rt, FetchReviews, pocketflow.WithStepName("reviews"))
 	if err != nil {
 		return "", err
 	}
@@ -54,15 +54,15 @@ func ProductWorkflow(ctx context.Context, rt *pbdbos.Runtime, productID string) 
 func main() {
 	app := pocketbase.New()
 
-	rt := pbdbos.Register(app, pbdbos.Config{})
+	rt := pocketflow.Register(app, pocketflow.Config{})
 
-	pbdbos.RegisterWorkflow(rt, ProductWorkflow)
+	pocketflow.RegisterWorkflow(rt, ProductWorkflow)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.GET("/product/{id}", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			handle, err := pbdbos.RunWorkflow(rt, ProductWorkflow, id)
+			handle, err := pocketflow.RunWorkflow(rt, ProductWorkflow, id)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
