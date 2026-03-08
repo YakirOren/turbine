@@ -52,12 +52,14 @@ func New(app core.App, config Config) *Runtime {
 	if config.ExecutorID == "" {
 		config.ExecutorID = "local"
 	}
-	if config.AppName == "" {
-		config.Logger.Warn("pbdbos: AppName is empty, using 'default'")
-		config.AppName = "default"
-	}
 	if config.ApplicationVersion == "" {
 		config.ApplicationVersion = computeApplicationVersion()
+	}
+	if config.GCRetention == 0 {
+		config.GCRetention = 72 * time.Hour
+	}
+	if config.GCSchedule == "" {
+		config.GCSchedule = "0 0 * * *"
 	}
 
 	baseCtx, cancelFunc := context.WithCancelCause(context.Background())
@@ -92,17 +94,12 @@ func (rt *Runtime) Launch() error {
 		return fmt.Errorf("pbdbos: runtime is already launched")
 	}
 
-	if err := ensureCollections(rt.app); err != nil {
-		return fmt.Errorf("pbdbos: failed to ensure collections: %w", err)
-	}
+	rt.applicationID = rt.app.Settings().Meta.AppName
 
 	rt.systemDB.launch(rt.ctx)
 
-	// Start the queue runner
-	go rt.queueRunner.run(rt)
-	rt.logger.Debug("queue runner started")
-
-	// Recover pending workflows
+	// Recover pending workflows before starting the queue runner
+	// to avoid racing between recovery and dequeue
 	handles, err := recoverPendingWorkflows(rt, []string{rt.executorID})
 	if err != nil {
 		return fmt.Errorf("pbdbos: failed to recover workflows: %w", err)
@@ -112,7 +109,29 @@ func (rt *Runtime) Launch() error {
 	}
 
 	rt.launched.Store(true)
-	rt.logger.Info("pbdbos launched", "app_name", rt.config.AppName, "executor_id", rt.executorID)
+
+	// Start the queue runner after recovery is complete
+	go rt.queueRunner.run(rt)
+	rt.logger.Debug("queue runner started")
+
+	// Register garbage collection cron job if retention is positive
+	if rt.config.GCRetention > 0 {
+		if err := rt.app.Cron().Add("pbdbos_gc", rt.config.GCSchedule, func() {
+			if !rt.launched.Load() {
+				return
+			}
+			cutoff := time.Now().Add(-rt.config.GCRetention)
+			if err := rt.systemDB.garbageCollectWorkflows(rt.ctx, garbageCollectWorkflowsInput{
+				cutoffTime: cutoff,
+			}); err != nil {
+				rt.logger.Error("workflow garbage collection failed", "error", err)
+			}
+		}); err != nil {
+			return fmt.Errorf("pbdbos: failed to register GC cron job: %w", err)
+		}
+	}
+
+	rt.logger.Info("pbdbos launched", "app_name", rt.applicationID, "executor_id", rt.executorID)
 	return nil
 }
 
@@ -148,6 +167,12 @@ func (rt *Runtime) Shutdown(timeout time.Duration) {
 	}
 
 	rt.launched.Store(false)
+}
+
+// GarbageCollect removes completed workflows older than the configured retention period.
+func (rt *Runtime) GarbageCollect() error {
+	cutoff := time.Now().Add(-rt.config.GCRetention)
+	return rt.systemDB.garbageCollectWorkflows(rt.ctx, garbageCollectWorkflowsInput{cutoffTime: cutoff})
 }
 
 // Accessors

@@ -1,13 +1,10 @@
 package pbdbos
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"reflect"
 )
-
-const nilMarker = "__DBOS_NIL"
 
 type serializer[T any] interface {
 	Encode(data T) (*string, error)
@@ -22,27 +19,22 @@ func newJSONSerializer[T any]() serializer[T] {
 
 func (j *jsonSerializer[T]) Encode(data T) (*string, error) {
 	if isNilValue(data) {
-		marker := string(nilMarker)
-		return &marker, nil
+		return nil, nil
 	}
 	jsonBytes, err := json.Marshal(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode data: %w", err)
 	}
-	encodedStr := base64.StdEncoding.EncodeToString(jsonBytes)
-	return &encodedStr, nil
+	s := string(jsonBytes)
+	return &s, nil
 }
 
 func (j *jsonSerializer[T]) Decode(data *string) (T, error) {
-	if data == nil || *data == nilMarker {
+	if data == nil || *data == "" {
 		return getNilOrZeroValue[T](), nil
 	}
 	var result T
-	dataBytes, err := base64.StdEncoding.DecodeString(*data)
-	if err != nil {
-		return result, fmt.Errorf("failed to decode base64 data: %w", err)
-	}
-	if err := json.Unmarshal(dataBytes, &result); err != nil {
+	if err := json.Unmarshal([]byte(*data), &result); err != nil {
 		return result, fmt.Errorf("failed to decode json data: %w", err)
 	}
 	return result, nil

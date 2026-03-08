@@ -39,6 +39,21 @@ func (eb *eventBus) Notify(key string) {
 func (eb *eventBus) Remove(key string, ch chan struct{}) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
+	eb.removeLocked(key, ch)
+}
+
+// Swap atomically replaces a waiter channel with a new one, preventing
+// a gap where a Notify could be missed between Remove and Wait.
+func (eb *eventBus) Swap(key string, old chan struct{}) chan struct{} {
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+	eb.removeLocked(key, old)
+	ch := make(chan struct{}, 1)
+	eb.waiters[key] = append(eb.waiters[key], ch)
+	return ch
+}
+
+func (eb *eventBus) removeLocked(key string, ch chan struct{}) {
 	waiters := eb.waiters[key]
 	for i, w := range waiters {
 		if w == ch {

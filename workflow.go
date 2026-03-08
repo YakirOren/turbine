@@ -53,6 +53,8 @@ type workflowOptions struct {
 	DeduplicationID     string
 	Priority            uint
 	QueuePartitionKey   string
+	Timeout             time.Duration
+	Deadline            time.Time
 	alreadyEncodedInput bool
 	isDequeue           bool
 	isRecovery          bool
@@ -85,6 +87,18 @@ func WithQueuePartitionKey(partitionKey string) WorkflowOption {
 	return func(p *workflowOptions) { p.QueuePartitionKey = partitionKey }
 }
 
+// WithTimeout sets a timeout duration for the workflow execution.
+// The workflow's context will be cancelled after this duration.
+func WithTimeout(d time.Duration) WorkflowOption {
+	return func(p *workflowOptions) { p.Timeout = d }
+}
+
+// WithDeadline sets an absolute deadline for the workflow execution.
+// The workflow's context will be cancelled at this time.
+func WithDeadline(t time.Time) WorkflowOption {
+	return func(p *workflowOptions) { p.Deadline = t }
+}
+
 func withWorkflowName(name string) WorkflowOption {
 	return func(p *workflowOptions) {
 		if p.WorkflowName == "" {
@@ -110,9 +124,8 @@ func withIsRecovery() WorkflowOption {
 /*******************************/
 
 type workflowOutcome[R any] struct {
-	result        R
-	err           error
-	needsDecoding bool
+	result R
+	err    error
 }
 
 type baseWorkflowHandle struct {
@@ -261,9 +274,13 @@ func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...Work
 
 	// Type-erased wrapper for recovery and queue runner
 	typedErasedWF := WorkflowFunc(func(ctx context.Context, rt *Runtime, input any) (any, error) {
-		encodedInput, ok := input.(*string)
-		if !ok {
-			return nil, fmt.Errorf("expected *string input, got %T", input)
+		var encodedInput *string
+		if input != nil {
+			var ok bool
+			encodedInput, ok = input.(*string)
+			if !ok {
+				return nil, fmt.Errorf("expected *string input, got %T", input)
+			}
 		}
 		serializer := newJSONSerializer[P]()
 		typedInput, err := serializer.Decode(encodedInput)
@@ -286,14 +303,14 @@ func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...Work
 	}
 
 	if _, exists := rt.workflowRegistry.LoadOrStore(fqn, entry); exists {
-		panic(fmt.Sprintf("workflow already registered: %s", fqn))
+		panic(newConflictingRegistrationError(fqn))
 	}
 	customName := regOpts.name
 	if customName == "" {
 		customName = fqn
 	}
 	if _, exists := rt.workflowCustomNameToFQN.LoadOrStore(customName, fqn); exists {
-		panic(fmt.Sprintf("workflow name already registered: %s", customName))
+		panic(newConflictingRegistrationError(customName))
 	}
 
 	// If this is a scheduled workflow, register a cron job via PocketBase
@@ -356,12 +373,7 @@ func RunWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], input P, opts ...
 			outcome := <-wh.outcomeChan
 			var typedResult R
 			if outcome.result != nil {
-				if outcome.needsDecoding {
-					if encoded, ok := outcome.result.(*string); ok {
-						ser := newJSONSerializer[R]()
-						typedResult, _ = ser.Decode(encoded)
-					}
-				} else if typed, ok := outcome.result.(R); ok {
+				if typed, ok := outcome.result.(R); ok {
 					typedResult = typed
 				}
 			}
@@ -449,6 +461,8 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		DeduplicationID:    params.DeduplicationID,
 		Priority:           int(params.Priority),
 		QueuePartitionKey:  params.QueuePartitionKey,
+		Timeout:            params.Timeout,
+		Deadline:           params.Deadline,
 	}
 
 	ownerXID := uuid.New().String()
@@ -476,35 +490,38 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	}
 
 	// Create workflow state
-	wfState := &workflowState{workflowID: workflowID, stepID: -1}
+	wfState := &workflowState{workflowID: workflowID}
+	wfState.stepID.Store(-1)
 	wfCtx := context.WithValue(rt.ctx, workflowStateKey, wfState)
 
 	// Apply deadline if set
+	var cancelTimeout context.CancelFunc
 	if insertResult.timeout > 0 && insertResult.workflowDeadline.IsZero() {
-		var cancel context.CancelFunc
-		wfCtx, cancel = context.WithTimeout(wfCtx, insertResult.timeout)
-		_ = cancel // will be cancelled when workflow completes or runtime shuts down
+		wfCtx, cancelTimeout = context.WithTimeout(wfCtx, insertResult.timeout)
 	} else if !insertResult.workflowDeadline.IsZero() {
-		var cancel context.CancelFunc
-		wfCtx, cancel = context.WithDeadline(wfCtx, insertResult.workflowDeadline)
-		_ = cancel
+		wfCtx, cancelTimeout = context.WithDeadline(wfCtx, insertResult.workflowDeadline)
 	}
 
 	outcomeChan := make(chan workflowOutcome[any], 1)
 	rt.workflowsWg.Add(1)
 	go func() {
 		defer rt.workflowsWg.Done()
+		if cancelTimeout != nil {
+			defer cancelTimeout()
+		}
 		rt.activeWorkflowIDs.Store(workflowID, struct{}{})
 		defer rt.activeWorkflowIDs.Delete(workflowID)
 
 		result, fnErr := fn(wfCtx, rt, input)
 
-		// Handle ID conflict
+		// Handle workflow ID conflict — another goroutine owns this workflow ID.
+		// Wait for the existing workflow to complete and return its result.
 		if errors.Is(fnErr, &DBOSError{Code: ConflictingIDError}) {
+			rt.logger.Warn("workflow ID conflict, waiting for existing workflow", "workflow_id", workflowID)
 			encoded, awaitErr := retryWithResult(rt.ctx, func() (*string, error) {
 				return rt.systemDB.awaitWorkflowResult(rt.ctx, workflowID, _DB_RETRY_INTERVAL)
 			}, withRetrierLogger(rt.logger))
-			outcomeChan <- workflowOutcome[any]{result: encoded, err: awaitErr, needsDecoding: true}
+			outcomeChan <- workflowOutcome[any]{result: encoded, err: awaitErr}
 			close(outcomeChan)
 			return
 		}
@@ -688,7 +705,8 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn StepFunc, opts ...St
 	}
 
 	// Execute with retry
-	stepState := &workflowState{workflowID: wfState.workflowID, stepID: stepID, isWithinStep: true}
+	stepState := &workflowState{workflowID: wfState.workflowID, isWithinStep: true}
+	stepState.stepID.Store(int64(stepID))
 	stepCtx := context.WithValue(ctx, workflowStateKey, stepState)
 	startTime := time.Now()
 
@@ -752,7 +770,7 @@ func executeStepWithRetry(ctx context.Context, rt *Runtime, opts *stepOptions, r
 		}
 		joinedErrors = errors.Join(joinedErrors, err)
 	}
-	return output, fmt.Errorf("max retries (%d) exceeded: %w", opts.maxRetries, joinedErrors)
+	return output, newMaxStepRetriesExceededError("", opts.stepName, opts.maxRetries, joinedErrors)
 }
 
 // Go runs a step in a goroutine. Must be within a workflow.
@@ -879,6 +897,9 @@ func GetEvent[R any](ctx context.Context, rt *Runtime, targetWorkflowID string, 
 }
 
 // Sleep performs a durable sleep within a workflow.
+// The wake-up time is recorded as a step so that on recovery,
+// if the wake-up time has already passed, Sleep returns immediately;
+// otherwise it sleeps only the remaining time.
 func Sleep(ctx context.Context, rt *Runtime, duration time.Duration) error {
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
@@ -888,14 +909,37 @@ func Sleep(ctx context.Context, rt *Runtime, duration time.Duration) error {
 		return fmt.Errorf("cannot call Sleep within a step")
 	}
 
-	_, err := retryWithResult(ctx, func() (time.Duration, error) {
-		return rt.systemDB.sleep(ctx, sleepInput{
-			workflowUUID: wfState.workflowID,
-			functionID:   wfState.nextStepID(),
-			duration:     duration,
-		})
-	}, withRetrierLogger(rt.logger))
-	return err
+	// The step records the wake-up time in millis. On first run, the step body
+	// executes the sleep. On replay, we get the stored wake-up time back and
+	// sleep only the remaining duration.
+	wakeUpMs, err := RunAsStep(ctx, rt, func(ctx context.Context) (int64, error) {
+		wakeUpTime := time.Now().Add(duration)
+		remaining := time.Until(wakeUpTime)
+		if remaining > 0 {
+			select {
+			case <-time.After(remaining):
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			}
+		}
+		return wakeUpTime.UnixMilli(), nil
+	}, WithStepName("DBOS.sleep"))
+	if err != nil {
+		return err
+	}
+
+	// On replay, wakeUpMs is the originally recorded wake-up time.
+	// Sleep only the remaining duration (if any).
+	wakeUpTime := time.UnixMilli(wakeUpMs)
+	remaining := time.Until(wakeUpTime)
+	if remaining > 0 {
+		select {
+		case <-time.After(remaining):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 /****************************************/

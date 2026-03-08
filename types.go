@@ -2,6 +2,7 @@ package pbdbos
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 )
 
@@ -70,13 +71,12 @@ type StepInfo struct {
 // workflowState holds the runtime state for a workflow execution.
 type workflowState struct {
 	workflowID   string
-	stepID       int
+	stepID       atomic.Int64
 	isWithinStep bool
 }
 
 func (ws *workflowState) nextStepID() int {
-	ws.stepID++
-	return ws.stepID
+	return int(ws.stepID.Add(1))
 }
 
 // Internal DB input/output types
@@ -192,7 +192,6 @@ type WorkflowSendInput struct {
 
 type recvInput struct {
 	workflowUUID string
-	functionID   int
 	topic        string
 	timeout      time.Duration
 }
@@ -205,17 +204,9 @@ type WorkflowSetEventInput struct {
 }
 
 type getEventInput struct {
-	workflowUUID       string
 	targetWorkflowUUID string
-	functionID         int
 	key                string
 	timeout            time.Duration
-}
-
-type sleepInput struct {
-	workflowUUID string
-	functionID   int
-	duration     time.Duration
 }
 
 type dequeueWorkflowsInput struct {
@@ -273,8 +264,6 @@ type systemDatabase interface {
 	recv(ctx context.Context, input recvInput) (*string, error)
 	setEvent(ctx context.Context, input WorkflowSetEventInput) error
 	getEvent(ctx context.Context, input getEventInput) (*string, error)
-
-	sleep(ctx context.Context, input sleepInput) (time.Duration, error)
 
 	dequeueWorkflows(ctx context.Context, input dequeueWorkflowsInput) ([]dequeuedWorkflow, error)
 	clearQueueAssignment(ctx context.Context, workflowID string) (bool, error)

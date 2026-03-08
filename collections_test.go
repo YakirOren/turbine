@@ -6,19 +6,14 @@ import (
 	"github.com/pocketbase/pocketbase/tests"
 )
 
-func TestEnsureCollections(t *testing.T) {
+func TestMigrationCreatesCollections(t *testing.T) {
 	app, err := tests.NewTestApp()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer app.Cleanup()
 
-	err = ensureCollections(app)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Verify each collection exists
+	// Verify each collection exists (created by the init() migration)
 	names := []string{
 		collectionWorkflowStatus,
 		collectionOperationOutputs,
@@ -34,21 +29,5 @@ func TestEnsureCollections(t *testing.T) {
 		if col.Name != name {
 			t.Fatalf("expected collection name %s, got %s", name, col.Name)
 		}
-	}
-}
-
-func TestEnsureCollectionsIdempotent(t *testing.T) {
-	app, err := tests.NewTestApp()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer app.Cleanup()
-
-	// Run twice — should not error on second run
-	if err := ensureCollections(app); err != nil {
-		t.Fatal(err)
-	}
-	if err := ensureCollections(app); err != nil {
-		t.Fatal(err)
 	}
 }

@@ -16,10 +16,6 @@ func setupSysDB(t *testing.T) (*sqliteSysDB, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ensureCollections(app); err != nil {
-		app.Cleanup()
-		t.Fatal(err)
-	}
 	eb := newEventBus()
 	sysDB := newSQLiteSysDB(app, eb, slog.Default())
 	sysDB.launch(context.Background())

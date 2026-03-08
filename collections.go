@@ -5,64 +5,25 @@ import (
 )
 
 const (
-	collectionWorkflowStatus       = "dbos_workflow_status"
-	collectionOperationOutputs     = "dbos_operation_outputs"
-	collectionNotifications        = "dbos_notifications"
-	collectionWorkflowEvents       = "dbos_workflow_events"
-	collectionWorkflowEventsHist   = "dbos_workflow_events_history"
+	collectionWorkflowStatus     = "dbos_workflow_status"
+	collectionOperationOutputs   = "dbos_operation_outputs"
+	collectionNotifications      = "dbos_notifications"
+	collectionWorkflowEvents     = "dbos_workflow_events"
+	collectionWorkflowEventsHist = "dbos_workflow_events_history"
 )
 
-func ensureCollections(app core.App) error {
-	collections := []func(core.App) (*core.Collection, error){
-		workflowStatusCollection,
-		operationOutputsCollection,
-		notificationsCollection,
-		workflowEventsCollection,
-		workflowEventsHistoryCollection,
-	}
-
-	for _, createFn := range collections {
-		col, err := createFn(app)
-		if err != nil {
-			return err
-		}
-
-		// Check if already exists
-		if _, findErr := app.FindCollectionByNameOrId(col.Name); findErr == nil {
-			continue
-		}
-
-		if err := app.Save(col); err != nil {
-			return err
-		}
-	}
-
-	// Create composite unique indexes via raw SQL (PocketBase doesn't support composite PKs natively)
-	indexes := []string{
-		"CREATE UNIQUE INDEX IF NOT EXISTS idx_operation_outputs_pk ON dbos_operation_outputs (workflow_uuid, function_id)",
-		"CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_events_pk ON dbos_workflow_events (workflow_uuid, key)",
-		"CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_events_history_pk ON dbos_workflow_events_history (workflow_uuid, function_id, key)",
-		"CREATE INDEX IF NOT EXISTS idx_notifications_dest_topic ON dbos_notifications (destination_uuid, topic) WHERE consumed = FALSE",
-		"CREATE INDEX IF NOT EXISTS idx_workflow_status_executor ON dbos_workflow_status (executor_id, status, application_version)",
-	}
-
-	for _, sql := range indexes {
-		if _, err := app.DB().NewQuery(sql).Execute(); err != nil {
-			return err
-		}
-	}
-
-	return nil
+func init() {
+	core.AppMigrations.Register(upCreateCollections, downCreateCollections, "pbdbos_1_create_collections")
 }
 
-func workflowStatusCollection(app core.App) (*core.Collection, error) {
-	col := core.NewBaseCollection(collectionWorkflowStatus)
-
-	col.Fields.Add(
+func upCreateCollections(app core.App) error {
+	// 1. Workflow status
+	wfStatus := core.NewBaseCollection(collectionWorkflowStatus)
+	wfStatus.Fields.Add(
 		&core.TextField{Name: "status", Required: true},
 		&core.TextField{Name: "name", Required: true},
-		&core.TextField{Name: "inputs"},
-		&core.TextField{Name: "output"},
+		&core.JSONField{Name: "inputs"},
+		&core.JSONField{Name: "output"},
 		&core.TextField{Name: "error"},
 		&core.TextField{Name: "executor_id", Required: true},
 		&core.TextField{Name: "application_version"},
@@ -81,62 +42,87 @@ func workflowStatusCollection(app core.App) (*core.Collection, error) {
 		&core.TextField{Name: "parent_workflow_uuid"},
 		&core.NumberField{Name: "parent_function_id"},
 	)
+	wfStatus.AddIndex("idx_workflow_status_executor", false, "executor_id, status, application_version", "")
+	wfStatus.AddIndex("idx_workflow_status_dedup", true, "queue_name, deduplication_id", "deduplication_id != ''")
+	if err := app.Save(wfStatus); err != nil {
+		return err
+	}
 
-	return col, nil
-}
-
-func operationOutputsCollection(app core.App) (*core.Collection, error) {
-	col := core.NewBaseCollection(collectionOperationOutputs)
-
-	col.Fields.Add(
+	// 2. Operation outputs
+	opOutputs := core.NewBaseCollection(collectionOperationOutputs)
+	opOutputs.Fields.Add(
 		&core.TextField{Name: "workflow_uuid", Required: true},
 		&core.NumberField{Name: "function_id", Required: true},
-		&core.TextField{Name: "output"},
+		&core.JSONField{Name: "output"},
 		&core.TextField{Name: "error"},
 		&core.TextField{Name: "child_workflow_id"},
 		&core.TextField{Name: "function_name"},
 		&core.NumberField{Name: "started_at_epoch_ms"},
 		&core.NumberField{Name: "ended_at_epoch_ms"},
 	)
+	opOutputs.AddIndex("idx_operation_outputs_pk", true, "workflow_uuid, function_id", "")
+	if err := app.Save(opOutputs); err != nil {
+		return err
+	}
 
-	return col, nil
-}
-
-func notificationsCollection(app core.App) (*core.Collection, error) {
-	col := core.NewBaseCollection(collectionNotifications)
-
-	col.Fields.Add(
+	// 3. Notifications
+	notifs := core.NewBaseCollection(collectionNotifications)
+	notifs.Fields.Add(
 		&core.TextField{Name: "destination_uuid", Required: true},
 		&core.TextField{Name: "topic"},
-		&core.TextField{Name: "message"},
+		&core.JSONField{Name: "message"},
 		&core.NumberField{Name: "created_at_epoch_ms"},
 		&core.BoolField{Name: "consumed"},
 	)
+	notifs.AddIndex("idx_notifications_dest_topic", false, "destination_uuid, topic", "consumed = FALSE")
+	if err := app.Save(notifs); err != nil {
+		return err
+	}
 
-	return col, nil
-}
-
-func workflowEventsCollection(app core.App) (*core.Collection, error) {
-	col := core.NewBaseCollection(collectionWorkflowEvents)
-
-	col.Fields.Add(
+	// 4. Workflow events
+	wfEvents := core.NewBaseCollection(collectionWorkflowEvents)
+	wfEvents.Fields.Add(
 		&core.TextField{Name: "workflow_uuid", Required: true},
 		&core.TextField{Name: "key", Required: true},
-		&core.TextField{Name: "value", Required: true},
+		&core.JSONField{Name: "value"},
 	)
+	wfEvents.AddIndex("idx_workflow_events_pk", true, "workflow_uuid, key", "")
+	if err := app.Save(wfEvents); err != nil {
+		return err
+	}
 
-	return col, nil
-}
-
-func workflowEventsHistoryCollection(app core.App) (*core.Collection, error) {
-	col := core.NewBaseCollection(collectionWorkflowEventsHist)
-
-	col.Fields.Add(
+	// 5. Workflow events history
+	wfEventsHist := core.NewBaseCollection(collectionWorkflowEventsHist)
+	wfEventsHist.Fields.Add(
 		&core.TextField{Name: "workflow_uuid", Required: true},
 		&core.NumberField{Name: "function_id", Required: true},
 		&core.TextField{Name: "key", Required: true},
-		&core.TextField{Name: "value", Required: true},
+		&core.JSONField{Name: "value"},
 	)
+	wfEventsHist.AddIndex("idx_workflow_events_history_pk", true, "workflow_uuid, function_id, key", "")
+	if err := app.Save(wfEventsHist); err != nil {
+		return err
+	}
 
-	return col, nil
+	return nil
+}
+
+func downCreateCollections(app core.App) error {
+	names := []string{
+		collectionWorkflowEventsHist,
+		collectionWorkflowEvents,
+		collectionNotifications,
+		collectionOperationOutputs,
+		collectionWorkflowStatus,
+	}
+	for _, name := range names {
+		col, err := app.FindCollectionByNameOrId(name)
+		if err != nil {
+			continue
+		}
+		if err := app.Delete(col); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -1,11 +1,15 @@
 package pbdbos
 
-import "log/slog"
+import (
+	"log/slog"
+	"time"
+)
 
 // Config holds configuration parameters for initializing the pbdbos plugin.
 type Config struct {
-	AppName            string       // Required: application name
-	ApplicationVersion string       // Optional: defaults to binary hash
-	ExecutorID         string       // Optional: defaults to "local"
-	Logger             *slog.Logger // Optional: defaults to slog default
+	ApplicationVersion string        // Optional: defaults to binary hash
+	ExecutorID         string        // Optional: defaults to "local"
+	Logger             *slog.Logger  // Optional: defaults to slog default
+	GCRetention        time.Duration // How long to keep completed workflows. 0 = use default (72h). Negative = disabled.
+	GCSchedule         string        // Cron expression for GC. Default: "0 0 * * *" (daily midnight)
 }
