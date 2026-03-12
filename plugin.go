@@ -1,4 +1,4 @@
-package pbdbos
+package pocketflow
 
 import (
 	"time"
@@ -6,7 +6,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-// Register hooks pbdbos into PocketBase's lifecycle as a plugin.
+// Register hooks pocketflow into PocketBase's lifecycle as a plugin.
 // Returns the Runtime so you can register workflows before app.Start().
 func Register(app core.App, config Config) *Runtime {
 	rt := New(app, config)

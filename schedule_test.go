@@ -1,7 +1,6 @@
-package pbdbos
+package pocketflow
 
 import (
-	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,7 +13,7 @@ func TestScheduledWorkflowRegistration(t *testing.T) {
 	var executed atomic.Bool
 	var receivedTime atomic.Value
 
-	myWF := func(ctx context.Context, rt *Runtime, scheduledAt time.Time) (string, error) {
+	myWF := func(ctx Context, scheduledAt time.Time) (string, error) {
 		executed.Store(true)
 		receivedTime.Store(scheduledAt)
 		return "scheduled-ok", nil
@@ -44,7 +43,7 @@ func TestScheduledWorkflowExecution(t *testing.T) {
 
 	var executed atomic.Bool
 
-	myWF := func(ctx context.Context, rt *Runtime, scheduledAt time.Time) (string, error) {
+	myWF := func(ctx Context, scheduledAt time.Time) (string, error) {
 		executed.Store(true)
 		return "done", nil
 	}
@@ -65,7 +64,7 @@ func TestScheduledWorkflowExecution(t *testing.T) {
 	wfID := "sched-test-" + now.UTC().Format(time.RFC3339)
 	_, err := registered.wrappedFunction(rt, now,
 		WithWorkflowID(wfID),
-		WithQueue(_DBOS_INTERNAL_QUEUE_NAME),
+		WithQueue(_PF_INTERNAL_QUEUE_NAME),
 	)
 	if err != nil {
 		t.Fatalf("failed to enqueue scheduled workflow: %v", err)
@@ -88,7 +87,7 @@ func TestScheduledWorkflowPanicsOnWrongInputType(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
-	myWF := func(ctx context.Context, rt *Runtime, input string) (string, error) {
+	myWF := func(ctx Context, input string) (string, error) {
 		return input, nil
 	}
 

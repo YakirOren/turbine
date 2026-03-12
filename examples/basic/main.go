@@ -1,30 +1,29 @@
 package main
 
 import (
-	"context"
 	"log"
 
-	"github.com/YakirOren/pbdbos"
+	"github.com/YakirOren/pocketflow"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 )
 
-func Greet(ctx context.Context, rt *pbdbos.Runtime, name string) (string, error) {
+func Greet(ctx pocketflow.Context, name string) (string, error) {
 	return "hello " + name, nil
 }
 
 func main() {
 	app := pocketbase.New()
 
-	rt := pbdbos.Register(app, pbdbos.Config{})
+	rt := pocketflow.Register(app, pocketflow.Config{})
 
-	pbdbos.RegisterWorkflow(rt, Greet)
+	pocketflow.RegisterWorkflow(rt, Greet)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/greet/{name}", func(re *core.RequestEvent) error {
 			name := re.Request.PathValue("name")
 
-			handle, err := pbdbos.RunWorkflow(rt, Greet, name)
+			handle, err := pocketflow.RunWorkflow(rt, Greet, name)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}

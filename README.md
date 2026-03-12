@@ -1,4 +1,4 @@
-# pbdbos
+# pocketflow
 
 Durable workflow engine for [PocketBase](https://pocketbase.io). Runs entirely on SQLite — no external dependencies.
 
@@ -20,7 +20,7 @@ Inspired by [DBOS Transact](https://github.com/dbos-inc/dbos-transact-golang), r
 ## Install
 
 ```bash
-go get github.com/YakirOren/pbdbos
+go get github.com/YakirOren/pocketflow
 ```
 
 ## Quick Start
@@ -32,7 +32,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/YakirOren/pbdbos"
+	"github.com/YakirOren/pocketflow"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -40,20 +40,20 @@ import (
 func main() {
 	app := pocketbase.New()
 
-	rt := pbdbos.Register(app, pbdbos.Config{})
+	rt := pocketflow.Register(app, pocketflow.Config{})
 
-	greet := func(ctx context.Context, rt *pbdbos.Runtime, name string) (string, error) {
+	greet := func(ctx context.Context, rt *pocketflow.Runtime, name string) (string, error) {
 		return "hello " + name, nil
 	}
 
-	pbdbos.RegisterWorkflow(rt, greet)
+	pocketflow.RegisterWorkflow(rt, greet)
 
 	// Call workflows from PocketBase routes
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/greet/{name}", func(re *core.RequestEvent) error {
 			name := re.Request.PathValue("name")
 
-			handle, err := pbdbos.RunWorkflow(rt, greet, name)
+			handle, err := pocketflow.RunWorkflow(rt, greet, name)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
@@ -79,24 +79,24 @@ func main() {
 A workflow is a function with the signature `func(ctx context.Context, rt *Runtime, input P) (R, error)`.
 
 ```go
-myWorkflow := func(ctx context.Context, rt *pbdbos.Runtime, input string) (string, error) {
+myWorkflow := func(ctx context.Context, rt *pocketflow.Runtime, input string) (string, error) {
     // This step's result is recorded — on recovery it replays from the DB
-    doubled, err := pbdbos.RunAsStep(ctx, rt, func(ctx context.Context) (string, error) {
+    doubled, err := pocketflow.RunAsStep(ctx, rt, func(ctx context.Context) (string, error) {
         return input + input, nil
-    }, pbdbos.WithStepName("double"))
+    }, pocketflow.WithStepName("double"))
     if err != nil {
         return "", err
     }
     return doubled, nil
 }
 
-pbdbos.RegisterWorkflow(rt, myWorkflow)
+pocketflow.RegisterWorkflow(rt, myWorkflow)
 ```
 
 Run a workflow:
 
 ```go
-handle, err := pbdbos.RunWorkflow(rt, myWorkflow, "hello")
+handle, err := pocketflow.RunWorkflow(rt, myWorkflow, "hello")
 if err != nil {
     log.Fatal(err)
 }
@@ -108,23 +108,23 @@ result, err := handle.GetResult()
 ### Registration Options
 
 ```go
-pbdbos.RegisterWorkflow(rt, myWorkflow,
-    pbdbos.WithWorkflowName("my-workflow"),    // custom name (default: function name)
-    pbdbos.WithMaxRetries(50),                 // max recovery attempts (default: 100)
+pocketflow.RegisterWorkflow(rt, myWorkflow,
+    pocketflow.WithWorkflowName("my-workflow"),    // custom name (default: function name)
+    pocketflow.WithMaxRetries(50),                 // max recovery attempts (default: 100)
 )
 ```
 
 ### Workflow Options
 
 ```go
-pbdbos.RunWorkflow(rt, myWorkflow, input,
-    pbdbos.WithWorkflowID("custom-id"),             // deterministic ID
-    pbdbos.WithQueue("my-queue"),                    // enqueue instead of run immediately
-    pbdbos.WithDeduplicationID("dedup-key"),         // prevent duplicate enqueues
-    pbdbos.WithPriority(1),                          // lower = higher priority
-    pbdbos.WithQueuePartitionKey("tenant-1"),        // partition key for partitioned queues
-    pbdbos.WithTimeout(30*time.Second),              // cancel after 30s
-    pbdbos.WithDeadline(time.Now().Add(time.Hour)),  // cancel at specific time
+pocketflow.RunWorkflow(rt, myWorkflow, input,
+    pocketflow.WithWorkflowID("custom-id"),             // deterministic ID
+    pocketflow.WithQueue("my-queue"),                    // enqueue instead of run immediately
+    pocketflow.WithDeduplicationID("dedup-key"),         // prevent duplicate enqueues
+    pocketflow.WithPriority(1),                          // lower = higher priority
+    pocketflow.WithQueuePartitionKey("tenant-1"),        // partition key for partitioned queues
+    pocketflow.WithTimeout(30*time.Second),              // cancel after 30s
+    pocketflow.WithDeadline(time.Now().Add(time.Hour)),  // cancel at specific time
 )
 ```
 
@@ -134,13 +134,13 @@ Set a timeout or absolute deadline on a workflow. The workflow's context is canc
 
 ```go
 // Timeout: relative duration from when the workflow starts executing
-handle, _ := pbdbos.RunWorkflow(rt, myWorkflow, input,
-    pbdbos.WithTimeout(5*time.Minute),
+handle, _ := pocketflow.RunWorkflow(rt, myWorkflow, input,
+    pocketflow.WithTimeout(5*time.Minute),
 )
 
 // Deadline: absolute point in time
-handle, _ := pbdbos.RunWorkflow(rt, myWorkflow, input,
-    pbdbos.WithDeadline(time.Date(2025, 12, 31, 23, 59, 59, 0, time.UTC)),
+handle, _ := pocketflow.RunWorkflow(rt, myWorkflow, input,
+    pocketflow.WithDeadline(time.Date(2025, 12, 31, 23, 59, 59, 0, time.UTC)),
 )
 ```
 
@@ -151,9 +151,9 @@ If both are set, the deadline takes precedence.
 Steps are the unit of durable execution. Each step's result is recorded in SQLite. On recovery, recorded steps replay their saved result instead of re-executing.
 
 ```go
-result, err := pbdbos.RunAsStep(ctx, rt, func(ctx context.Context) (int, error) {
+result, err := pocketflow.RunAsStep(ctx, rt, func(ctx context.Context) (int, error) {
     return callExternalAPI()  // only called once, even across crashes
-}, pbdbos.WithStepName("call-api"))
+}, pocketflow.WithStepName("call-api"))
 ```
 
 ### Step Retries
@@ -161,12 +161,12 @@ result, err := pbdbos.RunAsStep(ctx, rt, func(ctx context.Context) (int, error) 
 Steps support automatic retries with exponential backoff:
 
 ```go
-result, err := pbdbos.RunAsStep(ctx, rt, callUnreliableAPI,
-    pbdbos.WithStepName("fetch"),
-    pbdbos.WithStepMaxRetries(5),                    // retry up to 5 times
-    pbdbos.WithBackoffFactor(2.0),                   // exponential backoff multiplier
-    pbdbos.WithBaseInterval(500*time.Millisecond),   // initial delay between retries
-    pbdbos.WithMaxInterval(10*time.Second),          // cap on retry delay
+result, err := pocketflow.RunAsStep(ctx, rt, callUnreliableAPI,
+    pocketflow.WithStepName("fetch"),
+    pocketflow.WithStepMaxRetries(5),                    // retry up to 5 times
+    pocketflow.WithBackoffFactor(2.0),                   // exponential backoff multiplier
+    pocketflow.WithBaseInterval(500*time.Millisecond),   // initial delay between retries
+    pocketflow.WithMaxInterval(10*time.Second),          // cap on retry delay
 )
 ```
 
@@ -175,9 +175,9 @@ result, err := pbdbos.RunAsStep(ctx, rt, callUnreliableAPI,
 Run steps in parallel with `Go`:
 
 ```go
-ch, _ := pbdbos.Go(ctx, rt, func(ctx context.Context) (int, error) {
+ch, _ := pocketflow.Go(ctx, rt, func(ctx context.Context) (int, error) {
     return expensiveComputation()
-}, pbdbos.WithStepName("compute"))
+}, pocketflow.WithStepName("compute"))
 
 outcome := <-ch
 // outcome.Result, outcome.Err
@@ -188,7 +188,7 @@ outcome := <-ch
 Durable sleep that survives crashes and restarts. The wake-up time is recorded as a step — on recovery, if the time has passed, it returns immediately; otherwise it sleeps only the remaining duration.
 
 ```go
-if err := pbdbos.Sleep(ctx, rt, 24*time.Hour); err != nil {
+if err := pocketflow.Sleep(ctx, rt, 24*time.Hour); err != nil {
     return "", err
 }
 ```
@@ -196,22 +196,22 @@ if err := pbdbos.Sleep(ctx, rt, 24*time.Hour); err != nil {
 ## Queues
 
 ```go
-q := pbdbos.NewWorkflowQueue(rt, "emails",
-    pbdbos.WithWorkerConcurrency(5),
-    pbdbos.WithGlobalConcurrency(10),
-    pbdbos.WithRateLimiter(pbdbos.RateLimiter{Limit: 100, Period: time.Minute}),
-    pbdbos.WithPriorityEnabled(),
-    pbdbos.WithPartitionQueue(),                      // enable partitioned processing
+q := pocketflow.NewWorkflowQueue(rt, "emails",
+    pocketflow.WithWorkerConcurrency(5),
+    pocketflow.WithGlobalConcurrency(10),
+    pocketflow.WithRateLimiter(pocketflow.RateLimiter{Limit: 100, Period: time.Minute}),
+    pocketflow.WithPriorityEnabled(),
+    pocketflow.WithPartitionQueue(),                      // enable partitioned processing
 )
 
 // Enqueue a workflow
-pbdbos.RunWorkflow(rt, sendEmail, recipient, pbdbos.WithQueue("emails"))
+pocketflow.RunWorkflow(rt, sendEmail, recipient, pocketflow.WithQueue("emails"))
 ```
 
 In a multi-instance setup, use `ListenQueues` to control which queues each instance processes:
 
 ```go
-pbdbos.ListenQueues(rt, q)
+pocketflow.ListenQueues(rt, q)
 ```
 
 ## Scheduled Workflows
@@ -219,12 +219,12 @@ pbdbos.ListenQueues(rt, q)
 Uses PocketBase's built-in cron. Scheduled workflows must accept `time.Time` as input.
 
 ```go
-cleanup := func(ctx context.Context, rt *pbdbos.Runtime, scheduledAt time.Time) (string, error) {
+cleanup := func(ctx context.Context, rt *pocketflow.Runtime, scheduledAt time.Time) (string, error) {
     // runs every hour
     return "cleaned", nil
 }
 
-pbdbos.RegisterWorkflow(rt, cleanup, pbdbos.WithSchedule("0 * * * *"))
+pocketflow.RegisterWorkflow(rt, cleanup, pocketflow.WithSchedule("0 * * * *"))
 ```
 
 ## Communication
@@ -233,39 +233,39 @@ pbdbos.RegisterWorkflow(rt, cleanup, pbdbos.WithSchedule("0 * * * *"))
 
 ```go
 // In workflow A: send a message
-pbdbos.Send(ctx, rt, targetWorkflowID, "payload", "my-topic")
+pocketflow.Send(ctx, rt, targetWorkflowID, "payload", "my-topic")
 
 // In workflow B: receive (blocks until message arrives or timeout)
-msg, err := pbdbos.Recv[string](ctx, rt, "my-topic", 30*time.Second)
+msg, err := pocketflow.Recv[string](ctx, rt, "my-topic", 30*time.Second)
 ```
 
 ### Events
 
 ```go
 // In workflow A: set a key-value event
-pbdbos.SetEvent(ctx, rt, "status", "ready")
+pocketflow.SetEvent(ctx, rt, "status", "ready")
 
 // Anywhere: get the event (blocks until set or timeout)
-val, err := pbdbos.GetEvent[string](ctx, rt, workflowID, "status", 10*time.Second)
+val, err := pocketflow.GetEvent[string](ctx, rt, workflowID, "status", 10*time.Second)
 ```
 
 ## Management
 
 ```go
 // Get the current workflow ID from within a workflow
-wfID, err := pbdbos.GetWorkflowID(ctx)
+wfID, err := pocketflow.GetWorkflowID(ctx)
 
 // Retrieve a handle to an existing workflow
-handle := pbdbos.RetrieveWorkflow[string](rt, "workflow-id")
+handle := pocketflow.RetrieveWorkflow[string](rt, "workflow-id")
 result, err := handle.GetResult()
 status, err := handle.GetStatus()
 
 // Cancel / Resume
-pbdbos.CancelWorkflow(rt, "workflow-id")
-pbdbos.ResumeWorkflow(rt, "workflow-id")
+pocketflow.CancelWorkflow(rt, "workflow-id")
+pocketflow.ResumeWorkflow(rt, "workflow-id")
 
 // Inspect steps
-steps, err := pbdbos.GetWorkflowSteps(rt, "workflow-id")
+steps, err := pocketflow.GetWorkflowSteps(rt, "workflow-id")
 ```
 
 ## Garbage Collection
@@ -273,7 +273,7 @@ steps, err := pbdbos.GetWorkflowSteps(rt, "workflow-id")
 Completed workflows (SUCCESS/ERROR) are automatically cleaned up on a schedule. By default, workflows older than 72 hours are deleted daily at midnight.
 
 ```go
-rt := pbdbos.Register(app, pbdbos.Config{
+rt := pocketflow.Register(app, pocketflow.Config{
     GCRetention: 24 * time.Hour,     // keep completed workflows for 24h (default: 72h)
     GCSchedule:  "0 */6 * * *",      // run GC every 6 hours (default: "0 0 * * *")
 })
@@ -291,15 +291,15 @@ Pending and enqueued workflows are never deleted by GC.
 
 ## How It Works
 
-pbdbos stores all workflow state in SQLite collections managed by PocketBase. Collections are created automatically on first launch — no migrations needed.
+pocketflow stores all workflow state in SQLite collections managed by PocketBase. Collections are created automatically on first launch — no migrations needed.
 
 | Collection | Purpose |
 |---|---|
-| `dbos_workflow_status` | Workflow metadata, status, queue assignment, and lifecycle tracking |
-| `dbos_operation_outputs` | Step results — replayed on recovery instead of re-executing |
-| `dbos_notifications` | Inter-workflow messages (Send/Recv) |
-| `dbos_workflow_events` | Key-value events (current state) |
-| `dbos_workflow_events_history` | Event history for step-level replay |
+| `pf_workflow_status` | Workflow metadata, status, queue assignment, and lifecycle tracking |
+| `pf_operation_outputs` | Step results — replayed on recovery instead of re-executing |
+| `pf_notifications` | Inter-workflow messages (Send/Recv) |
+| `pf_workflow_events` | Key-value events (current state) |
+| `pf_workflow_events_history` | Event history for step-level replay |
 
 The queue runner polls SQLite for enqueued workflows using atomic `UPDATE ... RETURNING` to prevent double-dispatch. An in-process event bus replaces PostgreSQL's `LISTEN/NOTIFY` for low-latency wake-ups.
 

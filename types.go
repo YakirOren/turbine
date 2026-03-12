@@ -1,4 +1,4 @@
-package pbdbos
+package pocketflow
 
 import (
 	"context"
@@ -20,7 +20,7 @@ const (
 
 // WorkflowStatus contains information about a workflow's current state.
 type WorkflowStatus struct {
-	ID                 string             `json:"workflow_uuid"`
+	ID                 string             `json:"workflow_id"`
 	Status             WorkflowStatusType `json:"status"`
 	Name               string             `json:"name"`
 	Output             any                `json:"output,omitempty"`
@@ -59,7 +59,7 @@ type getResultOptions struct {
 
 // StepInfo contains information about a workflow step execution.
 type StepInfo struct {
-	WorkflowUUID string `json:"workflow_uuid"`
+	WorkflowID string `json:"workflow_id"`
 	FunctionID   int    `json:"function_id"`
 	FunctionName string `json:"function_name"`
 	Output       string `json:"output,omitempty"`
@@ -268,6 +268,8 @@ type systemDatabase interface {
 	dequeueWorkflows(ctx context.Context, input dequeueWorkflowsInput) ([]dequeuedWorkflow, error)
 	clearQueueAssignment(ctx context.Context, workflowID string) (bool, error)
 	getQueuePartitions(ctx context.Context, queueName string) ([]string, error)
+	waitForEnqueue(ctx context.Context, queueName string) chan struct{}
+	stopWaitForEnqueue(queueName string, ch chan struct{})
 
 	garbageCollectWorkflows(ctx context.Context, input garbageCollectWorkflowsInput) error
 }

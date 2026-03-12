@@ -6,23 +6,23 @@ import (
 	"log"
 	"time"
 
-	"github.com/YakirOren/pbdbos"
+	"github.com/YakirOren/pocketflow"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 )
 
 // ReminderWorkflow sends a reminder after a durable delay.
 // If the process crashes during the sleep, it resumes with only the remaining time.
-func ReminderWorkflow(ctx context.Context, rt *pbdbos.Runtime, userID string) (string, error) {
+func ReminderWorkflow(ctx pocketflow.Context, userID string) (string, error) {
 	// Wait 24 hours — survives crashes and restarts
-	if err := pbdbos.Sleep(ctx, rt, 24*time.Hour); err != nil {
+	if err := pocketflow.Sleep(ctx, 24*time.Hour); err != nil {
 		return "", err
 	}
 
-	_, err := pbdbos.RunAsStep(ctx, rt, func(ctx context.Context) (bool, error) {
+	_, err := pocketflow.RunAsStep(ctx, func(ctx context.Context) (bool, error) {
 		fmt.Printf("sending reminder to %s\n", userID)
 		return true, nil
-	}, pbdbos.WithStepName("send-reminder"))
+	}, pocketflow.WithStepName("send-reminder"))
 	if err != nil {
 		return "", err
 	}
@@ -33,15 +33,15 @@ func ReminderWorkflow(ctx context.Context, rt *pbdbos.Runtime, userID string) (s
 func main() {
 	app := pocketbase.New()
 
-	rt := pbdbos.Register(app, pbdbos.Config{})
+	rt := pocketflow.Register(app, pocketflow.Config{})
 
-	pbdbos.RegisterWorkflow(rt, ReminderWorkflow)
+	pocketflow.RegisterWorkflow(rt, ReminderWorkflow)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/remind/{userID}", func(re *core.RequestEvent) error {
 			userID := re.Request.PathValue("userID")
 
-			handle, err := pbdbos.RunWorkflow(rt, ReminderWorkflow, userID)
+			handle, err := pocketflow.RunWorkflow(rt, ReminderWorkflow, userID)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}

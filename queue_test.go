@@ -1,7 +1,6 @@
-package pbdbos
+package pocketflow
 
 import (
-	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,7 +12,7 @@ func TestQueueEnqueueAndDequeue(t *testing.T) {
 
 	var executed atomic.Bool
 
-	myWF := func(ctx context.Context, rt *Runtime, input string) (string, error) {
+	myWF := func(ctx Context, input string) (string, error) {
 		executed.Store(true)
 		return "queued:" + input, nil
 	}
@@ -59,7 +58,7 @@ func TestQueueWithCustomID(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
-	myWF := func(ctx context.Context, rt *Runtime, input int) (int, error) {
+	myWF := func(ctx Context, input int) (int, error) {
 		return input * 3, nil
 	}
 
@@ -99,5 +98,46 @@ func TestQueueWithCustomID(t *testing.T) {
 	}
 	if result != 21 {
 		t.Fatalf("expected 21, got %d", result)
+	}
+}
+
+func TestQueueEventDrivenWakeUp(t *testing.T) {
+	rt, cleanup := setupRuntime(t)
+	defer cleanup()
+
+	var executedAt atomic.Int64
+
+	myWF := func(ctx Context, input string) (string, error) {
+		executedAt.Store(time.Now().UnixMilli())
+		return "fast:" + input, nil
+	}
+
+	RegisterWorkflow(rt, myWF)
+	NewWorkflowQueue(rt, "fast-queue")
+
+	if err := rt.Launch(); err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Shutdown(5 * time.Second)
+
+	enqueueTime := time.Now()
+	handle, err := RunWorkflow(rt, myWF, "test", WithQueue("fast-queue"))
+	if err != nil {
+		t.Fatalf("RunWorkflow failed: %v", err)
+	}
+
+	result, err := handle.GetResult()
+	if err != nil {
+		t.Fatalf("GetResult failed: %v", err)
+	}
+	if result != "fast:test" {
+		t.Fatalf("expected 'fast:test', got %q", result)
+	}
+
+	// Verify the workflow was picked up quickly (under 1 second)
+	execTime := time.UnixMilli(executedAt.Load())
+	latency := execTime.Sub(enqueueTime)
+	if latency > 1*time.Second {
+		t.Fatalf("queue wake-up too slow: %v (expected < 1s)", latency)
 	}
 }

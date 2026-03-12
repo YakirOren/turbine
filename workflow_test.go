@@ -1,4 +1,4 @@
-package pbdbos
+package pocketflow
 
 import (
 	"context"
@@ -23,7 +23,7 @@ func TestRunWorkflowSimple(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
-	myWF := func(ctx context.Context, rt *Runtime, input string) (string, error) {
+	myWF := func(ctx Context, input string) (string, error) {
 		return "hello " + input, nil
 	}
 
@@ -52,8 +52,8 @@ func TestRunWorkflowWithStep(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
-	myWF := func(ctx context.Context, rt *Runtime, input int) (int, error) {
-		doubled, err := RunAsStep(ctx, rt, func(ctx context.Context) (int, error) {
+	myWF := func(ctx Context, input int) (int, error) {
+		doubled, err := RunAsStep(ctx, func(ctx context.Context) (int, error) {
 			return input * 2, nil
 		}, WithStepName("double"))
 		if err != nil {
@@ -87,7 +87,7 @@ func TestRunWorkflowWithError(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
-	myWF := func(ctx context.Context, rt *Runtime, input string) (string, error) {
+	myWF := func(ctx Context, input string) (string, error) {
 		return "", fmt.Errorf("intentional error")
 	}
 
@@ -113,7 +113,7 @@ func TestRunWorkflowGetStatus(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
-	myWF := func(ctx context.Context, rt *Runtime, input string) (string, error) {
+	myWF := func(ctx Context, input string) (string, error) {
 		return "done", nil
 	}
 
@@ -145,15 +145,15 @@ func TestRunWorkflowMultipleSteps(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
-	myWF := func(ctx context.Context, rt *Runtime, input int) (int, error) {
-		a, err := RunAsStep(ctx, rt, func(ctx context.Context) (int, error) {
+	myWF := func(ctx Context, input int) (int, error) {
+		a, err := RunAsStep(ctx, func(ctx context.Context) (int, error) {
 			return input + 1, nil
 		}, WithStepName("step1"))
 		if err != nil {
 			return 0, err
 		}
 
-		b, err := RunAsStep(ctx, rt, func(ctx context.Context) (int, error) {
+		b, err := RunAsStep(ctx, func(ctx context.Context) (int, error) {
 			return a * 2, nil
 		}, WithStepName("step2"))
 		if err != nil {
@@ -197,7 +197,7 @@ func TestRunWorkflowWithTimeout(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
-	myWF := func(ctx context.Context, rt *Runtime, input string) (string, error) {
+	myWF := func(ctx Context, input string) (string, error) {
 		select {
 		case <-time.After(5 * time.Second):
 			return "should not reach", nil
@@ -237,7 +237,7 @@ func TestRunWorkflowWithDeadline(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
-	myWF := func(ctx context.Context, rt *Runtime, input string) (string, error) {
+	myWF := func(ctx Context, input string) (string, error) {
 		select {
 		case <-time.After(5 * time.Second):
 			return "should not reach", nil
@@ -278,7 +278,7 @@ func TestGarbageCollect(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
-	myWF := func(ctx context.Context, rt *Runtime, input string) (string, error) {
+	myWF := func(ctx Context, input string) (string, error) {
 		return "done", nil
 	}
 
@@ -325,7 +325,7 @@ func TestGarbageCollectPreservesPending(t *testing.T) {
 
 	// Use a workflow that blocks until we signal it
 	blocker := make(chan struct{})
-	myWF := func(ctx context.Context, rt *Runtime, input string) (string, error) {
+	myWF := func(ctx Context, input string) (string, error) {
 		<-blocker
 		return "done", nil
 	}
@@ -365,7 +365,7 @@ func TestRetrieveWorkflow(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
-	myWF := func(ctx context.Context, rt *Runtime, input string) (string, error) {
+	myWF := func(ctx Context, input string) (string, error) {
 		return "result:" + input, nil
 	}
 

@@ -1,4 +1,4 @@
-package pbdbos
+package pocketflow
 
 import (
 	"context"
@@ -10,22 +10,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 /*******************************/
 /******* FUNCTION TYPES *******/
 /*******************************/
 
-type dbosContextKey string
+type workflowStateKeyType struct{}
 
-const workflowStateKey dbosContextKey = "workflowState"
+var workflowStateKey = workflowStateKeyType{}
 
 // Workflow is a type-safe workflow function.
-type Workflow[P any, R any] func(ctx context.Context, rt *Runtime, input P) (R, error)
+type Workflow[P any, R any] func(ctx Context, input P) (R, error)
 
 // WorkflowFunc is a type-erased workflow function used internally.
-type WorkflowFunc func(ctx context.Context, rt *Runtime, input any) (any, error)
+type WorkflowFunc func(ctx Context, input any) (any, error)
 
 // Step is a function executed as a durable step within a workflow.
 // Steps are automatically recorded and replayed during recovery.
@@ -273,7 +273,7 @@ func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...Work
 	fqn := resolveWorkflowFunctionName(fn)
 
 	// Type-erased wrapper for recovery and queue runner
-	typedErasedWF := WorkflowFunc(func(ctx context.Context, rt *Runtime, input any) (any, error) {
+	typedErasedWF := WorkflowFunc(func(ctx Context, input any) (any, error) {
 		var encodedInput *string
 		if input != nil {
 			var ok bool
@@ -287,7 +287,7 @@ func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...Work
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode input: %w", err)
 		}
-		return fn(ctx, rt, typedInput)
+		return fn(ctx, typedInput)
 	})
 
 	wrapped := wrappedWorkflowFunc(func(rt *Runtime, input any, opts ...WorkflowOption) (WorkflowHandle[any], error) {
@@ -323,7 +323,7 @@ func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...Work
 		entry.CronSchedule = regOpts.cronSchedule
 		rt.workflowRegistry.Store(fqn, entry)
 
-		cronJobID := fmt.Sprintf("pbdbos_sched_%s", customName)
+		cronJobID := fmt.Sprintf("pf_sched_%s", customName)
 		if err := rt.app.Cron().Add(cronJobID, regOpts.cronSchedule, func() {
 			if !rt.launched.Load() {
 				return
@@ -332,7 +332,7 @@ func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...Work
 			wfID := fmt.Sprintf("sched-%s-%s", customName, scheduledTime.UTC().Format(time.RFC3339))
 			_, err := wrapped(rt, scheduledTime,
 				WithWorkflowID(wfID),
-				WithQueue(_DBOS_INTERNAL_QUEUE_NAME),
+				WithQueue(_PF_INTERNAL_QUEUE_NAME),
 			)
 			if err != nil {
 				rt.logger.Error("failed to run scheduled workflow", "name", customName, "error", err)
@@ -351,8 +351,8 @@ func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...Work
 func RunWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], input P, opts ...WorkflowOption) (WorkflowHandle[R], error) {
 	opts = append(opts, withWorkflowName(resolveWorkflowFunctionName(fn)))
 
-	typedErasedWF := WorkflowFunc(func(ctx context.Context, rt *Runtime, inputAny any) (any, error) {
-		return fn(ctx, rt, inputAny.(P))
+	typedErasedWF := WorkflowFunc(func(ctx Context, inputAny any) (any, error) {
+		return fn(ctx, inputAny.(P))
 	})
 
 	handle, err := runWorkflowInternal(rt, typedErasedWF, input, opts...)
@@ -425,7 +425,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	// Generate workflow ID
 	workflowID := params.WorkflowID
 	if workflowID == "" {
-		workflowID = uuid.New().String()
+		workflowID = core.GenerateDefaultRandomId()
 	}
 
 	var status WorkflowStatusType
@@ -465,7 +465,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		Deadline:           params.Deadline,
 	}
 
-	ownerXID := uuid.New().String()
+	ownerXID := core.GenerateDefaultRandomId()
 	insertInput := insertWorkflowStatusDBInput{
 		status:            wfStatus,
 		maxRetries:        params.MaxRetries,
@@ -492,15 +492,17 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	// Create workflow state
 	wfState := &workflowState{workflowID: workflowID}
 	wfState.stepID.Store(-1)
-	wfCtx := context.WithValue(rt.ctx, workflowStateKey, wfState)
+	baseCtx := context.WithValue(rt.ctx, workflowStateKey, wfState)
 
 	// Apply deadline if set
 	var cancelTimeout context.CancelFunc
 	if insertResult.timeout > 0 && insertResult.workflowDeadline.IsZero() {
-		wfCtx, cancelTimeout = context.WithTimeout(wfCtx, insertResult.timeout)
+		baseCtx, cancelTimeout = context.WithTimeout(baseCtx, insertResult.timeout)
 	} else if !insertResult.workflowDeadline.IsZero() {
-		wfCtx, cancelTimeout = context.WithDeadline(wfCtx, insertResult.workflowDeadline)
+		baseCtx, cancelTimeout = context.WithDeadline(baseCtx, insertResult.workflowDeadline)
 	}
+
+	wfCtx := &pfContext{Context: baseCtx, runtime: rt}
 
 	outcomeChan := make(chan workflowOutcome[any], 1)
 	rt.workflowsWg.Add(1)
@@ -512,11 +514,11 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		rt.activeWorkflowIDs.Store(workflowID, struct{}{})
 		defer rt.activeWorkflowIDs.Delete(workflowID)
 
-		result, fnErr := fn(wfCtx, rt, input)
+		result, fnErr := fn(wfCtx, input)
 
 		// Handle workflow ID conflict — another goroutine owns this workflow ID.
 		// Wait for the existing workflow to complete and return its result.
-		if errors.Is(fnErr, &DBOSError{Code: ConflictingIDError}) {
+		if errors.Is(fnErr, &PFError{Code: ConflictingIDError}) {
 			rt.logger.Warn("workflow ID conflict, waiting for existing workflow", "workflow_id", workflowID)
 			encoded, awaitErr := retryWithResult(rt.ctx, func() (*string, error) {
 				return rt.systemDB.awaitWorkflowResult(rt.ctx, workflowID, _DB_RETRY_INTERVAL)
@@ -633,7 +635,8 @@ func WithNextStepID(stepID int) StepOption {
 }
 
 // RunAsStep executes a function as a durable step within a workflow.
-func RunAsStep[R any](ctx context.Context, rt *Runtime, fn Step[R], opts ...StepOption) (R, error) {
+func RunAsStep[R any](ctx Context, fn Step[R], opts ...StepOption) (R, error) {
+	rt := runtimeFromContext(ctx)
 	stepName := runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
 	opts = append(opts, WithStepName(stepName))
 
@@ -774,7 +777,7 @@ func executeStepWithRetry(ctx context.Context, rt *Runtime, opts *stepOptions, r
 }
 
 // Go runs a step in a goroutine. Must be within a workflow.
-func Go[R any](ctx context.Context, rt *Runtime, fn Step[R], opts ...StepOption) (chan StepOutcome[R], error) {
+func Go[R any](ctx Context, fn Step[R], opts ...StepOption) (chan StepOutcome[R], error) {
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
 		return nil, fmt.Errorf("Go must be called within a workflow")
@@ -784,7 +787,7 @@ func Go[R any](ctx context.Context, rt *Runtime, fn Step[R], opts ...StepOption)
 	ch := make(chan StepOutcome[R], 1)
 	go func() {
 		defer close(ch)
-		res, err := RunAsStep(ctx, rt, fn, opts...)
+		res, err := RunAsStep(ctx, fn, opts...)
 		ch <- StepOutcome[R]{Result: res, Err: err}
 	}()
 	return ch, nil
@@ -795,7 +798,8 @@ func Go[R any](ctx context.Context, rt *Runtime, fn Step[R], opts ...StepOption)
 /*****************************************/
 
 // Send sends a message to another workflow.
-func Send(ctx context.Context, rt *Runtime, destinationID string, message any, topic string) error {
+func Send(ctx Context, destinationID string, message any, topic string) error {
+	rt := runtimeFromContext(ctx)
 	ser := newJSONSerializer[any]()
 	encoded, err := ser.Encode(message)
 	if err != nil {
@@ -808,13 +812,13 @@ func Send(ctx context.Context, rt *Runtime, destinationID string, message any, t
 		if wfState.isWithinStep {
 			return fmt.Errorf("cannot call Send within a step")
 		}
-		_, err = RunAsStep(ctx, rt, func(ctx context.Context) (any, error) {
+		_, err = RunAsStep(ctx, func(ctx context.Context) (any, error) {
 			return nil, rt.systemDB.send(ctx, WorkflowSendInput{
 				DestinationUUID: destinationID,
 				Topic:           topic,
 				Message:         encoded,
 			})
-		}, WithStepName("DBOS.send"))
+		}, WithStepName("pf.send"))
 		return err
 	}
 
@@ -828,7 +832,8 @@ func Send(ctx context.Context, rt *Runtime, destinationID string, message any, t
 }
 
 // Recv receives a message within a workflow.
-func Recv[R any](ctx context.Context, rt *Runtime, topic string, timeout time.Duration) (R, error) {
+func Recv[R any](ctx Context, topic string, timeout time.Duration) (R, error) {
+	rt := runtimeFromContext(ctx)
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
 		return *new(R), fmt.Errorf("Recv must be called within a workflow")
@@ -855,7 +860,8 @@ func Recv[R any](ctx context.Context, rt *Runtime, topic string, timeout time.Du
 }
 
 // SetEvent sets a key-value event for the current workflow.
-func SetEvent(ctx context.Context, rt *Runtime, key string, value any) error {
+func SetEvent(ctx Context, key string, value any) error {
+	rt := runtimeFromContext(ctx)
 	ser := newJSONSerializer[any]()
 	encoded, err := ser.Encode(value)
 	if err != nil {
@@ -867,18 +873,19 @@ func SetEvent(ctx context.Context, rt *Runtime, key string, value any) error {
 		return fmt.Errorf("SetEvent must be called within a workflow")
 	}
 
-	_, err = RunAsStep(ctx, rt, func(ctx context.Context) (any, error) {
+	_, err = RunAsStep(ctx, func(ctx context.Context) (any, error) {
 		return nil, rt.systemDB.setEvent(ctx, WorkflowSetEventInput{
 			WorkflowUUID: wfState.workflowID,
 			Key:          key,
 			Value:        encoded,
 		})
-	}, WithStepName("DBOS.setEvent"))
+	}, WithStepName("pf.setEvent"))
 	return err
 }
 
 // GetEvent gets a key-value event from a target workflow.
-func GetEvent[R any](ctx context.Context, rt *Runtime, targetWorkflowID string, key string, timeout time.Duration) (R, error) {
+func GetEvent[R any](ctx Context, targetWorkflowID string, key string, timeout time.Duration) (R, error) {
+	rt := runtimeFromContext(ctx)
 	encoded, err := retryWithResult(ctx, func() (*string, error) {
 		return rt.systemDB.getEvent(ctx, getEventInput{
 			targetWorkflowUUID: targetWorkflowID,
@@ -900,7 +907,7 @@ func GetEvent[R any](ctx context.Context, rt *Runtime, targetWorkflowID string, 
 // The wake-up time is recorded as a step so that on recovery,
 // if the wake-up time has already passed, Sleep returns immediately;
 // otherwise it sleeps only the remaining time.
-func Sleep(ctx context.Context, rt *Runtime, duration time.Duration) error {
+func Sleep(ctx Context, duration time.Duration) error {
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
 		return fmt.Errorf("Sleep must be called within a workflow")
@@ -912,7 +919,7 @@ func Sleep(ctx context.Context, rt *Runtime, duration time.Duration) error {
 	// The step records the wake-up time in millis. On first run, the step body
 	// executes the sleep. On replay, we get the stored wake-up time back and
 	// sleep only the remaining duration.
-	wakeUpMs, err := RunAsStep(ctx, rt, func(ctx context.Context) (int64, error) {
+	wakeUpMs, err := RunAsStep(ctx, func(ctx context.Context) (int64, error) {
 		wakeUpTime := time.Now().Add(duration)
 		remaining := time.Until(wakeUpTime)
 		if remaining > 0 {
@@ -923,7 +930,7 @@ func Sleep(ctx context.Context, rt *Runtime, duration time.Duration) error {
 			}
 		}
 		return wakeUpTime.UnixMilli(), nil
-	}, WithStepName("DBOS.sleep"))
+	}, WithStepName("pf.sleep"))
 	if err != nil {
 		return err
 	}
@@ -996,7 +1003,7 @@ func GetWorkflowSteps(rt *Runtime, workflowID string) ([]StepInfo, error) {
 	result := make([]StepInfo, len(steps))
 	for i, s := range steps {
 		result[i] = StepInfo{
-			WorkflowUUID: s.workflowUUID,
+			WorkflowID: s.workflowUUID,
 			FunctionID:   s.functionID,
 			FunctionName: s.functionName,
 		}
