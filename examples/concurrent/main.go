@@ -24,18 +24,18 @@ func FetchReviews(ctx context.Context) (string, error) {
 
 // ProductWorkflow fetches pricing, inventory, and reviews concurrently.
 // Each step is durable — on recovery, completed steps replay from the DB.
-func ProductWorkflow(ctx context.Context, rt *pocketflow.Runtime, productID string) (string, error) {
-	priceCh, err := pocketflow.Go(ctx, rt, FetchPricing, pocketflow.WithStepName("pricing"))
+func ProductWorkflow(ctx pocketflow.Context, productID string) (string, error) {
+	priceCh, err := pocketflow.Go(ctx, FetchPricing, pocketflow.WithStepName("pricing"))
 	if err != nil {
 		return "", err
 	}
 
-	inventoryCh, err := pocketflow.Go(ctx, rt, FetchInventory, pocketflow.WithStepName("inventory"))
+	inventoryCh, err := pocketflow.Go(ctx, FetchInventory, pocketflow.WithStepName("inventory"))
 	if err != nil {
 		return "", err
 	}
 
-	reviewsCh, err := pocketflow.Go(ctx, rt, FetchReviews, pocketflow.WithStepName("reviews"))
+	reviewsCh, err := pocketflow.Go(ctx, FetchReviews, pocketflow.WithStepName("reviews"))
 	if err != nil {
 		return "", err
 	}

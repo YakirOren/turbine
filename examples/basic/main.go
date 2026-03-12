@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log"
 
 	"github.com/YakirOren/pocketflow"
@@ -9,7 +8,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-func Greet(ctx context.Context, rt *pocketflow.Runtime, name string) (string, error) {
+func Greet(ctx pocketflow.Context, name string) (string, error) {
 	return "hello " + name, nil
 }
 

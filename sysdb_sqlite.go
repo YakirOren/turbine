@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -507,7 +506,7 @@ func (s *sqliteSysDB) resumeWorkflow(ctx context.Context, input resumeWorkflowDB
 func (s *sqliteSysDB) forkWorkflow(ctx context.Context, input forkWorkflowDBInput) (string, error) {
 	newID := input.newWorkflowID
 	if newID == "" {
-		newID = uuid.New().String()
+		newID = core.GenerateDefaultRandomId()
 	}
 	if input.startStepID < 0 {
 		return "", fmt.Errorf("startStepID must be >= 0, got %d", input.startStepID)
@@ -793,7 +792,7 @@ func (s *sqliteSysDB) recordChildGetResult(ctx context.Context, input recordChil
 /****************************************/
 
 func (s *sqliteSysDB) send(ctx context.Context, input WorkflowSendInput) error {
-	msgID := uuid.New().String()
+	msgID := core.GenerateDefaultRandomId()
 	_, err := s.app.DB().NewQuery(`INSERT INTO pf_notifications
 		(id, destination_id, topic, message, created_at_epoch_ms, consumed)
 		VALUES ({:id}, {:dest}, {:topic}, {:message}, {:created_at}, FALSE)`).Bind(dbx.Params{

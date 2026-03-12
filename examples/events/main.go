@@ -17,28 +17,28 @@ func ProcessRequest(ctx context.Context) (bool, error) {
 }
 
 // ApprovalWorkflow waits for an external approval signal via events.
-func ApprovalWorkflow(ctx context.Context, rt *pocketflow.Runtime, requestID string) (string, error) {
-	if err := pocketflow.SetEvent(ctx, rt, "status", "waiting_approval"); err != nil {
+func ApprovalWorkflow(ctx pocketflow.Context, requestID string) (string, error) {
+	if err := pocketflow.SetEvent(ctx, "status", "waiting_approval"); err != nil {
 		return "", err
 	}
 
 	// Wait up to 1 hour for approval
-	approved, err := pocketflow.Recv[bool](ctx, rt, "approval", 1*time.Hour)
+	approved, err := pocketflow.Recv[bool](ctx, "approval", 1*time.Hour)
 	if err != nil {
 		return "", err
 	}
 
 	if !approved {
-		pocketflow.SetEvent(ctx, rt, "status", "rejected")
+		pocketflow.SetEvent(ctx, "status", "rejected")
 		return fmt.Sprintf("request %s rejected", requestID), nil
 	}
 
-	_, err = pocketflow.RunAsStep(ctx, rt, ProcessRequest, pocketflow.WithStepName("process"))
+	_, err = pocketflow.RunAsStep(ctx, ProcessRequest, pocketflow.WithStepName("process"))
 	if err != nil {
 		return "", err
 	}
 
-	pocketflow.SetEvent(ctx, rt, "status", "completed")
+	pocketflow.SetEvent(ctx, "status", "completed")
 	return fmt.Sprintf("request %s approved and processed", requestID), nil
 }
 
@@ -68,7 +68,7 @@ func main() {
 		e.Router.GET("/request/{id}/status", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			status, err := pocketflow.GetEvent[string](context.Background(), rt, "approval-"+id, "status", 5*time.Second)
+			status, err := pocketflow.GetEvent[string](rt.NewContext(re.Request.Context()), "approval-"+id, "status", 5*time.Second)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
@@ -79,7 +79,7 @@ func main() {
 		e.Router.POST("/request/{id}/approve", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			if err := pocketflow.Send(context.Background(), rt, "approval-"+id, true, "approval"); err != nil {
+			if err := pocketflow.Send(rt.NewContext(re.Request.Context()), "approval-"+id, true, "approval"); err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
 

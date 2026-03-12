@@ -14,8 +14,8 @@ func DoCleanup(ctx context.Context) (int, error) {
 	return 42, nil
 }
 
-func Cleanup(ctx context.Context, rt *pocketflow.Runtime, scheduledAt time.Time) (string, error) {
-	_, err := pocketflow.RunAsStep(ctx, rt, DoCleanup, pocketflow.WithStepName("cleanup"))
+func Cleanup(ctx pocketflow.Context, scheduledAt time.Time) (string, error) {
+	_, err := pocketflow.RunAsStep(ctx, DoCleanup, pocketflow.WithStepName("cleanup"))
 	if err != nil {
 		return "", err
 	}

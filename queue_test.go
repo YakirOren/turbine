@@ -1,7 +1,6 @@
 package pocketflow
 
 import (
-	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,7 +12,7 @@ func TestQueueEnqueueAndDequeue(t *testing.T) {
 
 	var executed atomic.Bool
 
-	myWF := func(ctx context.Context, rt *Runtime, input string) (string, error) {
+	myWF := func(ctx Context, input string) (string, error) {
 		executed.Store(true)
 		return "queued:" + input, nil
 	}
@@ -59,7 +58,7 @@ func TestQueueWithCustomID(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
-	myWF := func(ctx context.Context, rt *Runtime, input int) (int, error) {
+	myWF := func(ctx Context, input int) (int, error) {
 		return input * 3, nil
 	}
 
@@ -108,7 +107,7 @@ func TestQueueEventDrivenWakeUp(t *testing.T) {
 
 	var executedAt atomic.Int64
 
-	myWF := func(ctx context.Context, rt *Runtime, input string) (string, error) {
+	myWF := func(ctx Context, input string) (string, error) {
 		executedAt.Store(time.Now().UnixMilli())
 		return "fast:" + input, nil
 	}
