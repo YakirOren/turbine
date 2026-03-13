@@ -45,7 +45,7 @@ func ApprovalWorkflow(ctx pocketflow.Context, requestID string) (string, error) 
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Register(app, pocketflow.Config{})
+	rt := pocketflow.Setup(app, pocketflow.Config{})
 
 	pocketflow.RegisterWorkflow(rt, ApprovalWorkflow)
 

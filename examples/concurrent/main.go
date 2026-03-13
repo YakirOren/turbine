@@ -54,7 +54,7 @@ func ProductWorkflow(ctx pocketflow.Context, productID string) (string, error) {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Register(app, pocketflow.Config{})
+	rt := pocketflow.Setup(app, pocketflow.Config{})
 
 	pocketflow.RegisterWorkflow(rt, ProductWorkflow)
 

@@ -25,7 +25,7 @@ func Cleanup(ctx pocketflow.Context, scheduledAt time.Time) (string, error) {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Register(app, pocketflow.Config{})
+	rt := pocketflow.Setup(app, pocketflow.Config{})
 
 	// Run cleanup every hour
 	pocketflow.RegisterWorkflow(rt, Cleanup, pocketflow.WithSchedule("0 * * * *"))

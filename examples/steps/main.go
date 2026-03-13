@@ -40,7 +40,7 @@ func OrderWorkflow(ctx pocketflow.Context, orderID string) (string, error) {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Register(app, pocketflow.Config{})
+	rt := pocketflow.Setup(app, pocketflow.Config{})
 
 	pocketflow.RegisterWorkflow(rt, OrderWorkflow)
 
