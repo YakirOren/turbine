@@ -163,7 +163,7 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 						continue
 					}
 					registered := registeredAny.(workflowRegistryEntry)
-					_, err := registered.wrappedFunction(rt, wf.input, WithWorkflowID(wf.workflowID), withIsDequeue())
+					_, err := registered.wrappedFunction(rt, wf.input, WithID(wf.workflowID), withIsDequeue())
 					if err != nil {
 						queueLogger.Error("error running queued workflow", "error", err)
 					}

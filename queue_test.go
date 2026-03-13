@@ -72,7 +72,7 @@ func TestQueueWithCustomID(t *testing.T) {
 
 	handle, err := RunWorkflow(rt, myWF, 7,
 		WithQueue("id-queue"),
-		WithWorkflowID("custom-queue-wf-1"),
+		WithID("custom-queue-wf-1"),
 	)
 	if err != nil {
 		t.Fatal(err)

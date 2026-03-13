@@ -51,7 +51,7 @@ func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]Handle[any], 
 		registered := registeredAny.(workflowRegistryEntry)
 
 		opts := []WorkflowOption{
-			WithWorkflowID(wf.ID),
+			WithID(wf.ID),
 			withIsRecovery(),
 		}
 		handle, err := registered.wrappedFunction(rt, wf.Input, opts...)

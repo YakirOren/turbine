@@ -63,7 +63,7 @@ type workflowOptions struct {
 // WorkflowOption configures workflow execution.
 type WorkflowOption func(*workflowOptions)
 
-func WithWorkflowID(id string) WorkflowOption {
+func WithID(id string) WorkflowOption {
 	return func(p *workflowOptions) { p.WorkflowID = id }
 }
 
@@ -238,7 +238,7 @@ func WithMaxRetries(maxRetries int) WorkflowRegistrationOption {
 	return func(p *workflowRegistrationOptions) { p.maxRetries = maxRetries }
 }
 
-func WithWorkflowName(name string) WorkflowRegistrationOption {
+func WithName(name string) WorkflowRegistrationOption {
 	return func(p *workflowRegistrationOptions) { p.name = name }
 }
 
@@ -331,7 +331,7 @@ func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...Work
 			scheduledTime := time.Now()
 			wfID := fmt.Sprintf("sched-%s-%s", customName, scheduledTime.UTC().Format(time.RFC3339))
 			_, err := wrapped(rt, scheduledTime,
-				WithWorkflowID(wfID),
+				WithID(wfID),
 				WithQueue(_PF_INTERNAL_QUEUE_NAME),
 			)
 			if err != nil {

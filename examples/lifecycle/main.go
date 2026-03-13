@@ -39,7 +39,7 @@ func main() {
 			id := re.Request.PathValue("id")
 
 			handle, err := pocketflow.RunWorkflow(rt, LongRunningJob, id,
-				pocketflow.WithWorkflowID("job-"+id),
+				pocketflow.WithID("job-"+id),
 			)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})

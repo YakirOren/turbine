@@ -290,7 +290,7 @@ func TestGarbageCollect(t *testing.T) {
 	defer rt.Shutdown(5 * time.Second)
 
 	// Run a workflow to completion
-	handle, err := RunWorkflow(rt, myWF, "gc-test", WithWorkflowID("gc-test-1"))
+	handle, err := RunWorkflow(rt, myWF, "gc-test", WithID("gc-test-1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestGarbageCollectPreservesPending(t *testing.T) {
 	}
 	defer rt.Shutdown(5 * time.Second)
 
-	handle, err := RunWorkflow(rt, myWF, "pending-test", WithWorkflowID("gc-pending-1"))
+	handle, err := RunWorkflow(rt, myWF, "pending-test", WithID("gc-pending-1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,7 @@ func TestRetrieveWorkflow(t *testing.T) {
 	}
 	defer rt.Shutdown(5 * time.Second)
 
-	handle, err := RunWorkflow(rt, myWF, "test", WithWorkflowID("retrieve-test-1"))
+	handle, err := RunWorkflow(rt, myWF, "test", WithID("retrieve-test-1"))
 	if err != nil {
 		t.Fatal(err)
 	}

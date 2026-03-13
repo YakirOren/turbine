@@ -54,7 +54,7 @@ func main() {
 			id := re.Request.PathValue("id")
 
 			handle, err := pocketflow.RunWorkflow(rt, ApprovalWorkflow, id,
-				pocketflow.WithWorkflowID("approval-"+id),
+				pocketflow.WithID("approval-"+id),
 			)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
