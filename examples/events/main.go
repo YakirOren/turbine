@@ -18,7 +18,7 @@ func ProcessRequest(ctx context.Context) (bool, error) {
 
 // ApprovalWorkflow waits for an external approval signal via events.
 func ApprovalWorkflow(ctx pocketflow.Context, requestID string) (string, error) {
-	if err := pocketflow.SetEvent(ctx, "status", "waiting_approval"); err != nil {
+	if err := pocketflow.SetValue(ctx, "status", "waiting_approval"); err != nil {
 		return "", err
 	}
 
@@ -29,16 +29,16 @@ func ApprovalWorkflow(ctx pocketflow.Context, requestID string) (string, error) 
 	}
 
 	if !approved {
-		pocketflow.SetEvent(ctx, "status", "rejected")
+		pocketflow.SetValue(ctx, "status", "rejected")
 		return fmt.Sprintf("request %s rejected", requestID), nil
 	}
 
-	_, err = pocketflow.RunAsStep(ctx, ProcessRequest, pocketflow.WithStepName("process"))
+	_, err = pocketflow.Do(ctx, ProcessRequest, pocketflow.WithStepName("process"))
 	if err != nil {
 		return "", err
 	}
 
-	pocketflow.SetEvent(ctx, "status", "completed")
+	pocketflow.SetValue(ctx, "status", "completed")
 	return fmt.Sprintf("request %s approved and processed", requestID), nil
 }
 
@@ -68,7 +68,7 @@ func main() {
 		e.Router.GET("/request/{id}/status", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			status, err := pocketflow.GetEvent[string](rt.NewContext(re.Request.Context()), "approval-"+id, "status", 5*time.Second)
+			status, err := pocketflow.GetValue[string](rt.NewContext(re.Request.Context()), "approval-"+id, "status", 5*time.Second)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}

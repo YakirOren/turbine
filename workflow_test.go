@@ -53,7 +53,7 @@ func TestRunWithStep(t *testing.T) {
 	defer cleanup()
 
 	myWF := func(ctx Context, input int) (int, error) {
-		doubled, err := RunAsStep(ctx, func(ctx context.Context) (int, error) {
+		doubled, err := Do(ctx, func(ctx context.Context) (int, error) {
 			return input * 2, nil
 		}, WithStepName("double"))
 		if err != nil {
@@ -146,14 +146,14 @@ func TestRunMultipleSteps(t *testing.T) {
 	defer cleanup()
 
 	myWF := func(ctx Context, input int) (int, error) {
-		a, err := RunAsStep(ctx, func(ctx context.Context) (int, error) {
+		a, err := Do(ctx, func(ctx context.Context) (int, error) {
 			return input + 1, nil
 		}, WithStepName("step1"))
 		if err != nil {
 			return 0, err
 		}
 
-		b, err := RunAsStep(ctx, func(ctx context.Context) (int, error) {
+		b, err := Do(ctx, func(ctx context.Context) (int, error) {
 			return a * 2, nil
 		}, WithStepName("step2"))
 		if err != nil {

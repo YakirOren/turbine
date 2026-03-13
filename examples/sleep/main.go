@@ -15,11 +15,11 @@ import (
 // If the process crashes during the sleep, it resumes with only the remaining time.
 func ReminderWorkflow(ctx pocketflow.Context, userID string) (string, error) {
 	// Wait 24 hours — survives crashes and restarts
-	if err := pocketflow.Sleep(ctx, 24*time.Hour); err != nil {
+	if err := pocketflow.Pause(ctx, 24*time.Hour); err != nil {
 		return "", err
 	}
 
-	_, err := pocketflow.RunAsStep(ctx, func(ctx context.Context) (bool, error) {
+	_, err := pocketflow.Do(ctx, func(ctx context.Context) (bool, error) {
 		fmt.Printf("sending reminder to %s\n", userID)
 		return true, nil
 	}, pocketflow.WithStepName("send-reminder"))

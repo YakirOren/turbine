@@ -12,11 +12,11 @@ import (
 
 // LongRunningJob sleeps for a long time — can be cancelled and resumed.
 func LongRunningJob(ctx pocketflow.Context, jobID string) (string, error) {
-	if err := pocketflow.Sleep(ctx, 1*time.Hour); err != nil {
+	if err := pocketflow.Pause(ctx, 1*time.Hour); err != nil {
 		return "", err
 	}
 
-	_, err := pocketflow.RunAsStep(ctx, func(ctx context.Context) (bool, error) {
+	_, err := pocketflow.Do(ctx, func(ctx context.Context) (bool, error) {
 		return true, nil
 	}, pocketflow.WithStepName("process"))
 	if err != nil {

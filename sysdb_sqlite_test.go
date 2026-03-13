@@ -280,7 +280,7 @@ func TestRecvTimeout(t *testing.T) {
 	}
 }
 
-func TestSetAndGetEvent(t *testing.T) {
+func TestSetAndGetValue(t *testing.T) {
 	sysDB, cleanup := setupSysDB(t)
 	defer cleanup()
 
@@ -322,7 +322,7 @@ func TestSetAndGetEvent(t *testing.T) {
 	}
 }
 
-func TestSetEventIdempotent(t *testing.T) {
+func TestSetValueIdempotent(t *testing.T) {
 	sysDB, cleanup := setupSysDB(t)
 	defer cleanup()
 
@@ -367,7 +367,7 @@ func TestSetEventIdempotent(t *testing.T) {
 	}
 }
 
-func TestGetEventTimeout(t *testing.T) {
+func TestGetValueTimeout(t *testing.T) {
 	sysDB, cleanup := setupSysDB(t)
 	defer cleanup()
 

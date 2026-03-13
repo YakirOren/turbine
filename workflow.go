@@ -634,8 +634,8 @@ func WithNextStepID(stepID int) StepOption {
 	return func(opts *stepOptions) { opts.preStepID = &stepID }
 }
 
-// RunAsStep executes a function as a durable step within a workflow.
-func RunAsStep[R any](ctx Context, fn Step[R], opts ...StepOption) (R, error) {
+// Do executes a function as a durable step within a workflow.
+func Do[R any](ctx Context, fn Step[R], opts ...StepOption) (R, error) {
 	rt := runtimeFromContext(ctx)
 	stepName := runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
 	opts = append(opts, WithStepName(stepName))
@@ -777,7 +777,7 @@ func executeStepWithRetry(ctx context.Context, rt *Runtime, opts *stepOptions, r
 }
 
 // Go runs a step in a goroutine. Must be within a workflow.
-func Go[R any](ctx Context, fn Step[R], opts ...StepOption) (chan AsyncResult[R], error) {
+func DoAsync[R any](ctx Context, fn Step[R], opts ...StepOption) (chan AsyncResult[R], error) {
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
 		return nil, fmt.Errorf("Go must be called within a workflow")
@@ -787,7 +787,7 @@ func Go[R any](ctx Context, fn Step[R], opts ...StepOption) (chan AsyncResult[R]
 	ch := make(chan AsyncResult[R], 1)
 	go func() {
 		defer close(ch)
-		res, err := RunAsStep(ctx, fn, opts...)
+		res, err := Do(ctx, fn, opts...)
 		ch <- AsyncResult[R]{Result: res, Err: err}
 	}()
 	return ch, nil
@@ -812,7 +812,7 @@ func Send(ctx Context, destinationID string, message any, topic string) error {
 		if wfState.isWithinStep {
 			return fmt.Errorf("cannot call Send within a step")
 		}
-		_, err = RunAsStep(ctx, func(ctx context.Context) (any, error) {
+		_, err = Do(ctx, func(ctx context.Context) (any, error) {
 			return nil, rt.systemDB.send(ctx, SendInput{
 				DestinationUUID: destinationID,
 				Topic:           topic,
@@ -859,8 +859,8 @@ func Recv[R any](ctx Context, topic string, timeout time.Duration) (R, error) {
 	return ser.Decode(encoded)
 }
 
-// SetEvent sets a key-value event for the current workflow.
-func SetEvent(ctx Context, key string, value any) error {
+// SetValue sets a key-value event for the current workflow.
+func SetValue(ctx Context, key string, value any) error {
 	rt := runtimeFromContext(ctx)
 	ser := newJSONSerializer[any]()
 	encoded, err := ser.Encode(value)
@@ -870,10 +870,10 @@ func SetEvent(ctx Context, key string, value any) error {
 
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
-		return fmt.Errorf("SetEvent must be called within a workflow")
+		return fmt.Errorf("SetValue must be called within a workflow")
 	}
 
-	_, err = RunAsStep(ctx, func(ctx context.Context) (any, error) {
+	_, err = Do(ctx, func(ctx context.Context) (any, error) {
 		return nil, rt.systemDB.setEvent(ctx, SetValueInput{
 			WorkflowUUID: wfState.workflowID,
 			Key:          key,
@@ -883,8 +883,8 @@ func SetEvent(ctx Context, key string, value any) error {
 	return err
 }
 
-// GetEvent gets a key-value event from a target workflow.
-func GetEvent[R any](ctx Context, targetWorkflowID string, key string, timeout time.Duration) (R, error) {
+// GetValue gets a key-value event from a target workflow.
+func GetValue[R any](ctx Context, targetWorkflowID string, key string, timeout time.Duration) (R, error) {
 	rt := runtimeFromContext(ctx)
 	encoded, err := retryWithResult(ctx, func() (*string, error) {
 		return rt.systemDB.getEvent(ctx, getEventInput{
@@ -905,9 +905,9 @@ func GetEvent[R any](ctx Context, targetWorkflowID string, key string, timeout t
 
 // Sleep performs a durable sleep within a workflow.
 // The wake-up time is recorded as a step so that on recovery,
-// if the wake-up time has already passed, Sleep returns immediately;
+// if the wake-up time has already passed, Pause returns immediately;
 // otherwise it sleeps only the remaining time.
-func Sleep(ctx Context, duration time.Duration) error {
+func Pause(ctx Context, duration time.Duration) error {
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
 		return fmt.Errorf("Sleep must be called within a workflow")
@@ -919,7 +919,7 @@ func Sleep(ctx Context, duration time.Duration) error {
 	// The step records the wake-up time in millis. On first run, the step body
 	// executes the sleep. On replay, we get the stored wake-up time back and
 	// sleep only the remaining duration.
-	wakeUpMs, err := RunAsStep(ctx, func(ctx context.Context) (int64, error) {
+	wakeUpMs, err := Do(ctx, func(ctx context.Context) (int64, error) {
 		wakeUpTime := time.Now().Add(duration)
 		remaining := time.Until(wakeUpTime)
 		if remaining > 0 {
@@ -953,14 +953,6 @@ func Sleep(ctx Context, duration time.Duration) error {
 /******* WORKFLOW MANAGEMENT ***********/
 /****************************************/
 
-// GetWorkflowID returns the current workflow ID from context.
-func GetWorkflowID(ctx context.Context) (string, error) {
-	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
-	if !ok || wfState == nil {
-		return "", fmt.Errorf("not within a workflow")
-	}
-	return wfState.workflowID, nil
-}
 
 // Retrieve returns a handle to an existing workflow.
 func Retrieve[R any](rt *Runtime, workflowID string) Handle[R] {

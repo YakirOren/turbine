@@ -16,7 +16,7 @@ func Send(ctx context.Context) (bool, error) {
 }
 
 func SendEmail(ctx pocketflow.Context, to string) (string, error) {
-	_, err := pocketflow.RunAsStep(ctx, Send, pocketflow.WithStepName("send"))
+	_, err := pocketflow.Do(ctx, Send, pocketflow.WithStepName("send"))
 	if err != nil {
 		return "", err
 	}
