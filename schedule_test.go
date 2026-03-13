@@ -19,7 +19,7 @@ func TestScheduledWorkflowRegistration(t *testing.T) {
 		return "scheduled-ok", nil
 	}
 
-	RegisterWorkflow(rt, myWF, WithSchedule("* * * * *"))
+	Register(rt, myWF, WithSchedule("* * * * *"))
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func TestScheduledWorkflowExecution(t *testing.T) {
 		return "done", nil
 	}
 
-	RegisterWorkflow(rt, myWF, WithSchedule("* * * * *"))
+	Register(rt, myWF, WithSchedule("* * * * *"))
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
@@ -98,5 +98,5 @@ func TestScheduledWorkflowPanicsOnWrongInputType(t *testing.T) {
 		}
 	}()
 
-	RegisterWorkflow(rt, myWF, WithSchedule("* * * * *"))
+	Register(rt, myWF, WithSchedule("* * * * *"))
 }

@@ -28,7 +28,7 @@ func main() {
 	rt := pocketflow.Setup(app, pocketflow.Config{})
 
 	// Run cleanup every hour
-	pocketflow.RegisterWorkflow(rt, Cleanup, pocketflow.WithSchedule("0 * * * *"))
+	pocketflow.Register(rt, Cleanup, pocketflow.WithSchedule("0 * * * *"))
 
 	if err := app.Start(); err != nil {
 		log.Fatal(err)

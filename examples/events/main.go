@@ -47,13 +47,13 @@ func main() {
 
 	rt := pocketflow.Setup(app, pocketflow.Config{})
 
-	pocketflow.RegisterWorkflow(rt, ApprovalWorkflow)
+	pocketflow.Register(rt, ApprovalWorkflow)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/request/{id}", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			handle, err := pocketflow.RunWorkflow(rt, ApprovalWorkflow, id,
+			handle, err := pocketflow.Run(rt, ApprovalWorkflow, id,
 				pocketflow.WithID("approval-"+id),
 			)
 			if err != nil {

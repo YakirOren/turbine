@@ -258,9 +258,9 @@ func resolveWorkflowFunctionName[P any, R any](fn Workflow[P, R]) string {
 	return fqn
 }
 
-// RegisterWorkflow registers a typed workflow function with the runtime.
+// Register registers a typed workflow function with the runtime.
 // Must be called before Launch().
-func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegistrationOption) {
+func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegistrationOption) {
 	if rt.launched.Load() {
 		panic("cannot register workflow after runtime has launched")
 	}
@@ -347,8 +347,8 @@ func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...Work
 /******* RUN WORKFLOW ********/
 /**********************************/
 
-// RunWorkflow starts a typed workflow. Returns a handle to get the result.
-func RunWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], input P, opts ...WorkflowOption) (Handle[R], error) {
+// Run starts a typed workflow. Returns a handle to get the result.
+func Run[P any, R any](rt *Runtime, fn Workflow[P, R], input P, opts ...WorkflowOption) (Handle[R], error) {
 	opts = append(opts, withWorkflowName(resolveWorkflowFunctionName(fn)))
 
 	typedErasedWF := WorkflowFunc(func(ctx Context, inputAny any) (any, error) {
@@ -962,8 +962,8 @@ func GetWorkflowID(ctx context.Context) (string, error) {
 	return wfState.workflowID, nil
 }
 
-// RetrieveWorkflow returns a handle to an existing workflow.
-func RetrieveWorkflow[R any](rt *Runtime, workflowID string) Handle[R] {
+// Retrieve returns a handle to an existing workflow.
+func Retrieve[R any](rt *Runtime, workflowID string) Handle[R] {
 	return &workflowPollingHandle[R]{baseHandle: baseHandle{workflowID: workflowID, runtime: rt}}
 }
 

@@ -19,7 +19,7 @@ func setupRuntime(t *testing.T) (*Runtime, func()) {
 	return rt, app.Cleanup
 }
 
-func TestRunWorkflowSimple(t *testing.T) {
+func TestRunSimple(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
@@ -27,16 +27,16 @@ func TestRunWorkflowSimple(t *testing.T) {
 		return "hello " + input, nil
 	}
 
-	RegisterWorkflow(rt, myWF)
+	Register(rt, myWF)
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
 	defer rt.Shutdown(5 * time.Second)
 
-	handle, err := RunWorkflow(rt, myWF, "world")
+	handle, err := Run(rt, myWF, "world")
 	if err != nil {
-		t.Fatalf("RunWorkflow failed: %v", err)
+		t.Fatalf("Run failed: %v", err)
 	}
 
 	result, err := handle.GetResult()
@@ -48,7 +48,7 @@ func TestRunWorkflowSimple(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowWithStep(t *testing.T) {
+func TestRunWithStep(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
@@ -62,14 +62,14 @@ func TestRunWorkflowWithStep(t *testing.T) {
 		return doubled, nil
 	}
 
-	RegisterWorkflow(rt, myWF)
+	Register(rt, myWF)
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
 	defer rt.Shutdown(5 * time.Second)
 
-	handle, err := RunWorkflow(rt, myWF, 21)
+	handle, err := Run(rt, myWF, 21)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestRunWorkflowWithStep(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowWithError(t *testing.T) {
+func TestRunWithError(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
@@ -91,14 +91,14 @@ func TestRunWorkflowWithError(t *testing.T) {
 		return "", fmt.Errorf("intentional error")
 	}
 
-	RegisterWorkflow(rt, myWF)
+	Register(rt, myWF)
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
 	defer rt.Shutdown(5 * time.Second)
 
-	handle, err := RunWorkflow(rt, myWF, "test")
+	handle, err := Run(rt, myWF, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestRunWorkflowWithError(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowGetStatus(t *testing.T) {
+func TestRunGetStatus(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
@@ -117,14 +117,14 @@ func TestRunWorkflowGetStatus(t *testing.T) {
 		return "done", nil
 	}
 
-	RegisterWorkflow(rt, myWF)
+	Register(rt, myWF)
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
 	defer rt.Shutdown(5 * time.Second)
 
-	handle, err := RunWorkflow(rt, myWF, "test")
+	handle, err := Run(rt, myWF, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestRunWorkflowGetStatus(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowMultipleSteps(t *testing.T) {
+func TestRunMultipleSteps(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
@@ -163,14 +163,14 @@ func TestRunWorkflowMultipleSteps(t *testing.T) {
 		return b, nil
 	}
 
-	RegisterWorkflow(rt, myWF)
+	Register(rt, myWF)
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
 	defer rt.Shutdown(5 * time.Second)
 
-	handle, err := RunWorkflow(rt, myWF, 10)
+	handle, err := Run(rt, myWF, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestRunWorkflowMultipleSteps(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowWithTimeout(t *testing.T) {
+func TestRunWithTimeout(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
@@ -206,14 +206,14 @@ func TestRunWorkflowWithTimeout(t *testing.T) {
 		}
 	}
 
-	RegisterWorkflow(rt, myWF)
+	Register(rt, myWF)
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
 	defer rt.Shutdown(5 * time.Second)
 
-	handle, err := RunWorkflow(rt, myWF, "test", WithTimeout(100*time.Millisecond))
+	handle, err := Run(rt, myWF, "test", WithTimeout(100*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestRunWorkflowWithTimeout(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowWithDeadline(t *testing.T) {
+func TestRunWithDeadline(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
@@ -246,7 +246,7 @@ func TestRunWorkflowWithDeadline(t *testing.T) {
 		}
 	}
 
-	RegisterWorkflow(rt, myWF)
+	Register(rt, myWF)
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
@@ -254,7 +254,7 @@ func TestRunWorkflowWithDeadline(t *testing.T) {
 	defer rt.Shutdown(5 * time.Second)
 
 	deadline := time.Now().Add(100 * time.Millisecond)
-	handle, err := RunWorkflow(rt, myWF, "test", WithDeadline(deadline))
+	handle, err := Run(rt, myWF, "test", WithDeadline(deadline))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestGarbageCollect(t *testing.T) {
 		return "done", nil
 	}
 
-	RegisterWorkflow(rt, myWF)
+	Register(rt, myWF)
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
@@ -290,7 +290,7 @@ func TestGarbageCollect(t *testing.T) {
 	defer rt.Shutdown(5 * time.Second)
 
 	// Run a workflow to completion
-	handle, err := RunWorkflow(rt, myWF, "gc-test", WithID("gc-test-1"))
+	handle, err := Run(rt, myWF, "gc-test", WithID("gc-test-1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,14 +330,14 @@ func TestGarbageCollectPreservesPending(t *testing.T) {
 		return "done", nil
 	}
 
-	RegisterWorkflow(rt, myWF)
+	Register(rt, myWF)
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
 	defer rt.Shutdown(5 * time.Second)
 
-	handle, err := RunWorkflow(rt, myWF, "pending-test", WithID("gc-pending-1"))
+	handle, err := Run(rt, myWF, "pending-test", WithID("gc-pending-1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestGarbageCollectPreservesPending(t *testing.T) {
 	close(blocker)
 }
 
-func TestRetrieveWorkflow(t *testing.T) {
+func TestRetrieve(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
@@ -369,21 +369,21 @@ func TestRetrieveWorkflow(t *testing.T) {
 		return "result:" + input, nil
 	}
 
-	RegisterWorkflow(rt, myWF)
+	Register(rt, myWF)
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
 	defer rt.Shutdown(5 * time.Second)
 
-	handle, err := RunWorkflow(rt, myWF, "test", WithID("retrieve-test-1"))
+	handle, err := Run(rt, myWF, "test", WithID("retrieve-test-1"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, _ = handle.GetResult() // Wait for completion
 
 	// Retrieve by ID
-	retrieved := RetrieveWorkflow[string](rt, "retrieve-test-1")
+	retrieved := Retrieve[string](rt, "retrieve-test-1")
 	result, err := retrieved.GetResult()
 	if err != nil {
 		t.Fatalf("retrieved GetResult failed: %v", err)

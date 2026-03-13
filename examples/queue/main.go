@@ -28,7 +28,7 @@ func main() {
 
 	rt := pocketflow.Setup(app, pocketflow.Config{})
 
-	pocketflow.RegisterWorkflow(rt, SendEmail)
+	pocketflow.Register(rt, SendEmail)
 
 	pocketflow.NewWorkflowQueue(rt, "emails",
 		pocketflow.WithWorkerConcurrency(3),
@@ -39,7 +39,7 @@ func main() {
 		e.Router.POST("/send-email/{to}", func(re *core.RequestEvent) error {
 			to := re.Request.PathValue("to")
 
-			handle, err := pocketflow.RunWorkflow(rt, SendEmail, to,
+			handle, err := pocketflow.Run(rt, SendEmail, to,
 				pocketflow.WithQueue("emails"),
 			)
 			if err != nil {

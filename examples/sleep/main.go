@@ -35,13 +35,13 @@ func main() {
 
 	rt := pocketflow.Setup(app, pocketflow.Config{})
 
-	pocketflow.RegisterWorkflow(rt, ReminderWorkflow)
+	pocketflow.Register(rt, ReminderWorkflow)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/remind/{userID}", func(re *core.RequestEvent) error {
 			userID := re.Request.PathValue("userID")
 
-			handle, err := pocketflow.RunWorkflow(rt, ReminderWorkflow, userID)
+			handle, err := pocketflow.Run(rt, ReminderWorkflow, userID)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}

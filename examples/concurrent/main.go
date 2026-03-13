@@ -56,13 +56,13 @@ func main() {
 
 	rt := pocketflow.Setup(app, pocketflow.Config{})
 
-	pocketflow.RegisterWorkflow(rt, ProductWorkflow)
+	pocketflow.Register(rt, ProductWorkflow)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.GET("/product/{id}", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			handle, err := pocketflow.RunWorkflow(rt, ProductWorkflow, id)
+			handle, err := pocketflow.Run(rt, ProductWorkflow, id)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}

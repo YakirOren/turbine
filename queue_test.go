@@ -17,7 +17,7 @@ func TestQueueEnqueueAndDequeue(t *testing.T) {
 		return "queued:" + input, nil
 	}
 
-	RegisterWorkflow(rt, myWF)
+	Register(rt, myWF)
 	NewWorkflowQueue(rt, "test-queue")
 
 	if err := rt.Launch(); err != nil {
@@ -25,9 +25,9 @@ func TestQueueEnqueueAndDequeue(t *testing.T) {
 	}
 	defer rt.Shutdown(5 * time.Second)
 
-	handle, err := RunWorkflow(rt, myWF, "hello", WithQueue("test-queue"))
+	handle, err := Run(rt, myWF, "hello", WithQueue("test-queue"))
 	if err != nil {
-		t.Fatalf("RunWorkflow with queue failed: %v", err)
+		t.Fatalf("Run with queue failed: %v", err)
 	}
 
 	// The workflow is enqueued — queue runner should pick it up
@@ -62,7 +62,7 @@ func TestQueueWithCustomID(t *testing.T) {
 		return input * 3, nil
 	}
 
-	RegisterWorkflow(rt, myWF)
+	Register(rt, myWF)
 	NewWorkflowQueue(rt, "id-queue")
 
 	if err := rt.Launch(); err != nil {
@@ -70,7 +70,7 @@ func TestQueueWithCustomID(t *testing.T) {
 	}
 	defer rt.Shutdown(5 * time.Second)
 
-	handle, err := RunWorkflow(rt, myWF, 7,
+	handle, err := Run(rt, myWF, 7,
 		WithQueue("id-queue"),
 		WithID("custom-queue-wf-1"),
 	)
@@ -112,7 +112,7 @@ func TestQueueEventDrivenWakeUp(t *testing.T) {
 		return "fast:" + input, nil
 	}
 
-	RegisterWorkflow(rt, myWF)
+	Register(rt, myWF)
 	NewWorkflowQueue(rt, "fast-queue")
 
 	if err := rt.Launch(); err != nil {
@@ -121,9 +121,9 @@ func TestQueueEventDrivenWakeUp(t *testing.T) {
 	defer rt.Shutdown(5 * time.Second)
 
 	enqueueTime := time.Now()
-	handle, err := RunWorkflow(rt, myWF, "test", WithQueue("fast-queue"))
+	handle, err := Run(rt, myWF, "test", WithQueue("fast-queue"))
 	if err != nil {
-		t.Fatalf("RunWorkflow failed: %v", err)
+		t.Fatalf("Run failed: %v", err)
 	}
 
 	result, err := handle.GetResult()

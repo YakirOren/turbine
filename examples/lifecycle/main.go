@@ -31,14 +31,14 @@ func main() {
 
 	rt := pocketflow.Setup(app, pocketflow.Config{})
 
-	pocketflow.RegisterWorkflow(rt, LongRunningJob)
+	pocketflow.Register(rt, LongRunningJob)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		// Start a job with a deterministic ID
 		e.Router.POST("/job/{id}", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			handle, err := pocketflow.RunWorkflow(rt, LongRunningJob, id,
+			handle, err := pocketflow.Run(rt, LongRunningJob, id,
 				pocketflow.WithID("job-"+id),
 			)
 			if err != nil {
@@ -55,7 +55,7 @@ func main() {
 			id := re.Request.PathValue("id")
 			wfID := "job-" + id
 
-			handle := pocketflow.RetrieveWorkflow[string](rt, wfID)
+			handle := pocketflow.Retrieve[string](rt, wfID)
 
 			status, err := handle.GetStatus()
 			if err != nil {
