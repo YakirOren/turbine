@@ -15,15 +15,15 @@ func Greet(ctx pocketflow.Context, name string) (string, error) {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Register(app, pocketflow.Config{})
+	rt := pocketflow.Setup(app, pocketflow.Config{})
 
-	pocketflow.RegisterWorkflow(rt, Greet)
+	pocketflow.Register(rt, Greet)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/greet/{name}", func(re *core.RequestEvent) error {
 			name := re.Request.PathValue("name")
 
-			handle, err := pocketflow.RunWorkflow(rt, Greet, name)
+			handle, err := pocketflow.Run(rt, Greet, name)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}

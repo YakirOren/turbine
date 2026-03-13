@@ -2,8 +2,6 @@
 
 Durable workflow engine for [PocketBase](https://pocketbase.io). Runs entirely on SQLite — no external dependencies.
 
-Inspired by [DBOS Transact](https://github.com/dbos-inc/dbos-transact-golang), rebuilt from scratch for PocketBase's plugin architecture.
-
 ## Features
 
 - **Durable workflows** — survive crashes, restart where they left off
@@ -11,9 +9,9 @@ Inspired by [DBOS Transact](https://github.com/dbos-inc/dbos-transact-golang), r
 - **Step retries** — automatic retries with exponential backoff
 - **Queues** — concurrency control, priority, rate limiting, partitioning
 - **Scheduled workflows** — cron expressions via PocketBase's built-in scheduler
-- **Send/Recv** — inter-workflow messaging
+- **Send/Receive** — inter-workflow messaging
 - **Events** — key-value signaling between workflows
-- **Durable sleep** — survives restarts
+- **Durable pause** — survives restarts
 - **Timeout/Deadline** — cancel workflows after a duration or at a specific time
 - **Garbage collection** — automatic cleanup of completed workflows
 
@@ -29,7 +27,6 @@ go get github.com/YakirOren/pocketflow
 package main
 
 import (
-	"context"
 	"log"
 
 	"github.com/YakirOren/pocketflow"
@@ -40,20 +37,20 @@ import (
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Register(app, pocketflow.Config{})
+	rt := pocketflow.Setup(app, pocketflow.Config{})
 
-	greet := func(ctx context.Context, rt *pocketflow.Runtime, name string) (string, error) {
+	greet := func(ctx pocketflow.Context, name string) (string, error) {
 		return "hello " + name, nil
 	}
 
-	pocketflow.RegisterWorkflow(rt, greet)
+	pocketflow.Register(rt, greet)
 
 	// Call workflows from PocketBase routes
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/greet/{name}", func(re *core.RequestEvent) error {
 			name := re.Request.PathValue("name")
 
-			handle, err := pocketflow.RunWorkflow(rt, greet, name)
+			handle, err := pocketflow.Run(rt, greet, name)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
@@ -76,12 +73,12 @@ func main() {
 
 ## Workflows
 
-A workflow is a function with the signature `func(ctx context.Context, rt *Runtime, input P) (R, error)`.
+A workflow is a function with the signature `func(ctx pocketflow.Context, input P) (R, error)`.
 
 ```go
-myWorkflow := func(ctx context.Context, rt *pocketflow.Runtime, input string) (string, error) {
+myWorkflow := func(ctx pocketflow.Context, input string) (string, error) {
     // This step's result is recorded — on recovery it replays from the DB
-    doubled, err := pocketflow.RunAsStep(ctx, rt, func(ctx context.Context) (string, error) {
+    doubled, err := pocketflow.Do(ctx, func(ctx context.Context) (string, error) {
         return input + input, nil
     }, pocketflow.WithStepName("double"))
     if err != nil {
@@ -90,13 +87,13 @@ myWorkflow := func(ctx context.Context, rt *pocketflow.Runtime, input string) (s
     return doubled, nil
 }
 
-pocketflow.RegisterWorkflow(rt, myWorkflow)
+pocketflow.Register(rt, myWorkflow)
 ```
 
 Run a workflow:
 
 ```go
-handle, err := pocketflow.RunWorkflow(rt, myWorkflow, "hello")
+handle, err := pocketflow.Run(rt, myWorkflow, "hello")
 if err != nil {
     log.Fatal(err)
 }
@@ -108,23 +105,23 @@ result, err := handle.GetResult()
 ### Registration Options
 
 ```go
-pocketflow.RegisterWorkflow(rt, myWorkflow,
-    pocketflow.WithWorkflowName("my-workflow"),    // custom name (default: function name)
-    pocketflow.WithMaxRetries(50),                 // max recovery attempts (default: 100)
+pocketflow.Register(rt, myWorkflow,
+    pocketflow.WithName("my-workflow"),       // custom name (default: function name)
+    pocketflow.WithMaxRetries(50),            // max recovery attempts (default: 100)
 )
 ```
 
 ### Workflow Options
 
 ```go
-pocketflow.RunWorkflow(rt, myWorkflow, input,
-    pocketflow.WithWorkflowID("custom-id"),             // deterministic ID
-    pocketflow.WithQueue("my-queue"),                    // enqueue instead of run immediately
-    pocketflow.WithDeduplicationID("dedup-key"),         // prevent duplicate enqueues
-    pocketflow.WithPriority(1),                          // lower = higher priority
-    pocketflow.WithQueuePartitionKey("tenant-1"),        // partition key for partitioned queues
-    pocketflow.WithTimeout(30*time.Second),              // cancel after 30s
-    pocketflow.WithDeadline(time.Now().Add(time.Hour)),  // cancel at specific time
+pocketflow.Run(rt, myWorkflow, input,
+    pocketflow.WithID("custom-id"),                      // deterministic ID
+    pocketflow.WithQueue("my-queue"),                     // enqueue instead of run immediately
+    pocketflow.WithDeduplicationID("dedup-key"),          // prevent duplicate enqueues
+    pocketflow.WithPriority(1),                           // lower = higher priority
+    pocketflow.WithQueuePartitionKey("tenant-1"),         // partition key for partitioned queues
+    pocketflow.WithTimeout(30*time.Second),               // cancel after 30s
+    pocketflow.WithDeadline(time.Now().Add(time.Hour)),   // cancel at specific time
 )
 ```
 
@@ -134,12 +131,12 @@ Set a timeout or absolute deadline on a workflow. The workflow's context is canc
 
 ```go
 // Timeout: relative duration from when the workflow starts executing
-handle, _ := pocketflow.RunWorkflow(rt, myWorkflow, input,
+handle, _ := pocketflow.Run(rt, myWorkflow, input,
     pocketflow.WithTimeout(5*time.Minute),
 )
 
 // Deadline: absolute point in time
-handle, _ := pocketflow.RunWorkflow(rt, myWorkflow, input,
+handle, _ := pocketflow.Run(rt, myWorkflow, input,
     pocketflow.WithDeadline(time.Date(2025, 12, 31, 23, 59, 59, 0, time.UTC)),
 )
 ```
@@ -151,7 +148,7 @@ If both are set, the deadline takes precedence.
 Steps are the unit of durable execution. Each step's result is recorded in SQLite. On recovery, recorded steps replay their saved result instead of re-executing.
 
 ```go
-result, err := pocketflow.RunAsStep(ctx, rt, func(ctx context.Context) (int, error) {
+result, err := pocketflow.Do(ctx, func(ctx context.Context) (int, error) {
     return callExternalAPI()  // only called once, even across crashes
 }, pocketflow.WithStepName("call-api"))
 ```
@@ -161,7 +158,7 @@ result, err := pocketflow.RunAsStep(ctx, rt, func(ctx context.Context) (int, err
 Steps support automatic retries with exponential backoff:
 
 ```go
-result, err := pocketflow.RunAsStep(ctx, rt, callUnreliableAPI,
+result, err := pocketflow.Do(ctx, callUnreliableAPI,
     pocketflow.WithStepName("fetch"),
     pocketflow.WithStepMaxRetries(5),                    // retry up to 5 times
     pocketflow.WithBackoffFactor(2.0),                   // exponential backoff multiplier
@@ -172,10 +169,10 @@ result, err := pocketflow.RunAsStep(ctx, rt, callUnreliableAPI,
 
 ### Concurrent Steps
 
-Run steps in parallel with `Go`:
+Run steps in parallel with `DoAsync`:
 
 ```go
-ch, _ := pocketflow.Go(ctx, rt, func(ctx context.Context) (int, error) {
+ch, _ := pocketflow.DoAsync(ctx, func(ctx context.Context) (int, error) {
     return expensiveComputation()
 }, pocketflow.WithStepName("compute"))
 
@@ -183,12 +180,12 @@ outcome := <-ch
 // outcome.Result, outcome.Err
 ```
 
-## Sleep
+## Pause
 
-Durable sleep that survives crashes and restarts. The wake-up time is recorded as a step — on recovery, if the time has passed, it returns immediately; otherwise it sleeps only the remaining duration.
+Durable pause that survives crashes and restarts. The wake-up time is recorded as a step — on recovery, if the time has passed, it returns immediately; otherwise it pauses only the remaining duration.
 
 ```go
-if err := pocketflow.Sleep(ctx, rt, 24*time.Hour); err != nil {
+if err := pocketflow.Pause(ctx, 24*time.Hour); err != nil {
     return "", err
 }
 ```
@@ -196,7 +193,7 @@ if err := pocketflow.Sleep(ctx, rt, 24*time.Hour); err != nil {
 ## Queues
 
 ```go
-q := pocketflow.NewWorkflowQueue(rt, "emails",
+q := rt.Queue("emails",
     pocketflow.WithWorkerConcurrency(5),
     pocketflow.WithGlobalConcurrency(10),
     pocketflow.WithRateLimiter(pocketflow.RateLimiter{Limit: 100, Period: time.Minute}),
@@ -205,13 +202,13 @@ q := pocketflow.NewWorkflowQueue(rt, "emails",
 )
 
 // Enqueue a workflow
-pocketflow.RunWorkflow(rt, sendEmail, recipient, pocketflow.WithQueue("emails"))
+pocketflow.Run(rt, sendEmail, recipient, pocketflow.WithQueue("emails"))
 ```
 
-In a multi-instance setup, use `ListenQueues` to control which queues each instance processes:
+In a multi-instance setup, use `Listen` to control which queues each instance processes:
 
 ```go
-pocketflow.ListenQueues(rt, q)
+rt.Listen(q)
 ```
 
 ## Scheduled Workflows
@@ -219,53 +216,53 @@ pocketflow.ListenQueues(rt, q)
 Uses PocketBase's built-in cron. Scheduled workflows must accept `time.Time` as input.
 
 ```go
-cleanup := func(ctx context.Context, rt *pocketflow.Runtime, scheduledAt time.Time) (string, error) {
+cleanup := func(ctx pocketflow.Context, scheduledAt time.Time) (string, error) {
     // runs every hour
     return "cleaned", nil
 }
 
-pocketflow.RegisterWorkflow(rt, cleanup, pocketflow.WithSchedule("0 * * * *"))
+pocketflow.Register(rt, cleanup, pocketflow.WithSchedule("0 * * * *"))
 ```
 
 ## Communication
 
-### Send / Recv
+### Send / Receive
 
 ```go
 // In workflow A: send a message
-pocketflow.Send(ctx, rt, targetWorkflowID, "payload", "my-topic")
+pocketflow.Send(ctx, targetWorkflowID, "payload", "my-topic")
 
 // In workflow B: receive (blocks until message arrives or timeout)
-msg, err := pocketflow.Recv[string](ctx, rt, "my-topic", 30*time.Second)
+msg, err := pocketflow.Receive[string](ctx, "my-topic", 30*time.Second)
 ```
 
 ### Events
 
 ```go
 // In workflow A: set a key-value event
-pocketflow.SetEvent(ctx, rt, "status", "ready")
+pocketflow.SetValue(ctx, "status", "ready")
 
 // Anywhere: get the event (blocks until set or timeout)
-val, err := pocketflow.GetEvent[string](ctx, rt, workflowID, "status", 10*time.Second)
+val, err := pocketflow.GetValue[string](ctx, workflowID, "status", 10*time.Second)
 ```
 
 ## Management
 
 ```go
 // Get the current workflow ID from within a workflow
-wfID, err := pocketflow.GetWorkflowID(ctx)
+wfID := ctx.WorkflowID()
 
 // Retrieve a handle to an existing workflow
-handle := pocketflow.RetrieveWorkflow[string](rt, "workflow-id")
+handle := pocketflow.Retrieve[string](rt, "workflow-id")
 result, err := handle.GetResult()
 status, err := handle.GetStatus()
 
 // Cancel / Resume
-pocketflow.CancelWorkflow(rt, "workflow-id")
-pocketflow.ResumeWorkflow(rt, "workflow-id")
+rt.Cancel("workflow-id")
+rt.Resume("workflow-id")
 
 // Inspect steps
-steps, err := pocketflow.GetWorkflowSteps(rt, "workflow-id")
+steps, err := rt.Steps("workflow-id")
 ```
 
 ## Garbage Collection
@@ -273,7 +270,7 @@ steps, err := pocketflow.GetWorkflowSteps(rt, "workflow-id")
 Completed workflows (SUCCESS/ERROR) are automatically cleaned up on a schedule. By default, workflows older than 72 hours are deleted daily at midnight.
 
 ```go
-rt := pocketflow.Register(app, pocketflow.Config{
+rt := pocketflow.Setup(app, pocketflow.Config{
     GCRetention: 24 * time.Hour,     // keep completed workflows for 24h (default: 72h)
     GCSchedule:  "0 */6 * * *",      // run GC every 6 hours (default: "0 0 * * *")
 })
@@ -297,11 +294,11 @@ pocketflow stores all workflow state in SQLite collections managed by PocketBase
 |---|---|
 | `pf_workflow_status` | Workflow metadata, status, queue assignment, and lifecycle tracking |
 | `pf_operation_outputs` | Step results — replayed on recovery instead of re-executing |
-| `pf_notifications` | Inter-workflow messages (Send/Recv) |
+| `pf_notifications` | Inter-workflow messages (Send/Receive) |
 | `pf_workflow_events` | Key-value events (current state) |
 | `pf_workflow_events_history` | Event history for step-level replay |
 
-The queue runner polls SQLite for enqueued workflows using atomic `UPDATE ... RETURNING` to prevent double-dispatch. An in-process event bus replaces PostgreSQL's `LISTEN/NOTIFY` for low-latency wake-ups.
+The queue runner polls SQLite for enqueued workflows using atomic `UPDATE ... RETURNING` to prevent double-dispatch. An in-process event bus provides low-latency wake-ups.
 
 ## Examples
 
@@ -309,9 +306,9 @@ See the [`examples/`](examples/) directory for complete working examples:
 
 - [`basic`](examples/basic/) — minimal workflow
 - [`steps`](examples/steps/) — multi-step order processing
-- [`concurrent`](examples/concurrent/) — parallel steps with `Go`
+- [`concurrent`](examples/concurrent/) — parallel steps with `DoAsync`
 - [`retry`](examples/retry/) — step retries with exponential backoff
-- [`sleep`](examples/sleep/) — durable sleep
+- [`sleep`](examples/sleep/) — durable pause
 - [`queue`](examples/queue/) — queue with concurrency and rate limiting
 - [`scheduled`](examples/scheduled/) — cron-scheduled workflows
 - [`events`](examples/events/) — key-value events

@@ -15,11 +15,11 @@ import (
 // If the process crashes during the sleep, it resumes with only the remaining time.
 func ReminderWorkflow(ctx pocketflow.Context, userID string) (string, error) {
 	// Wait 24 hours — survives crashes and restarts
-	if err := pocketflow.Sleep(ctx, 24*time.Hour); err != nil {
+	if err := pocketflow.Pause(ctx, 24*time.Hour); err != nil {
 		return "", err
 	}
 
-	_, err := pocketflow.RunAsStep(ctx, func(ctx context.Context) (bool, error) {
+	_, err := pocketflow.Do(ctx, func(ctx context.Context) (bool, error) {
 		fmt.Printf("sending reminder to %s\n", userID)
 		return true, nil
 	}, pocketflow.WithStepName("send-reminder"))
@@ -33,15 +33,15 @@ func ReminderWorkflow(ctx pocketflow.Context, userID string) (string, error) {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Register(app, pocketflow.Config{})
+	rt := pocketflow.Setup(app, pocketflow.Config{})
 
-	pocketflow.RegisterWorkflow(rt, ReminderWorkflow)
+	pocketflow.Register(rt, ReminderWorkflow)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/remind/{userID}", func(re *core.RequestEvent) error {
 			userID := re.Request.PathValue("userID")
 
-			handle, err := pocketflow.RunWorkflow(rt, ReminderWorkflow, userID)
+			handle, err := pocketflow.Run(rt, ReminderWorkflow, userID)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}

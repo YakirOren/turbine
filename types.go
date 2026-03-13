@@ -6,22 +6,22 @@ import (
 	"time"
 )
 
-// WorkflowStatusType represents the current execution state of a workflow.
-type WorkflowStatusType string
+// StatusType represents the current execution state of a workflow.
+type StatusType string
 
 const (
-	WorkflowStatusPending                     WorkflowStatusType = "PENDING"
-	WorkflowStatusEnqueued                    WorkflowStatusType = "ENQUEUED"
-	WorkflowStatusSuccess                     WorkflowStatusType = "SUCCESS"
-	WorkflowStatusError                       WorkflowStatusType = "ERROR"
-	WorkflowStatusCancelled                   WorkflowStatusType = "CANCELLED"
-	WorkflowStatusMaxRecoveryAttemptsExceeded WorkflowStatusType = "MAX_RECOVERY_ATTEMPTS_EXCEEDED"
+	StatusPending                     StatusType = "PENDING"
+	StatusEnqueued                    StatusType = "ENQUEUED"
+	StatusSuccess                     StatusType = "SUCCESS"
+	StatusError                       StatusType = "ERROR"
+	StatusCancelled                   StatusType = "CANCELLED"
+	StatusMaxRecoveryAttemptsExceeded StatusType = "MAX_RECOVERY_ATTEMPTS_EXCEEDED"
 )
 
-// WorkflowStatus contains information about a workflow's current state.
-type WorkflowStatus struct {
+// Status contains information about a workflow's current state.
+type Status struct {
 	ID                 string             `json:"workflow_id"`
-	Status             WorkflowStatusType `json:"status"`
+	Status             StatusType `json:"status"`
 	Name               string             `json:"name"`
 	Output             any                `json:"output,omitempty"`
 	Error              error              `json:"error,omitempty"`
@@ -43,10 +43,10 @@ type WorkflowStatus struct {
 	ParentWorkflowID   string             `json:"parent_workflow_id,omitempty"`
 }
 
-// WorkflowHandle provides methods to interact with a running or completed workflow.
-type WorkflowHandle[R any] interface {
+// Handle provides methods to interact with a running or completed workflow.
+type Handle[R any] interface {
 	GetResult(opts ...GetResultOption) (R, error)
-	GetStatus() (WorkflowStatus, error)
+	GetStatus() (Status, error)
 	GetWorkflowID() string
 }
 
@@ -83,7 +83,7 @@ func (ws *workflowState) nextStepID() int {
 
 type insertWorkflowResult struct {
 	attempts         int
-	status           WorkflowStatusType
+	status           StatusType
 	name             string
 	queueName        *string
 	timeout          time.Duration
@@ -91,8 +91,8 @@ type insertWorkflowResult struct {
 	ownerXID         string
 }
 
-type insertWorkflowStatusDBInput struct {
-	status            WorkflowStatus
+type insertStatusDBInput struct {
+	status            Status
 	maxRetries        int
 	ownerXID          *string
 	incrementAttempts bool
@@ -100,13 +100,13 @@ type insertWorkflowStatusDBInput struct {
 
 type updateWorkflowOutcomeDBInput struct {
 	workflowID string
-	status     WorkflowStatusType
+	status     StatusType
 	output     *string
 	errorMsg   *string
 }
 
 type listWorkflowsDBInput struct {
-	status             []WorkflowStatusType
+	status             []StatusType
 	workflowName       []string
 	executorIDs        []string
 	applicationVersion []string
@@ -183,8 +183,8 @@ type stepInfo struct {
 	endedAt      *int64
 }
 
-// WorkflowSendInput is the input for sending a notification to a workflow.
-type WorkflowSendInput struct {
+// SendInput is the input for sending a notification to a workflow.
+type SendInput struct {
 	DestinationUUID string
 	Topic           string
 	Message         *string
@@ -196,8 +196,8 @@ type recvInput struct {
 	timeout      time.Duration
 }
 
-// WorkflowSetEventInput is the input for setting a workflow event.
-type WorkflowSetEventInput struct {
+// SetValueInput is the input for setting a workflow event.
+type SetValueInput struct {
 	WorkflowUUID string
 	Key          string
 	Value        *string
@@ -244,8 +244,8 @@ type systemDatabase interface {
 	launch(ctx context.Context)
 	shutdown(ctx context.Context, timeout time.Duration)
 
-	insertWorkflowStatus(ctx context.Context, input insertWorkflowStatusDBInput) (*insertWorkflowResult, error)
-	listWorkflows(ctx context.Context, input listWorkflowsDBInput) ([]WorkflowStatus, error)
+	insertStatus(ctx context.Context, input insertStatusDBInput) (*insertWorkflowResult, error)
+	listWorkflows(ctx context.Context, input listWorkflowsDBInput) ([]Status, error)
 	updateWorkflowOutcome(ctx context.Context, input updateWorkflowOutcomeDBInput) error
 	awaitWorkflowResult(ctx context.Context, workflowID string, pollInterval time.Duration) (*string, error)
 	cancelWorkflow(ctx context.Context, input cancelWorkflowDBInput) error
@@ -260,9 +260,9 @@ type systemDatabase interface {
 	checkOperationExecution(ctx context.Context, input checkOperationExecutionDBInput) (*recordedResult, error)
 	getWorkflowSteps(ctx context.Context, input getWorkflowStepsInput) ([]stepInfo, error)
 
-	send(ctx context.Context, input WorkflowSendInput) error
+	send(ctx context.Context, input SendInput) error
 	recv(ctx context.Context, input recvInput) (*string, error)
-	setEvent(ctx context.Context, input WorkflowSetEventInput) error
+	setEvent(ctx context.Context, input SetValueInput) error
 	getEvent(ctx context.Context, input getEventInput) (*string, error)
 
 	dequeueWorkflows(ctx context.Context, input dequeueWorkflowsInput) ([]dequeuedWorkflow, error)

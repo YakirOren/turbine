@@ -37,7 +37,7 @@ type Runtime struct {
 	workflowsWg *sync.WaitGroup
 
 	// Workflow registry
-	workflowRegistry        *sync.Map // map[string]WorkflowRegistryEntry
+	workflowRegistry        *sync.Map // map[string]workflowRegistryEntry
 	workflowCustomNameToFQN *sync.Map // maps custom names → FQN
 
 	// Set of workflow IDs currently running (key = workflow ID, value = struct{}{})

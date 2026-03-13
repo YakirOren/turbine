@@ -24,12 +24,12 @@ func FulfillOrder(ctx context.Context) (bool, error) {
 // Each step's result is saved — if the process crashes mid-workflow,
 // it resumes from the last completed step without re-executing it.
 func OrderWorkflow(ctx pocketflow.Context, orderID string) (string, error) {
-	chargeID, err := pocketflow.RunAsStep(ctx, ChargePayment, pocketflow.WithStepName("charge"))
+	chargeID, err := pocketflow.Do(ctx, ChargePayment, pocketflow.WithStepName("charge"))
 	if err != nil {
 		return "", err
 	}
 
-	_, err = pocketflow.RunAsStep(ctx, FulfillOrder, pocketflow.WithStepName("fulfill"))
+	_, err = pocketflow.Do(ctx, FulfillOrder, pocketflow.WithStepName("fulfill"))
 	if err != nil {
 		return "", err
 	}
@@ -40,15 +40,15 @@ func OrderWorkflow(ctx pocketflow.Context, orderID string) (string, error) {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Register(app, pocketflow.Config{})
+	rt := pocketflow.Setup(app, pocketflow.Config{})
 
-	pocketflow.RegisterWorkflow(rt, OrderWorkflow)
+	pocketflow.Register(rt, OrderWorkflow)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/order/{id}", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			handle, err := pocketflow.RunWorkflow(rt, OrderWorkflow, id)
+			handle, err := pocketflow.Run(rt, OrderWorkflow, id)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}

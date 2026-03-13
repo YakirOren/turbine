@@ -15,7 +15,7 @@ func TestMigrationCreatesCollections(t *testing.T) {
 
 	// Verify each collection exists (created by the init() migration)
 	names := []string{
-		collectionWorkflowStatus,
+		collectionStatus,
 		collectionOperationOutputs,
 		collectionNotifications,
 		collectionWorkflowEvents,

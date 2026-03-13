@@ -25,17 +25,17 @@ func FetchReviews(ctx context.Context) (string, error) {
 // ProductWorkflow fetches pricing, inventory, and reviews concurrently.
 // Each step is durable — on recovery, completed steps replay from the DB.
 func ProductWorkflow(ctx pocketflow.Context, productID string) (string, error) {
-	priceCh, err := pocketflow.Go(ctx, FetchPricing, pocketflow.WithStepName("pricing"))
+	priceCh, err := pocketflow.DoAsync(ctx, FetchPricing, pocketflow.WithStepName("pricing"))
 	if err != nil {
 		return "", err
 	}
 
-	inventoryCh, err := pocketflow.Go(ctx, FetchInventory, pocketflow.WithStepName("inventory"))
+	inventoryCh, err := pocketflow.DoAsync(ctx, FetchInventory, pocketflow.WithStepName("inventory"))
 	if err != nil {
 		return "", err
 	}
 
-	reviewsCh, err := pocketflow.Go(ctx, FetchReviews, pocketflow.WithStepName("reviews"))
+	reviewsCh, err := pocketflow.DoAsync(ctx, FetchReviews, pocketflow.WithStepName("reviews"))
 	if err != nil {
 		return "", err
 	}
@@ -54,15 +54,15 @@ func ProductWorkflow(ctx pocketflow.Context, productID string) (string, error) {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Register(app, pocketflow.Config{})
+	rt := pocketflow.Setup(app, pocketflow.Config{})
 
-	pocketflow.RegisterWorkflow(rt, ProductWorkflow)
+	pocketflow.Register(rt, ProductWorkflow)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.GET("/product/{id}", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			handle, err := pocketflow.RunWorkflow(rt, ProductWorkflow, id)
+			handle, err := pocketflow.Run(rt, ProductWorkflow, id)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}

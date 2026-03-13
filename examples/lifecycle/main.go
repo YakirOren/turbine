@@ -12,11 +12,11 @@ import (
 
 // LongRunningJob sleeps for a long time — can be cancelled and resumed.
 func LongRunningJob(ctx pocketflow.Context, jobID string) (string, error) {
-	if err := pocketflow.Sleep(ctx, 1*time.Hour); err != nil {
+	if err := pocketflow.Pause(ctx, 1*time.Hour); err != nil {
 		return "", err
 	}
 
-	_, err := pocketflow.RunAsStep(ctx, func(ctx context.Context) (bool, error) {
+	_, err := pocketflow.Do(ctx, func(ctx context.Context) (bool, error) {
 		return true, nil
 	}, pocketflow.WithStepName("process"))
 	if err != nil {
@@ -29,17 +29,17 @@ func LongRunningJob(ctx pocketflow.Context, jobID string) (string, error) {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Register(app, pocketflow.Config{})
+	rt := pocketflow.Setup(app, pocketflow.Config{})
 
-	pocketflow.RegisterWorkflow(rt, LongRunningJob)
+	pocketflow.Register(rt, LongRunningJob)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		// Start a job with a deterministic ID
 		e.Router.POST("/job/{id}", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			handle, err := pocketflow.RunWorkflow(rt, LongRunningJob, id,
-				pocketflow.WithWorkflowID("job-"+id),
+			handle, err := pocketflow.Run(rt, LongRunningJob, id,
+				pocketflow.WithID("job-"+id),
 			)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
@@ -55,14 +55,14 @@ func main() {
 			id := re.Request.PathValue("id")
 			wfID := "job-" + id
 
-			handle := pocketflow.RetrieveWorkflow[string](rt, wfID)
+			handle := pocketflow.Retrieve[string](rt, wfID)
 
 			status, err := handle.GetStatus()
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
 
-			steps, err := pocketflow.GetWorkflowSteps(rt, wfID)
+			steps, err := rt.Steps(wfID)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
@@ -83,7 +83,7 @@ func main() {
 		e.Router.POST("/job/{id}/cancel", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			if err := pocketflow.CancelWorkflow(rt, "job-"+id); err != nil {
+			if err := rt.Cancel("job-"+id); err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
 
@@ -94,7 +94,7 @@ func main() {
 		e.Router.POST("/job/{id}/resume", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			if err := pocketflow.ResumeWorkflow(rt, "job-"+id); err != nil {
+			if err := rt.Resume("job-"+id); err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
 

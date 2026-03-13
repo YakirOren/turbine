@@ -16,7 +16,7 @@ func Send(ctx context.Context) (bool, error) {
 }
 
 func SendEmail(ctx pocketflow.Context, to string) (string, error) {
-	_, err := pocketflow.RunAsStep(ctx, Send, pocketflow.WithStepName("send"))
+	_, err := pocketflow.Do(ctx, Send, pocketflow.WithStepName("send"))
 	if err != nil {
 		return "", err
 	}
@@ -26,11 +26,11 @@ func SendEmail(ctx pocketflow.Context, to string) (string, error) {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Register(app, pocketflow.Config{})
+	rt := pocketflow.Setup(app, pocketflow.Config{})
 
-	pocketflow.RegisterWorkflow(rt, SendEmail)
+	pocketflow.Register(rt, SendEmail)
 
-	pocketflow.NewWorkflowQueue(rt, "emails",
+	rt.Queue("emails",
 		pocketflow.WithWorkerConcurrency(3),
 		pocketflow.WithRateLimiter(pocketflow.RateLimiter{Limit: 10, Period: time.Minute}),
 	)
@@ -39,7 +39,7 @@ func main() {
 		e.Router.POST("/send-email/{to}", func(re *core.RequestEvent) error {
 			to := re.Request.PathValue("to")
 
-			handle, err := pocketflow.RunWorkflow(rt, SendEmail, to,
+			handle, err := pocketflow.Run(rt, SendEmail, to,
 				pocketflow.WithQueue("emails"),
 			)
 			if err != nil {

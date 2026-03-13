@@ -22,10 +22,10 @@ func setupSysDB(t *testing.T) (*sqliteSysDB, func()) {
 	return sysDB, app.Cleanup
 }
 
-func makeWorkflowStatus(id string) WorkflowStatus {
-	return WorkflowStatus{
+func makeStatus(id string) Status {
+	return Status{
 		ID:         id,
-		Status:     WorkflowStatusPending,
+		Status:     StatusPending,
 		Name:       "testWorkflow",
 		ExecutorID: "local",
 		CreatedAt:  time.Now(),
@@ -33,19 +33,19 @@ func makeWorkflowStatus(id string) WorkflowStatus {
 	}
 }
 
-func TestInsertWorkflowStatus(t *testing.T) {
+func TestInsertStatus(t *testing.T) {
 	sysDB, cleanup := setupSysDB(t)
 	defer cleanup()
 
 	wfID := "wf-insert-test-1"
-	input := insertWorkflowStatusDBInput{
-		status: makeWorkflowStatus(wfID),
+	input := insertStatusDBInput{
+		status: makeStatus(wfID),
 	}
-	result, err := sysDB.insertWorkflowStatus(context.Background(), input)
+	result, err := sysDB.insertStatus(context.Background(), input)
 	if err != nil {
-		t.Fatalf("insertWorkflowStatus failed: %v", err)
+		t.Fatalf("insertStatus failed: %v", err)
 	}
-	if result.status != WorkflowStatusPending {
+	if result.status != StatusPending {
 		t.Fatalf("expected PENDING, got %s", result.status)
 	}
 	if result.name != "testWorkflow" {
@@ -56,46 +56,46 @@ func TestInsertWorkflowStatus(t *testing.T) {
 	}
 }
 
-func TestInsertWorkflowStatusIdempotent(t *testing.T) {
+func TestInsertStatusIdempotent(t *testing.T) {
 	sysDB, cleanup := setupSysDB(t)
 	defer cleanup()
 
 	wfID := "wf-idempotent-1"
-	input := insertWorkflowStatusDBInput{
-		status: makeWorkflowStatus(wfID),
+	input := insertStatusDBInput{
+		status: makeStatus(wfID),
 	}
 
-	_, err := sysDB.insertWorkflowStatus(context.Background(), input)
+	_, err := sysDB.insertStatus(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Insert again — should succeed (ON CONFLICT DO UPDATE)
-	result, err := sysDB.insertWorkflowStatus(context.Background(), input)
+	result, err := sysDB.insertStatus(context.Background(), input)
 	if err != nil {
 		t.Fatalf("second insert failed: %v", err)
 	}
-	if result.status != WorkflowStatusPending {
+	if result.status != StatusPending {
 		t.Fatalf("expected PENDING, got %s", result.status)
 	}
 }
 
-func TestInsertWorkflowStatusConflictingName(t *testing.T) {
+func TestInsertStatusConflictingName(t *testing.T) {
 	sysDB, cleanup := setupSysDB(t)
 	defer cleanup()
 
 	wfID := "wf-conflict-name-1"
-	input := insertWorkflowStatusDBInput{
-		status: makeWorkflowStatus(wfID),
+	input := insertStatusDBInput{
+		status: makeStatus(wfID),
 	}
-	_, err := sysDB.insertWorkflowStatus(context.Background(), input)
+	_, err := sysDB.insertStatus(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Insert with different name — should error
 	input.status.Name = "differentWorkflow"
-	_, err = sysDB.insertWorkflowStatus(context.Background(), input)
+	_, err = sysDB.insertStatus(context.Background(), input)
 	if err == nil {
 		t.Fatal("expected conflicting workflow error, got nil")
 	}
@@ -106,10 +106,10 @@ func TestRecordAndCheckOperationResult(t *testing.T) {
 	defer cleanup()
 
 	wfID := "wf-op-test-1"
-	input := insertWorkflowStatusDBInput{
-		status: makeWorkflowStatus(wfID),
+	input := insertStatusDBInput{
+		status: makeStatus(wfID),
 	}
-	_, err := sysDB.insertWorkflowStatus(context.Background(), input)
+	_, err := sysDB.insertStatus(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,10 +152,10 @@ func TestCheckOperationExecutionNotFound(t *testing.T) {
 
 	// Create a workflow first so the status check passes
 	wfID := "wf-check-notfound-1"
-	input := insertWorkflowStatusDBInput{
-		status: makeWorkflowStatus(wfID),
+	input := insertStatusDBInput{
+		status: makeStatus(wfID),
 	}
-	_, err := sysDB.insertWorkflowStatus(context.Background(), input)
+	_, err := sysDB.insertStatus(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,10 +179,10 @@ func TestUpdateWorkflowOutcome(t *testing.T) {
 	defer cleanup()
 
 	wfID := "wf-outcome-1"
-	input := insertWorkflowStatusDBInput{
-		status: makeWorkflowStatus(wfID),
+	input := insertStatusDBInput{
+		status: makeStatus(wfID),
 	}
-	_, err := sysDB.insertWorkflowStatus(context.Background(), input)
+	_, err := sysDB.insertStatus(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestUpdateWorkflowOutcome(t *testing.T) {
 	outputStr := `{"result": 42}`
 	err = sysDB.updateWorkflowOutcome(context.Background(), updateWorkflowOutcomeDBInput{
 		workflowID: wfID,
-		status:     WorkflowStatusSuccess,
+		status:     StatusSuccess,
 		output:     &outputStr,
 	})
 	if err != nil {
@@ -203,10 +203,10 @@ func TestCancelWorkflow(t *testing.T) {
 	defer cleanup()
 
 	wfID := "wf-cancel-1"
-	input := insertWorkflowStatusDBInput{
-		status: makeWorkflowStatus(wfID),
+	input := insertStatusDBInput{
+		status: makeStatus(wfID),
 	}
-	_, err := sysDB.insertWorkflowStatus(context.Background(), input)
+	_, err := sysDB.insertStatus(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,17 +223,17 @@ func TestSendAndRecv(t *testing.T) {
 
 	destWfID := "wf-recv-1"
 	// Create destination workflow
-	input := insertWorkflowStatusDBInput{
-		status: makeWorkflowStatus(destWfID),
+	input := insertStatusDBInput{
+		status: makeStatus(destWfID),
 	}
-	_, err := sysDB.insertWorkflowStatus(context.Background(), input)
+	_, err := sysDB.insertStatus(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Send a message
 	msg := `"hello"`
-	sendInput := WorkflowSendInput{
+	sendInput := SendInput{
 		DestinationUUID: destWfID,
 		Topic:           "greet",
 		Message:         &msg,
@@ -280,22 +280,22 @@ func TestRecvTimeout(t *testing.T) {
 	}
 }
 
-func TestSetAndGetEvent(t *testing.T) {
+func TestSetAndGetValue(t *testing.T) {
 	sysDB, cleanup := setupSysDB(t)
 	defer cleanup()
 
 	wfID := "wf-event-1"
-	input := insertWorkflowStatusDBInput{
-		status: makeWorkflowStatus(wfID),
+	input := insertStatusDBInput{
+		status: makeStatus(wfID),
 	}
-	_, err := sysDB.insertWorkflowStatus(context.Background(), input)
+	_, err := sysDB.insertStatus(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Set event
 	val := `"event_value"`
-	setIn := WorkflowSetEventInput{
+	setIn := SetValueInput{
 		WorkflowUUID: wfID,
 		Key:          "myKey",
 		Value:        &val,
@@ -322,21 +322,21 @@ func TestSetAndGetEvent(t *testing.T) {
 	}
 }
 
-func TestSetEventIdempotent(t *testing.T) {
+func TestSetValueIdempotent(t *testing.T) {
 	sysDB, cleanup := setupSysDB(t)
 	defer cleanup()
 
 	wfID := "wf-event-idem-1"
-	input := insertWorkflowStatusDBInput{
-		status: makeWorkflowStatus(wfID),
+	input := insertStatusDBInput{
+		status: makeStatus(wfID),
 	}
-	_, err := sysDB.insertWorkflowStatus(context.Background(), input)
+	_, err := sysDB.insertStatus(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	val := `"first"`
-	setIn := WorkflowSetEventInput{
+	setIn := SetValueInput{
 		WorkflowUUID: wfID,
 		Key:          "k1",
 		Value:        &val,
@@ -367,7 +367,7 @@ func TestSetEventIdempotent(t *testing.T) {
 	}
 }
 
-func TestGetEventTimeout(t *testing.T) {
+func TestGetValueTimeout(t *testing.T) {
 	sysDB, cleanup := setupSysDB(t)
 	defer cleanup()
 
@@ -392,10 +392,10 @@ func TestGetWorkflowSteps(t *testing.T) {
 	defer cleanup()
 
 	wfID := "wf-steps-1"
-	input := insertWorkflowStatusDBInput{
-		status: makeWorkflowStatus(wfID),
+	input := insertStatusDBInput{
+		status: makeStatus(wfID),
 	}
-	_, err := sysDB.insertWorkflowStatus(context.Background(), input)
+	_, err := sysDB.insertStatus(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,10 +435,10 @@ func TestGarbageCollectWorkflows(t *testing.T) {
 
 	// Insert a completed workflow
 	wfID := "wf-gc-1"
-	input := insertWorkflowStatusDBInput{
-		status: makeWorkflowStatus(wfID),
+	input := insertStatusDBInput{
+		status: makeStatus(wfID),
 	}
-	_, err := sysDB.insertWorkflowStatus(context.Background(), input)
+	_, err := sysDB.insertStatus(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +446,7 @@ func TestGarbageCollectWorkflows(t *testing.T) {
 	out := `"done"`
 	err = sysDB.updateWorkflowOutcome(context.Background(), updateWorkflowOutcomeDBInput{
 		workflowID: wfID,
-		status:     WorkflowStatusSuccess,
+		status:     StatusSuccess,
 		output:     &out,
 	})
 	if err != nil {

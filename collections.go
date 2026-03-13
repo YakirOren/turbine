@@ -5,7 +5,7 @@ import (
 )
 
 const (
-	collectionWorkflowStatus     = "pf_workflow_status"
+	collectionStatus     = "pf_workflow_status"
 	collectionOperationOutputs   = "pf_operation_outputs"
 	collectionNotifications      = "pf_notifications"
 	collectionWorkflowEvents     = "pf_workflow_events"
@@ -18,7 +18,7 @@ func init() {
 
 func upCreateCollections(app core.App) error {
 	// 1. Workflow status
-	wfStatus := core.NewBaseCollection(collectionWorkflowStatus)
+	wfStatus := core.NewBaseCollection(collectionStatus)
 	wfStatus.Fields.Add(
 		&core.TextField{Name: "status", Required: true},
 		&core.TextField{Name: "name", Required: true},
@@ -120,7 +120,7 @@ func downCreateCollections(app core.App) error {
 		collectionWorkflowEvents,
 		collectionNotifications,
 		collectionOperationOutputs,
-		collectionWorkflowStatus,
+		collectionStatus,
 	}
 	for _, name := range names {
 		col, err := app.FindCollectionByNameOrId(name)

@@ -6,9 +6,9 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-// Register hooks pocketflow into PocketBase's lifecycle as a plugin.
+// Setup hooks pocketflow into PocketBase's lifecycle as a plugin.
 // Returns the Runtime so you can register workflows before app.Start().
-func Register(app core.App, config Config) *Runtime {
+func Setup(app core.App, config Config) *Runtime {
 	rt := New(app, config)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {

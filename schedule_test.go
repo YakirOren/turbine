@@ -19,7 +19,7 @@ func TestScheduledWorkflowRegistration(t *testing.T) {
 		return "scheduled-ok", nil
 	}
 
-	RegisterWorkflow(rt, myWF, WithSchedule("* * * * *"))
+	Register(rt, myWF, WithSchedule("* * * * *"))
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
@@ -31,7 +31,7 @@ func TestScheduledWorkflowRegistration(t *testing.T) {
 	if !ok {
 		t.Fatal("workflow not found in registry")
 	}
-	regEntry := entry.(WorkflowRegistryEntry)
+	regEntry := entry.(workflowRegistryEntry)
 	if regEntry.CronSchedule != "* * * * *" {
 		t.Fatalf("expected cron schedule '* * * * *', got %q", regEntry.CronSchedule)
 	}
@@ -48,7 +48,7 @@ func TestScheduledWorkflowExecution(t *testing.T) {
 		return "done", nil
 	}
 
-	RegisterWorkflow(rt, myWF, WithSchedule("* * * * *"))
+	Register(rt, myWF, WithSchedule("* * * * *"))
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
@@ -59,11 +59,11 @@ func TestScheduledWorkflowExecution(t *testing.T) {
 	now := time.Now()
 	fqn := resolveWorkflowFunctionName(myWF)
 	registeredAny, _ := rt.workflowRegistry.Load(fqn)
-	registered := registeredAny.(WorkflowRegistryEntry)
+	registered := registeredAny.(workflowRegistryEntry)
 
 	wfID := "sched-test-" + now.UTC().Format(time.RFC3339)
 	_, err := registered.wrappedFunction(rt, now,
-		WithWorkflowID(wfID),
+		WithID(wfID),
 		WithQueue(_PF_INTERNAL_QUEUE_NAME),
 	)
 	if err != nil {
@@ -98,5 +98,5 @@ func TestScheduledWorkflowPanicsOnWrongInputType(t *testing.T) {
 		}
 	}()
 
-	RegisterWorkflow(rt, myWF, WithSchedule("* * * * *"))
+	Register(rt, myWF, WithSchedule("* * * * *"))
 }

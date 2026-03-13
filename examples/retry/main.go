@@ -21,7 +21,7 @@ func CallUnreliableAPI(ctx context.Context) (string, error) {
 
 // FetchWorkflow calls an unreliable API with automatic retries and exponential backoff.
 func FetchWorkflow(ctx pocketflow.Context, url string) (string, error) {
-	result, err := pocketflow.RunAsStep(ctx, CallUnreliableAPI,
+	result, err := pocketflow.Do(ctx, CallUnreliableAPI,
 		pocketflow.WithStepName("fetch"),
 		pocketflow.WithStepMaxRetries(5),
 		pocketflow.WithBackoffFactor(2.0),
@@ -38,15 +38,15 @@ func FetchWorkflow(ctx pocketflow.Context, url string) (string, error) {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Register(app, pocketflow.Config{})
+	rt := pocketflow.Setup(app, pocketflow.Config{})
 
-	pocketflow.RegisterWorkflow(rt, FetchWorkflow)
+	pocketflow.Register(rt, FetchWorkflow)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/fetch/{url}", func(re *core.RequestEvent) error {
 			url := re.Request.PathValue("url")
 
-			handle, err := pocketflow.RunWorkflow(rt, FetchWorkflow, url)
+			handle, err := pocketflow.Run(rt, FetchWorkflow, url)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}

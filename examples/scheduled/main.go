@@ -15,7 +15,7 @@ func DoCleanup(ctx context.Context) (int, error) {
 }
 
 func Cleanup(ctx pocketflow.Context, scheduledAt time.Time) (string, error) {
-	_, err := pocketflow.RunAsStep(ctx, DoCleanup, pocketflow.WithStepName("cleanup"))
+	_, err := pocketflow.Do(ctx, DoCleanup, pocketflow.WithStepName("cleanup"))
 	if err != nil {
 		return "", err
 	}
@@ -25,10 +25,10 @@ func Cleanup(ctx pocketflow.Context, scheduledAt time.Time) (string, error) {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Register(app, pocketflow.Config{})
+	rt := pocketflow.Setup(app, pocketflow.Config{})
 
 	// Run cleanup every hour
-	pocketflow.RegisterWorkflow(rt, Cleanup, pocketflow.WithSchedule("0 * * * *"))
+	pocketflow.Register(rt, Cleanup, pocketflow.WithSchedule("0 * * * *"))
 
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
