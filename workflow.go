@@ -967,15 +967,15 @@ func Retrieve[R any](rt *Runtime, workflowID string) Handle[R] {
 	return &workflowPollingHandle[R]{baseHandle: baseHandle{workflowID: workflowID, runtime: rt}}
 }
 
-// CancelWorkflow cancels a workflow by ID.
-func CancelWorkflow(rt *Runtime, workflowID string) error {
+// Cancel cancels a workflow by ID.
+func (rt *Runtime) Cancel(workflowID string) error {
 	return retry(rt.ctx, func() error {
 		return rt.systemDB.cancelWorkflow(rt.ctx, cancelWorkflowDBInput{workflowID: workflowID})
 	}, withRetrierLogger(rt.logger))
 }
 
-// ResumeWorkflow resumes a cancelled workflow.
-func ResumeWorkflow(rt *Runtime, workflowID string) error {
+// Resume resumes a cancelled workflow.
+func (rt *Runtime) Resume(workflowID string) error {
 	return retry(rt.ctx, func() error {
 		return rt.systemDB.resumeWorkflow(rt.ctx, resumeWorkflowDBInput{
 			workflowID: workflowID,
@@ -985,15 +985,15 @@ func ResumeWorkflow(rt *Runtime, workflowID string) error {
 	}, withRetrierLogger(rt.logger))
 }
 
-// ListWorkflows returns workflows matching the given filters.
-func ListWorkflows(rt *Runtime, input listWorkflowsDBInput) ([]Status, error) {
+// List returns workflows matching the given filters.
+func (rt *Runtime) List(input listWorkflowsDBInput) ([]Status, error) {
 	return retryWithResult(rt.ctx, func() ([]Status, error) {
 		return rt.systemDB.listWorkflows(rt.ctx, input)
 	}, withRetrierLogger(rt.logger))
 }
 
-// GetWorkflowSteps returns the execution steps for a workflow.
-func GetWorkflowSteps(rt *Runtime, workflowID string) ([]StepInfo, error) {
+// Steps returns the execution steps for a workflow.
+func (rt *Runtime) Steps(workflowID string) ([]StepInfo, error) {
 	steps, err := retryWithResult(rt.ctx, func() ([]stepInfo, error) {
 		return rt.systemDB.getWorkflowSteps(rt.ctx, getWorkflowStepsInput{workflowID: workflowID})
 	}, withRetrierLogger(rt.logger))

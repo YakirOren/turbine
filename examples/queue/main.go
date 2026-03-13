@@ -30,7 +30,7 @@ func main() {
 
 	pocketflow.Register(rt, SendEmail)
 
-	pocketflow.NewWorkflowQueue(rt, "emails",
+	rt.Queue("emails",
 		pocketflow.WithWorkerConcurrency(3),
 		pocketflow.WithRateLimiter(pocketflow.RateLimiter{Limit: 10, Period: time.Minute}),
 	)

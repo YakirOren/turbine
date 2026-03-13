@@ -184,8 +184,8 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 	}
 }
 
-// NewWorkflowQueue registers a named queue with the runtime. Must be called before Launch().
-func NewWorkflowQueue(rt *Runtime, name string, options ...QueueOption) WorkflowQueue {
+// Queue registers a named queue with the runtime. Must be called before Launch().
+func (rt *Runtime) Queue(name string, options ...QueueOption) WorkflowQueue {
 	if rt.launched.Load() {
 		panic("cannot register queue after runtime has launched")
 	}
@@ -208,10 +208,10 @@ func newWorkflowQueue(rt *Runtime, name string, options ...QueueOption) Workflow
 	return q
 }
 
-// ListenQueues configures which queues the runtime should poll. Must be called before Launch().
-func ListenQueues(rt *Runtime, queues ...WorkflowQueue) {
+// Listen configures which queues the runtime should poll. Must be called before Launch().
+func (rt *Runtime) Listen(queues ...WorkflowQueue) {
 	if rt.launched.Load() {
-		panic("cannot call ListenQueues after runtime has launched")
+		panic("cannot call Listen after runtime has launched")
 	}
 	for _, queue := range queues {
 		if rq, exists := rt.queueRunner.workflowQueueRegistry[queue.Name]; exists {

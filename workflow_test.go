@@ -184,7 +184,7 @@ func TestRunMultipleSteps(t *testing.T) {
 	}
 
 	// Verify steps were recorded
-	steps, err := GetWorkflowSteps(rt, handle.GetWorkflowID())
+	steps, err := rt.Steps(handle.GetWorkflowID())
 	if err != nil {
 		t.Fatal(err)
 	}

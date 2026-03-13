@@ -18,7 +18,7 @@ func TestQueueEnqueueAndDequeue(t *testing.T) {
 	}
 
 	Register(rt, myWF)
-	NewWorkflowQueue(rt, "test-queue")
+	rt.Queue("test-queue")
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestQueueWithCustomID(t *testing.T) {
 	}
 
 	Register(rt, myWF)
-	NewWorkflowQueue(rt, "id-queue")
+	rt.Queue("id-queue")
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
@@ -113,7 +113,7 @@ func TestQueueEventDrivenWakeUp(t *testing.T) {
 	}
 
 	Register(rt, myWF)
-	NewWorkflowQueue(rt, "fast-queue")
+	rt.Queue("fast-queue")
 
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
