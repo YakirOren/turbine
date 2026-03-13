@@ -86,7 +86,7 @@ func TestQueueWithCustomID(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		status, err := handle.GetStatus()
-		if err == nil && status.Status == WorkflowStatusSuccess {
+		if err == nil && status.Status == StatusSuccess {
 			break
 		}
 		time.Sleep(200 * time.Millisecond)

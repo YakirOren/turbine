@@ -162,7 +162,7 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 						queueLogger.Error("workflow not in registry", "workflow_name", wf.name)
 						continue
 					}
-					registered := registeredAny.(WorkflowRegistryEntry)
+					registered := registeredAny.(workflowRegistryEntry)
 					_, err := registered.wrappedFunction(rt, wf.input, WithWorkflowID(wf.workflowID), withIsDequeue())
 					if err != nil {
 						queueLogger.Error("error running queued workflow", "error", err)

@@ -136,7 +136,7 @@ func TestRunWorkflowGetStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetStatus failed: %v", err)
 	}
-	if status.Status != WorkflowStatusSuccess {
+	if status.Status != StatusSuccess {
 		t.Fatalf("expected SUCCESS, got %s", status.Status)
 	}
 }
@@ -301,7 +301,7 @@ func TestGarbageCollect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetStatus failed: %v", err)
 	}
-	if status.Status != WorkflowStatusSuccess {
+	if status.Status != StatusSuccess {
 		t.Fatalf("expected SUCCESS, got %s", status.Status)
 	}
 
@@ -354,7 +354,7 @@ func TestGarbageCollectPreservesPending(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetStatus failed: %v", err)
 	}
-	if status.Status != WorkflowStatusPending {
+	if status.Status != StatusPending {
 		t.Fatalf("expected PENDING, got %s", status.Status)
 	}
 

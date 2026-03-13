@@ -31,7 +31,7 @@ func TestScheduledWorkflowRegistration(t *testing.T) {
 	if !ok {
 		t.Fatal("workflow not found in registry")
 	}
-	regEntry := entry.(WorkflowRegistryEntry)
+	regEntry := entry.(workflowRegistryEntry)
 	if regEntry.CronSchedule != "* * * * *" {
 		t.Fatalf("expected cron schedule '* * * * *', got %q", regEntry.CronSchedule)
 	}
@@ -59,7 +59,7 @@ func TestScheduledWorkflowExecution(t *testing.T) {
 	now := time.Now()
 	fqn := resolveWorkflowFunctionName(myWF)
 	registeredAny, _ := rt.workflowRegistry.Load(fqn)
-	registered := registeredAny.(WorkflowRegistryEntry)
+	registered := registeredAny.(workflowRegistryEntry)
 
 	wfID := "sched-test-" + now.UTC().Format(time.RFC3339)
 	_, err := registered.wrappedFunction(rt, now,

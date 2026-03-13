@@ -34,8 +34,8 @@ type Step[R any] func(ctx context.Context) (R, error)
 // StepFunc is a type-erased step function.
 type StepFunc func(ctx context.Context) (any, error)
 
-// StepOutcome holds the result and error from a concurrent step started with Go.
-type StepOutcome[R any] struct {
+// AsyncResult holds the result and error from a concurrent step started with Go.
+type AsyncResult[R any] struct {
 	Result R
 	Err    error
 }
@@ -128,33 +128,33 @@ type workflowOutcome[R any] struct {
 	err    error
 }
 
-type baseWorkflowHandle struct {
+type baseHandle struct {
 	workflowID string
 	runtime    *Runtime
 }
 
-func (h *baseWorkflowHandle) GetWorkflowID() string {
+func (h *baseHandle) GetWorkflowID() string {
 	return h.workflowID
 }
 
-func (h *baseWorkflowHandle) GetStatus() (WorkflowStatus, error) {
-	statuses, err := retryWithResult(h.runtime.ctx, func() ([]WorkflowStatus, error) {
+func (h *baseHandle) GetStatus() (Status, error) {
+	statuses, err := retryWithResult(h.runtime.ctx, func() ([]Status, error) {
 		return h.runtime.systemDB.listWorkflows(h.runtime.ctx, listWorkflowsDBInput{
 			workflowIDs: []string{h.workflowID},
 		})
 	}, withRetrierLogger(h.runtime.logger))
 	if err != nil {
-		return WorkflowStatus{}, fmt.Errorf("failed to get workflow status: %w", err)
+		return Status{}, fmt.Errorf("failed to get workflow status: %w", err)
 	}
 	if len(statuses) == 0 {
-		return WorkflowStatus{}, newNonExistentWorkflowError(h.workflowID)
+		return Status{}, newNonExistentWorkflowError(h.workflowID)
 	}
 	return statuses[0], nil
 }
 
 // workflowHandle is returned when a workflow is started locally.
 type workflowHandle[R any] struct {
-	baseWorkflowHandle
+	baseHandle
 	outcomeChan chan workflowOutcome[R]
 }
 
@@ -177,7 +177,7 @@ func (h *workflowHandle[R]) GetResult(opts ...GetResultOption) (R, error) {
 
 // workflowPollingHandle is returned for enqueued or recovered workflows.
 type workflowPollingHandle[R any] struct {
-	baseWorkflowHandle
+	baseHandle
 }
 
 func (h *workflowPollingHandle[R]) GetResult(opts ...GetResultOption) (R, error) {
@@ -214,10 +214,10 @@ func WithHandlePollingInterval(interval time.Duration) GetResultOption {
 
 const _DEFAULT_MAX_RECOVERY_ATTEMPTS = 100
 
-type wrappedWorkflowFunc func(rt *Runtime, input any, opts ...WorkflowOption) (WorkflowHandle[any], error)
+type wrappedWorkflowFunc func(rt *Runtime, input any, opts ...WorkflowOption) (Handle[any], error)
 
-// WorkflowRegistryEntry stores a registered workflow's metadata.
-type WorkflowRegistryEntry struct {
+// workflowRegistryEntry stores a registered workflow's metadata.
+type workflowRegistryEntry struct {
 	wrappedFunction wrappedWorkflowFunc
 	MaxRetries      int
 	Name            string
@@ -290,12 +290,12 @@ func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...Work
 		return fn(ctx, typedInput)
 	})
 
-	wrapped := wrappedWorkflowFunc(func(rt *Runtime, input any, opts ...WorkflowOption) (WorkflowHandle[any], error) {
+	wrapped := wrappedWorkflowFunc(func(rt *Runtime, input any, opts ...WorkflowOption) (Handle[any], error) {
 		opts = append(opts, withWorkflowName(fqn))
 		return runWorkflowInternal(rt, typedErasedWF, input, opts...)
 	})
 
-	entry := WorkflowRegistryEntry{
+	entry := workflowRegistryEntry{
 		wrappedFunction: wrapped,
 		FQN:             fqn,
 		MaxRetries:      regOpts.maxRetries,
@@ -348,7 +348,7 @@ func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...Work
 /**********************************/
 
 // RunWorkflow starts a typed workflow. Returns a handle to get the result.
-func RunWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], input P, opts ...WorkflowOption) (WorkflowHandle[R], error) {
+func RunWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], input P, opts ...WorkflowOption) (Handle[R], error) {
 	opts = append(opts, withWorkflowName(resolveWorkflowFunctionName(fn)))
 
 	typedErasedWF := WorkflowFunc(func(ctx Context, inputAny any) (any, error) {
@@ -362,7 +362,7 @@ func RunWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], input P, opts ...
 
 	// If polling handle, convert to typed
 	if ph, ok := handle.(*workflowPollingHandle[any]); ok {
-		return &workflowPollingHandle[R]{baseWorkflowHandle: ph.baseWorkflowHandle}, nil
+		return &workflowPollingHandle[R]{baseHandle: ph.baseHandle}, nil
 	}
 
 	// If local handle, bridge the channel types
@@ -380,7 +380,7 @@ func RunWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], input P, opts ...
 			typedChan <- workflowOutcome[R]{result: typedResult, err: outcome.err}
 		}()
 		return &workflowHandle[R]{
-			baseWorkflowHandle: wh.baseWorkflowHandle,
+			baseHandle: wh.baseHandle,
 			outcomeChan:        typedChan,
 		}, nil
 	}
@@ -389,7 +389,7 @@ func RunWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], input P, opts ...
 }
 
 // runWorkflowInternal is the core workflow execution logic.
-func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...WorkflowOption) (WorkflowHandle[any], error) {
+func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...WorkflowOption) (Handle[any], error) {
 	params := workflowOptions{ApplicationVersion: rt.applicationVersion}
 	for _, opt := range opts {
 		opt(&params)
@@ -400,7 +400,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	if !exists {
 		return nil, newNonExistentWorkflowError(params.WorkflowName)
 	}
-	registered := registeredAny.(WorkflowRegistryEntry)
+	registered := registeredAny.(workflowRegistryEntry)
 	if registered.MaxRetries > 0 {
 		params.MaxRetries = registered.MaxRetries
 	}
@@ -428,11 +428,11 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		workflowID = core.GenerateDefaultRandomId()
 	}
 
-	var status WorkflowStatusType
+	var status StatusType
 	if params.QueueName != "" {
-		status = WorkflowStatusEnqueued
+		status = StatusEnqueued
 	} else {
-		status = WorkflowStatusPending
+		status = StatusPending
 	}
 
 	// Serialize input
@@ -448,7 +448,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		}
 	}
 
-	wfStatus := WorkflowStatus{
+	wfStatus := Status{
 		Name:               params.WorkflowName,
 		ApplicationVersion: params.ApplicationVersion,
 		ExecutorID:         rt.executorID,
@@ -466,13 +466,13 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	}
 
 	ownerXID := core.GenerateDefaultRandomId()
-	insertInput := insertWorkflowStatusDBInput{
+	insertInput := insertStatusDBInput{
 		status:            wfStatus,
 		maxRetries:        params.MaxRetries,
 		ownerXID:          &ownerXID,
 		incrementAttempts: params.isDequeue || params.isRecovery,
 	}
-	insertResult, err := rt.systemDB.insertWorkflowStatus(rt.ctx, insertInput)
+	insertResult, err := rt.systemDB.insertStatus(rt.ctx, insertInput)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert workflow: %w", err)
 	}
@@ -480,13 +480,13 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	// Check if we should skip execution
 	_, loaded := rt.activeWorkflowIDs.Load(workflowID)
 	shouldSkip := params.QueueName != "" ||
-		insertResult.status == WorkflowStatusSuccess ||
-		insertResult.status == WorkflowStatusError ||
+		insertResult.status == StatusSuccess ||
+		insertResult.status == StatusError ||
 		(!params.isDequeue && !params.isRecovery && insertResult.ownerXID != ownerXID) ||
 		loaded
 
 	if shouldSkip {
-		return &workflowPollingHandle[any]{baseWorkflowHandle: baseWorkflowHandle{workflowID: workflowID, runtime: rt}}, nil
+		return &workflowPollingHandle[any]{baseHandle: baseHandle{workflowID: workflowID, runtime: rt}}, nil
 	}
 
 	// Create workflow state
@@ -528,9 +528,9 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 			return
 		}
 
-		outcomeStatus := WorkflowStatusSuccess
+		outcomeStatus := StatusSuccess
 		if fnErr != nil {
-			outcomeStatus = WorkflowStatusError
+			outcomeStatus = StatusError
 		}
 
 		// Serialize output
@@ -567,7 +567,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	}()
 
 	return &workflowHandle[any]{
-		baseWorkflowHandle: baseWorkflowHandle{workflowID: workflowID, runtime: rt},
+		baseHandle: baseHandle{workflowID: workflowID, runtime: rt},
 		outcomeChan:        outcomeChan,
 	}, nil
 }
@@ -777,18 +777,18 @@ func executeStepWithRetry(ctx context.Context, rt *Runtime, opts *stepOptions, r
 }
 
 // Go runs a step in a goroutine. Must be within a workflow.
-func Go[R any](ctx Context, fn Step[R], opts ...StepOption) (chan StepOutcome[R], error) {
+func Go[R any](ctx Context, fn Step[R], opts ...StepOption) (chan AsyncResult[R], error) {
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
 		return nil, fmt.Errorf("Go must be called within a workflow")
 	}
 	opts = append(opts, WithNextStepID(wfState.nextStepID()))
 
-	ch := make(chan StepOutcome[R], 1)
+	ch := make(chan AsyncResult[R], 1)
 	go func() {
 		defer close(ch)
 		res, err := RunAsStep(ctx, fn, opts...)
-		ch <- StepOutcome[R]{Result: res, Err: err}
+		ch <- AsyncResult[R]{Result: res, Err: err}
 	}()
 	return ch, nil
 }
@@ -813,7 +813,7 @@ func Send(ctx Context, destinationID string, message any, topic string) error {
 			return fmt.Errorf("cannot call Send within a step")
 		}
 		_, err = RunAsStep(ctx, func(ctx context.Context) (any, error) {
-			return nil, rt.systemDB.send(ctx, WorkflowSendInput{
+			return nil, rt.systemDB.send(ctx, SendInput{
 				DestinationUUID: destinationID,
 				Topic:           topic,
 				Message:         encoded,
@@ -823,7 +823,7 @@ func Send(ctx Context, destinationID string, message any, topic string) error {
 	}
 
 	return retry(ctx, func() error {
-		return rt.systemDB.send(ctx, WorkflowSendInput{
+		return rt.systemDB.send(ctx, SendInput{
 			DestinationUUID: destinationID,
 			Topic:           topic,
 			Message:         encoded,
@@ -874,7 +874,7 @@ func SetEvent(ctx Context, key string, value any) error {
 	}
 
 	_, err = RunAsStep(ctx, func(ctx context.Context) (any, error) {
-		return nil, rt.systemDB.setEvent(ctx, WorkflowSetEventInput{
+		return nil, rt.systemDB.setEvent(ctx, SetValueInput{
 			WorkflowUUID: wfState.workflowID,
 			Key:          key,
 			Value:        encoded,
@@ -963,8 +963,8 @@ func GetWorkflowID(ctx context.Context) (string, error) {
 }
 
 // RetrieveWorkflow returns a handle to an existing workflow.
-func RetrieveWorkflow[R any](rt *Runtime, workflowID string) WorkflowHandle[R] {
-	return &workflowPollingHandle[R]{baseWorkflowHandle: baseWorkflowHandle{workflowID: workflowID, runtime: rt}}
+func RetrieveWorkflow[R any](rt *Runtime, workflowID string) Handle[R] {
+	return &workflowPollingHandle[R]{baseHandle: baseHandle{workflowID: workflowID, runtime: rt}}
 }
 
 // CancelWorkflow cancels a workflow by ID.
@@ -986,8 +986,8 @@ func ResumeWorkflow(rt *Runtime, workflowID string) error {
 }
 
 // ListWorkflows returns workflows matching the given filters.
-func ListWorkflows(rt *Runtime, input listWorkflowsDBInput) ([]WorkflowStatus, error) {
-	return retryWithResult(rt.ctx, func() ([]WorkflowStatus, error) {
+func ListWorkflows(rt *Runtime, input listWorkflowsDBInput) ([]Status, error) {
+	return retryWithResult(rt.ctx, func() ([]Status, error) {
 		return rt.systemDB.listWorkflows(rt.ctx, input)
 	}, withRetrierLogger(rt.logger))
 }

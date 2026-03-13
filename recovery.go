@@ -1,14 +1,14 @@
 package pocketflow
 
-func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]WorkflowHandle[any], error) {
+func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]Handle[any], error) {
 	appVersion := []string{}
 	if rt.applicationVersion != "" {
 		appVersion = []string{rt.applicationVersion}
 	}
 
-	pendingWorkflows, err := retryWithResult(rt.ctx, func() ([]WorkflowStatus, error) {
+	pendingWorkflows, err := retryWithResult(rt.ctx, func() ([]Status, error) {
 		return rt.systemDB.listWorkflows(rt.ctx, listWorkflowsDBInput{
-			status:             []WorkflowStatusType{WorkflowStatusPending},
+			status:             []StatusType{StatusPending},
 			executorIDs:        executorIDs,
 			applicationVersion: appVersion,
 			loadInput:          true,
@@ -18,7 +18,7 @@ func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]WorkflowHandl
 		return nil, err
 	}
 
-	var handles []WorkflowHandle[any]
+	var handles []Handle[any]
 
 	for _, wf := range pendingWorkflows {
 		if wf.QueueName != "" {
@@ -31,7 +31,7 @@ func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]WorkflowHandl
 			}
 			if cleared {
 				handles = append(handles, &workflowPollingHandle[any]{
-					baseWorkflowHandle: baseWorkflowHandle{workflowID: wf.ID, runtime: rt},
+					baseHandle: baseHandle{workflowID: wf.ID, runtime: rt},
 				})
 			}
 			continue
@@ -48,7 +48,7 @@ func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]WorkflowHandl
 			rt.logger.Error("workflow function not found in registry", "workflow_id", wf.ID, "name", wf.Name)
 			continue
 		}
-		registered := registeredAny.(WorkflowRegistryEntry)
+		registered := registeredAny.(workflowRegistryEntry)
 
 		opts := []WorkflowOption{
 			WithWorkflowID(wf.ID),
