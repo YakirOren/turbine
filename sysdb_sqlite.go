@@ -55,7 +55,7 @@ func derefStr(s *string) string {
 	return *s
 }
 
-// workflowExists returns nil if the workflow exists, or a NonExistentWorkflowError if not.
+// workflowExists returns nil if the workflow exists, or a ErrWorkflowNotFound if not.
 func (s *sqliteSysDB) workflowExists(workflowID string) error {
 	var exists int
 	err := s.app.DB().Select("1").
@@ -65,7 +65,7 @@ func (s *sqliteSysDB) workflowExists(workflowID string) error {
 		Row(&exists)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return newNonExistentWorkflowError(workflowID)
+			return newErrWorkflowNotFound(workflowID)
 		}
 		return fmt.Errorf("failed to check workflow existence: %w", err)
 	}
@@ -199,7 +199,7 @@ func (s *sqliteSysDB) insertStatus(ctx context.Context, input insertStatusDBInpu
 	}
 	if err != nil {
 		if isSQLiteUniqueViolation(err) {
-			return nil, newQueueDeduplicatedError(input.status.ID, input.status.QueueName, input.status.DeduplicationID)
+			return nil, newErrDeduplicatedError(input.status.ID, input.status.QueueName, input.status.DeduplicationID)
 		}
 		return nil, fmt.Errorf("failed to insert workflow status: %w", err)
 	}
@@ -212,10 +212,10 @@ func (s *sqliteSysDB) insertStatus(ctx context.Context, input insertStatusDBInpu
 	}
 
 	if len(input.status.Name) > 0 && result.name != input.status.Name {
-		return nil, newConflictingWorkflowError(input.status.ID, fmt.Sprintf("Workflow already exists with a different name: %s, but the provided name is: %s", result.name, input.status.Name))
+		return nil, newErrWorkflowConflict(input.status.ID, fmt.Sprintf("Workflow already exists with a different name: %s, but the provided name is: %s", result.name, input.status.Name))
 	}
 	if len(input.status.QueueName) > 0 && result.queueName != nil && input.status.QueueName != *result.queueName {
-		return nil, newConflictingWorkflowError(input.status.ID, fmt.Sprintf("Workflow already exists in a different queue: %s, but the provided queue is: %s", *result.queueName, input.status.QueueName))
+		return nil, newErrWorkflowConflict(input.status.ID, fmt.Sprintf("Workflow already exists in a different queue: %s, but the provided queue is: %s", *result.queueName, input.status.QueueName))
 	}
 
 	if result.status != StatusSuccess && result.status != StatusError &&
@@ -231,7 +231,7 @@ func (s *sqliteSysDB) insertStatus(ctx context.Context, input insertStatusDBInpu
 		if dlqErr != nil {
 			return nil, fmt.Errorf("failed to update workflow to %s: %w", StatusMaxRecoveryAttemptsExceeded, dlqErr)
 		}
-		return nil, newDeadLetterQueueError(input.status.ID, input.maxRetries)
+		return nil, newErrDeadLetter(input.status.ID, input.maxRetries)
 	}
 
 	return &result, nil
@@ -434,9 +434,9 @@ func (s *sqliteSysDB) awaitWorkflowResult(ctx context.Context, workflowID string
 			}
 			return output, errors.New(errorStr.String)
 		case StatusCancelled:
-			return output, newAwaitedWorkflowCancelledError(workflowID)
+			return output, newErrAwaitCancelledError(workflowID)
 		case StatusMaxRecoveryAttemptsExceeded:
-			return output, newDeadLetterQueueError(workflowID, attempts-2)
+			return output, newErrDeadLetter(workflowID, attempts-2)
 		default:
 			select {
 			case <-time.After(pollInterval):
@@ -520,7 +520,7 @@ func (s *sqliteSysDB) forkWorkflow(ctx context.Context, input forkWorkflowDBInpu
 		return "", err
 	}
 	if len(wfs) == 0 {
-		return "", newNonExistentWorkflowError(input.originalWorkflowID)
+		return "", newErrWorkflowNotFound(input.originalWorkflowID)
 	}
 	orig := wfs[0]
 
@@ -645,13 +645,13 @@ func (s *sqliteSysDB) checkOperationExecution(ctx context.Context, input checkOp
 		Row(&workflowStatus)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, newNonExistentWorkflowError(input.workflowUUID)
+			return nil, newErrWorkflowNotFound(input.workflowUUID)
 		}
 		return nil, fmt.Errorf("failed to get workflow status: %w", err)
 	}
 
 	if workflowStatus == StatusCancelled {
-		return nil, newWorkflowCancelledError(input.workflowUUID)
+		return nil, newErrCancelledError(input.workflowUUID)
 	}
 
 	// Check operation outputs

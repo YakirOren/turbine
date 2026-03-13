@@ -147,7 +147,7 @@ func (h *baseHandle) GetStatus() (Status, error) {
 		return Status{}, fmt.Errorf("failed to get workflow status: %w", err)
 	}
 	if len(statuses) == 0 {
-		return Status{}, newNonExistentWorkflowError(h.workflowID)
+		return Status{}, newErrWorkflowNotFound(h.workflowID)
 	}
 	return statuses[0], nil
 }
@@ -303,14 +303,14 @@ func RegisterWorkflow[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...Work
 	}
 
 	if _, exists := rt.workflowRegistry.LoadOrStore(fqn, entry); exists {
-		panic(newConflictingRegistrationError(fqn))
+		panic(newErrRegistrationConflict(fqn))
 	}
 	customName := regOpts.name
 	if customName == "" {
 		customName = fqn
 	}
 	if _, exists := rt.workflowCustomNameToFQN.LoadOrStore(customName, fqn); exists {
-		panic(newConflictingRegistrationError(customName))
+		panic(newErrRegistrationConflict(customName))
 	}
 
 	// If this is a scheduled workflow, register a cron job via PocketBase
@@ -398,7 +398,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	// Lookup registry for registration-time options
 	registeredAny, exists := rt.workflowRegistry.Load(params.WorkflowName)
 	if !exists {
-		return nil, newNonExistentWorkflowError(params.WorkflowName)
+		return nil, newErrWorkflowNotFound(params.WorkflowName)
 	}
 	registered := registeredAny.(workflowRegistryEntry)
 	if registered.MaxRetries > 0 {
@@ -518,7 +518,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 
 		// Handle workflow ID conflict — another goroutine owns this workflow ID.
 		// Wait for the existing workflow to complete and return its result.
-		if errors.Is(fnErr, &PFError{Code: ConflictingIDError}) {
+		if errors.Is(fnErr, &PFError{Code: ErrConflictingID}) {
 			rt.logger.Warn("workflow ID conflict, waiting for existing workflow", "workflow_id", workflowID)
 			encoded, awaitErr := retryWithResult(rt.ctx, func() (*string, error) {
 				return rt.systemDB.awaitWorkflowResult(rt.ctx, workflowID, _DB_RETRY_INTERVAL)
@@ -773,7 +773,7 @@ func executeStepWithRetry(ctx context.Context, rt *Runtime, opts *stepOptions, r
 		}
 		joinedErrors = errors.Join(joinedErrors, err)
 	}
-	return output, newMaxStepRetriesExceededError("", opts.stepName, opts.maxRetries, joinedErrors)
+	return output, newErrMaxRetriesError("", opts.stepName, opts.maxRetries, joinedErrors)
 }
 
 // Go runs a step in a goroutine. Must be within a workflow.

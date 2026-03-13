@@ -6,20 +6,20 @@ import "fmt"
 type PFErrorCode int
 
 const (
-	ConflictingIDError           PFErrorCode = iota + 1
+	ErrConflictingID           PFErrorCode = iota + 1
 	_                                          // was InitializationError
-	NonExistentWorkflowError
-	ConflictingWorkflowError
-	WorkflowCancelled
+	ErrWorkflowNotFound
+	ErrWorkflowConflict
+	ErrCancelled
 	_                            // was UnexpectedStep
-	AwaitedWorkflowCancelled
-	ConflictingRegistrationError
+	ErrAwaitCancelled
+	ErrRegistrationConflict
 	_                            // was WorkflowUnexpectedTypeError
 	_                            // was WorkflowExecutionError
 	_                            // was StepExecutionError
-	DeadLetterQueueError
-	MaxStepRetriesExceeded
-	QueueDeduplicated
+	ErrDeadLetter
+	ErrMaxRetries
+	ErrDeduplicated
 )
 
 // PFError is the unified error type for all PocketFlow operations.
@@ -51,43 +51,43 @@ func (e *PFError) Is(target error) bool {
 	return t.Code != 0 && e.Code == t.Code
 }
 
-func newConflictingWorkflowError(workflowID, message string) *PFError {
+func newErrWorkflowConflict(workflowID, message string) *PFError {
 	msg := fmt.Sprintf("Conflicting workflow invocation with the same ID (%s)", workflowID)
 	if message != "" {
 		msg += ": " + message
 	}
-	return &PFError{Message: msg, Code: ConflictingWorkflowError, WorkflowID: workflowID}
+	return &PFError{Message: msg, Code: ErrWorkflowConflict, WorkflowID: workflowID}
 }
 
-func newNonExistentWorkflowError(workflowID string) *PFError {
-	return &PFError{Message: fmt.Sprintf("workflow %s does not exist", workflowID), Code: NonExistentWorkflowError, DestinationID: workflowID}
+func newErrWorkflowNotFound(workflowID string) *PFError {
+	return &PFError{Message: fmt.Sprintf("workflow %s does not exist", workflowID), Code: ErrWorkflowNotFound, DestinationID: workflowID}
 }
 
-func newConflictingRegistrationError(name string) *PFError {
-	return &PFError{Message: fmt.Sprintf("%s is already registered", name), Code: ConflictingRegistrationError}
+func newErrRegistrationConflict(name string) *PFError {
+	return &PFError{Message: fmt.Sprintf("%s is already registered", name), Code: ErrRegistrationConflict}
 }
 
-func newAwaitedWorkflowCancelledError(workflowID string) *PFError {
-	return &PFError{Message: fmt.Sprintf("Awaited workflow %s was cancelled", workflowID), Code: AwaitedWorkflowCancelled, WorkflowID: workflowID}
+func newErrAwaitCancelledError(workflowID string) *PFError {
+	return &PFError{Message: fmt.Sprintf("Awaited workflow %s was cancelled", workflowID), Code: ErrAwaitCancelled, WorkflowID: workflowID}
 }
 
-func newWorkflowCancelledError(workflowID string) *PFError {
-	return &PFError{Message: fmt.Sprintf("Workflow %s was cancelled", workflowID), Code: WorkflowCancelled}
+func newErrCancelledError(workflowID string) *PFError {
+	return &PFError{Message: fmt.Sprintf("Workflow %s was cancelled", workflowID), Code: ErrCancelled}
 }
 
 func newWorkflowConflictIDError(workflowID string) *PFError {
-	return &PFError{Message: fmt.Sprintf("Conflicting workflow ID %s", workflowID), Code: ConflictingIDError, WorkflowID: workflowID}
+	return &PFError{Message: fmt.Sprintf("Conflicting workflow ID %s", workflowID), Code: ErrConflictingID, WorkflowID: workflowID}
 }
 
-func newDeadLetterQueueError(workflowID string, maxRetries int) *PFError {
-	return &PFError{Message: fmt.Sprintf("Workflow %s has been moved to the dead-letter queue after exceeding the maximum of %d retries", workflowID, maxRetries), Code: DeadLetterQueueError, WorkflowID: workflowID, MaxRetries: maxRetries}
+func newErrDeadLetter(workflowID string, maxRetries int) *PFError {
+	return &PFError{Message: fmt.Sprintf("Workflow %s has been moved to the dead-letter queue after exceeding the maximum of %d retries", workflowID, maxRetries), Code: ErrDeadLetter, WorkflowID: workflowID, MaxRetries: maxRetries}
 }
 
-func newMaxStepRetriesExceededError(workflowID, stepName string, maxRetries int, err error) *PFError {
-	return &PFError{Message: fmt.Sprintf("Step %s has exceeded its maximum of %d retries: %v", stepName, maxRetries, err), Code: MaxStepRetriesExceeded, WorkflowID: workflowID, StepName: stepName, MaxRetries: maxRetries, wrappedErr: err}
+func newErrMaxRetriesError(workflowID, stepName string, maxRetries int, err error) *PFError {
+	return &PFError{Message: fmt.Sprintf("Step %s has exceeded its maximum of %d retries: %v", stepName, maxRetries, err), Code: ErrMaxRetries, WorkflowID: workflowID, StepName: stepName, MaxRetries: maxRetries, wrappedErr: err}
 }
 
-func newQueueDeduplicatedError(workflowID, queueName, deduplicationID string) *PFError {
-	return &PFError{Message: fmt.Sprintf("Workflow %s was deduplicated due to an existing workflow in queue %s with deduplication ID %s", workflowID, queueName, deduplicationID), Code: QueueDeduplicated, WorkflowID: workflowID, QueueName: queueName, DeduplicationID: deduplicationID}
+func newErrDeduplicatedError(workflowID, queueName, deduplicationID string) *PFError {
+	return &PFError{Message: fmt.Sprintf("Workflow %s was deduplicated due to an existing workflow in queue %s with deduplication ID %s", workflowID, queueName, deduplicationID), Code: ErrDeduplicated, WorkflowID: workflowID, QueueName: queueName, DeduplicationID: deduplicationID}
 }
 
