@@ -1203,3 +1203,55 @@ func (s *sqliteSysDB) garbageCollectWorkflows(ctx context.Context, input garbage
 	s.logger.Info("Garbage collected workflows", "cutoff", cutoffMs, "deleted", rowsAffected)
 	return nil
 }
+
+/*******************************/
+/******* KEY-VALUE STORE ********/
+/*******************************/
+
+func (s *sqliteSysDB) setKV(ctx context.Context, input setKVInput) error {
+	_, err := s.app.DB().NewQuery(`INSERT INTO pt_kv (id, key, value, updated_at_epoch_ms)
+		VALUES ({:id}, {:key}, {:value}, {:updated_at})
+		ON CONFLICT (key)
+		DO UPDATE SET value = excluded.value, updated_at_epoch_ms = excluded.updated_at_epoch_ms`).Bind(dbx.Params{
+		"id":         core.GenerateDefaultRandomId(),
+		"key":        input.key,
+		"value":      derefStr(input.value),
+		"updated_at": time.Now().UnixMilli(),
+	}).Execute()
+
+	if err != nil {
+		return fmt.Errorf("failed to set KV: %w", err)
+	}
+	return nil
+}
+
+func (s *sqliteSysDB) getKV(ctx context.Context, input getKVInput) (*string, error) {
+	var value sql.NullString
+	err := s.app.DB().Select("value").
+		From("pt_kv").
+		Where(dbx.HashExp{"key": input.key}).
+		Row(&value)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get KV: %w", err)
+	}
+
+	if value.Valid {
+		return &value.String, nil
+	}
+	return nil, nil
+}
+
+func (s *sqliteSysDB) deleteKV(ctx context.Context, input deleteKVInput) error {
+	_, err := s.app.DB().NewQuery(`DELETE FROM pt_kv WHERE key = {:key}`).Bind(dbx.Params{
+		"key": input.key,
+	}).Execute()
+
+	if err != nil {
+		return fmt.Errorf("failed to delete KV: %w", err)
+	}
+	return nil
+}

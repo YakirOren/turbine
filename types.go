@@ -281,6 +281,19 @@ type ProductRecord struct {
 	FileURL  string         `json:"file_url"`
 }
 
+type setKVInput struct {
+	key   string
+	value *string
+}
+
+type getKVInput struct {
+	key string
+}
+
+type deleteKVInput struct {
+	key string
+}
+
 // systemDatabase is the internal interface for database operations.
 type systemDatabase interface {
 	launch(ctx context.Context)
@@ -316,4 +329,8 @@ type systemDatabase interface {
 	updateAppStatus(ctx context.Context, input updateAppStatusDBInput) error
 
 	garbageCollectWorkflows(ctx context.Context, input garbageCollectWorkflowsInput) error
+
+	setKV(ctx context.Context, input setKVInput) error
+	getKV(ctx context.Context, input getKVInput) (*string, error)
+	deleteKV(ctx context.Context, input deleteKVInput) error
 }

@@ -12,6 +12,7 @@ const (
 	collectionWorkflowEventsHist = "pt_workflow_events_history"
 	collectionSchedules          = "pt_schedules"
 	collectionProducts           = "pt_products"
+	collectionKV                 = "pt_kv"
 )
 
 func init() {
@@ -48,6 +49,29 @@ func upCreateProducts(app core.App) error {
 
 func downCreateProducts(app core.App) error {
 	col, err := app.FindCollectionByNameOrId(collectionProducts)
+	if err != nil {
+		return nil
+	}
+	return app.Delete(col)
+}
+
+func init() {
+	core.AppMigrations.Register(upCreateKV, downCreateKV, "pt_3_create_kv")
+}
+
+func upCreateKV(app core.App) error {
+	kv := core.NewBaseCollection(collectionKV)
+	kv.Fields.Add(
+		&core.TextField{Name: "key", Required: true},
+		&core.JSONField{Name: "value", Required: true},
+		&core.NumberField{Name: "updated_at_epoch_ms"},
+	)
+	kv.AddIndex("idx_kv_key", true, "key", "")
+	return app.Save(kv)
+}
+
+func downCreateKV(app core.App) error {
+	col, err := app.FindCollectionByNameOrId(collectionKV)
 	if err != nil {
 		return nil
 	}
