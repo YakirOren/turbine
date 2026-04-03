@@ -57,6 +57,13 @@ func registerRoutes(se *core.ServeEvent, rt *turbine.Runtime) {
 		return h.approveWorkflow(e)
 	})
 
+	se.Router.POST("/api/pt/alert-channels/{id}/test", func(e *core.RequestEvent) error {
+		if !e.HasSuperuserAuth() {
+			return e.ForbiddenError("", nil)
+		}
+		return h.testAlertChannel(e)
+	})
+
 	se.Router.GET("/api/pt/calendar", func(e *core.RequestEvent) error {
 		if !e.HasSuperuserAuth() {
 			return e.ForbiddenError("", nil)

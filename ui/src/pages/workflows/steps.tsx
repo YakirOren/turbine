@@ -26,6 +26,7 @@ import {nodeTypes} from "@/components/step-node";
 import {pbClient} from "@/providers/pocketbase";
 import {ArrowLeft, ChevronRight, Code, Cog, FileText, Package, RefreshCw} from "lucide-react";
 import {timeAgo, formatDuration, formatTimestampPrecise} from "@/lib/format";
+import type {PtProductsResponse} from "@/types/pocketbase-types";
 
 function formatBytes(bytes: number): string {
     if (!bytes) return "—";
@@ -51,18 +52,7 @@ interface LogRecord {
     data: Record<string, unknown>;
 }
 
-interface ProductRecord {
-    id: string;
-    workflow_id: string;
-    function_id: number;
-    function_name: string;
-    file_name: string;
-    size: number;
-    metadata: Record<string, unknown>;
-    status: string;
-    error: string;
-    created: string;
-}
+type ProductRecord = PtProductsResponse<Record<string, unknown>>;
 
 const LOG_LEVELS: Record<number, { label: string; className: string }> = {
     [-4]: {label: "DEBUG", className: "text-muted-foreground"},

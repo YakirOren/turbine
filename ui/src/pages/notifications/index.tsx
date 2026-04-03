@@ -5,7 +5,7 @@ import { z } from "zod";
 import { useList, useInvalidate } from "@refinedev/core";
 import { useMutation } from "@tanstack/react-query";
 import { pbClient } from "@/providers/pocketbase";
-import { Webhook, Plus, Trash2, Pencil } from "lucide-react";
+import { Bell, Plus, Trash2, Pencil, Play } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,17 +39,17 @@ import {
 import { Field, FieldLabel, FieldDescription } from "@/components/ui/field";
 import { TableSkeleton } from "@/components/table-skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import type { PtWebhooksResponse } from "@/types/pocketbase-types";
+import type { PtAlertChannelsResponse } from "@/types/pocketbase-types";
 
-type WebhookRecord = PtWebhooksResponse<string[]>;
+type AlertChannelRecord = PtAlertChannelsResponse<string[]>;
 
-const webhookFormSchema = z.object({
-  url: z.string().url("Invalid URL"),
+const formSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  url: z.string(),
   events: z.array(z.string()).min(1, "Select at least one event"),
-  secret: z.string(),
   enabled: z.boolean(),
 });
-type WebhookFormValues = z.infer<typeof webhookFormSchema>;
+type FormValues = z.infer<typeof formSchema>;
 
 const EVENT_OPTIONS = [
   "workflow.SUCCESS",
@@ -60,6 +60,34 @@ const EVENT_OPTIONS = [
   "workflow.*",
 ];
 
+const SERVICE_NAMES: Record<string, string> = {
+  slack: "Slack",
+  discord: "Discord",
+  telegram: "Telegram",
+  smtp: "Email",
+  teams: "Teams",
+  gotify: "Gotify",
+  ntfy: "Ntfy",
+  pushover: "Pushover",
+  pushbullet: "Pushbullet",
+  matrix: "Matrix",
+  rocketchat: "Rocket.Chat",
+  mattermost: "Mattermost",
+  googlechat: "Google Chat",
+  opsgenie: "OpsGenie",
+  ifttt: "IFTTT",
+  join: "Join",
+  zulip: "Zulip",
+  bark: "Bark",
+  generic: "Generic",
+  logger: "Logger",
+};
+
+function extractServiceName(url: string): string {
+  const scheme = url.split("://")[0]?.replace(/\+.*$/, "") ?? "";
+  return SERVICE_NAMES[scheme.toLowerCase()] ?? (scheme || "Unknown");
+}
+
 function timeAgo(dateStr: string): string {
   if (!dateStr) return "\u2014";
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -69,85 +97,94 @@ function timeAgo(dateStr: string): string {
   return `${Math.round(diff / 86400000)}d ago`;
 }
 
-function truncateUrl(url: string, maxLen = 40): string {
-  if (url.length <= maxLen) return url;
-  return url.slice(0, maxLen) + "\u2026";
-}
-
-export function WebhookList() {
+export function NotificationList() {
   const invalidate = useInvalidate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const { control, handleSubmit: rhfSubmit, reset, watch } = useForm<WebhookFormValues>({
-    resolver: zodResolver(webhookFormSchema),
+  const { control, handleSubmit: rhfSubmit, reset, watch } = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
     defaultValues: {
+      name: "",
       url: "",
       events: [],
-      secret: "",
       enabled: true,
     },
   });
 
   const events = watch("events");
 
-  const { result, query: webhooksQuery } = useList<WebhookRecord>({
-    resource: "pt_webhooks",
+  const { result, query } = useList<AlertChannelRecord>({
+    resource: "pt_alert_channels",
     pagination: { mode: "off" },
   });
 
   const records = result.data ?? [];
-  const isLoading = webhooksQuery.isLoading && records.length === 0;
+  const isLoading = query.isLoading && records.length === 0;
 
-  const invalidateWebhooks = () =>
-    invalidate({ resource: "pt_webhooks", invalidates: ["list"] });
+  const invalidateChannels = () =>
+    invalidate({ resource: "pt_alert_channels", invalidates: ["list"] });
 
   const saveMutation = useMutation({
-    mutationFn: async (data: WebhookFormValues) => {
+    mutationFn: async (data: FormValues) => {
+      if (!editingId && !data.url) {
+        throw new Error("URL is required");
+      }
       const body: Record<string, unknown> = {
-        url: data.url,
+        name: data.name,
         events: data.events,
         enabled: data.enabled,
       };
-      if (data.secret) {
-        body.secret = data.secret;
+      if (data.url) {
+        body.url = data.url;
       }
       if (editingId) {
-        await pbClient.collection("pt_webhooks").update(editingId, body);
+        await pbClient.collection("pt_alert_channels").update(editingId, body);
       } else {
-        await pbClient.collection("pt_webhooks").create(body);
+        await pbClient.collection("pt_alert_channels").create(body);
       }
     },
     onSuccess: () => {
-      invalidateWebhooks();
-      toast.success(editingId ? "Webhook updated" : "Webhook created");
+      invalidateChannels();
+      toast.success(editingId ? "Channel updated" : "Channel created");
       setDialogOpen(false);
     },
     onError: (err: any) => {
-      toast.error(err?.message || `Failed to ${editingId ? "update" : "create"} webhook`);
+      toast.error(err?.message || `Failed to ${editingId ? "update" : "create"} channel`);
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) =>
-      pbClient.collection("pt_webhooks").delete(id),
+      pbClient.collection("pt_alert_channels").delete(id),
     onSuccess: () => {
-      invalidateWebhooks();
-      toast.success("Webhook deleted");
+      invalidateChannels();
+      toast.success("Channel deleted");
     },
     onError: (err: any) => {
-      toast.error(err?.message || "Failed to delete webhook");
+      toast.error(err?.message || "Failed to delete channel");
     },
   });
 
   const toggleMutation = useMutation({
-    mutationFn: (record: WebhookRecord) =>
-      pbClient.collection("pt_webhooks").update(record.id, { enabled: !record.enabled }),
+    mutationFn: (record: AlertChannelRecord) =>
+      pbClient.collection("pt_alert_channels").update(record.id, { enabled: !record.enabled }),
     onSuccess: () => {
-      invalidateWebhooks();
+      invalidateChannels();
     },
     onError: (err: any) => {
-      toast.error(err?.message || "Failed to toggle webhook");
+      toast.error(err?.message || "Failed to toggle channel");
+    },
+  });
+
+  const testMutation = useMutation({
+    mutationFn: (id: string) =>
+      pbClient.send(`/api/pt/alert-channels/${id}/test`, { method: "POST" }),
+    onSuccess: () => {
+      toast.success("Test notification sent");
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || "Test notification failed");
     },
   });
 
@@ -157,8 +194,8 @@ export function WebhookList() {
     setDialogOpen(true);
   };
 
-  const openEdit = (record: WebhookRecord) => {
-    reset({ url: record.url, events: [...record.events], secret: "", enabled: record.enabled });
+  const openEdit = (record: AlertChannelRecord) => {
+    reset({ name: record.name, url: "", events: [...record.events], enabled: record.enabled });
     setEditingId(record.id);
     setDialogOpen(true);
   };
@@ -167,9 +204,9 @@ export function WebhookList() {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">Webhooks</h1>
+          <h1 className="text-2xl font-bold">Notifications</h1>
         </div>
-        <TableSkeleton columns={6} headers={["URL", "Events", "Enabled", "Secret", "Created", ""]} />
+        <TableSkeleton columns={6} headers={["Name", "Service", "Events", "Enabled", "Created", ""]} />
       </div>
     );
   }
@@ -177,27 +214,27 @@ export function WebhookList() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Webhooks</h1>
+        <h1 className="text-2xl font-bold">Notifications</h1>
         <Button size="sm" onClick={openAdd}>
           <Plus className="mr-1.5 h-3.5 w-3.5" />
-          Add Webhook
+          Add Channel
         </Button>
       </div>
 
-      {webhooksQuery.isError && (
+      {query.isError && (
         <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {(webhooksQuery.error as unknown as Error)?.message ??
-            "Failed to load webhooks"}
+          {(query.error as unknown as Error)?.message ??
+            "Failed to load notification channels"}
         </div>
       )}
 
-      {records.length === 0 && !webhooksQuery.isError ? (
+      {records.length === 0 && !query.isError ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-20 text-muted-foreground">
-          <Webhook className="h-8 w-8" />
+          <Bell className="h-8 w-8" />
           <div className="text-center">
-            <p>No webhooks configured</p>
+            <p>No notification channels configured</p>
             <p className="mt-1 text-xs">
-              Add a webhook to receive notifications when workflows complete.
+              Add a channel to receive alerts when workflows complete.
             </p>
           </div>
         </div>
@@ -206,23 +243,26 @@ export function WebhookList() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>URL</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Service</TableHead>
                 <TableHead>Events</TableHead>
                 <TableHead>Enabled</TableHead>
-                <TableHead>Secret</TableHead>
                 <TableHead>Created</TableHead>
-                <TableHead className="w-20" />
+                <TableHead className="w-28" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {records.map((record) => (
                 <TableRow key={record.id}>
-                  <TableCell className="font-mono text-sm">
-                    {truncateUrl(record.url)}
+                  <TableCell className="font-medium">
+                    {record.name}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {extractServiceName(record.url)}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
-                      {record.events.map((event) => (
+                      {record.events?.map((event) => (
                         <Badge
                           key={event}
                           variant="secondary"
@@ -237,11 +277,8 @@ export function WebhookList() {
                     <Switch
                       checked={record.enabled}
                       onCheckedChange={() => toggleMutation.mutate(record)}
-                      aria-label={`${record.enabled ? "Disable" : "Enable"} webhook`}
+                      aria-label={`${record.enabled ? "Disable" : "Enable"} channel`}
                     />
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {record.secret ? "(set)" : "(none)"}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {timeAgo(record.created)}
@@ -252,8 +289,18 @@ export function WebhookList() {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                        onClick={() => testMutation.mutate(record.id)}
+                        disabled={testMutation.isPending}
+                        aria-label={`Test channel ${record.name}`}
+                      >
+                        <Play className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
                         onClick={() => openEdit(record)}
-                        aria-label={`Edit webhook ${record.url}`}
+                        aria-label={`Edit channel ${record.name}`}
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
@@ -263,17 +310,17 @@ export function WebhookList() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                            aria-label={`Delete webhook ${record.url}`}
+                            aria-label={`Delete channel ${record.name}`}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                           <AlertDialogHeader>
-                            <AlertDialogTitle>Delete webhook?</AlertDialogTitle>
+                            <AlertDialogTitle>Delete channel?</AlertDialogTitle>
                             <AlertDialogDescription>
-                              This will permanently delete the webhook for{" "}
-                              <span className="font-mono">{truncateUrl(record.url)}</span>.
+                              This will permanently delete the notification channel{" "}
+                              <span className="font-medium">{record.name}</span>.
                               This cannot be undone.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
@@ -300,23 +347,40 @@ export function WebhookList() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editingId ? "Edit Webhook" : "Add Webhook"}</DialogTitle>
+            <DialogTitle>{editingId ? "Edit Channel" : "Add Channel"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <Field>
-              <FieldLabel htmlFor="webhook-url">URL</FieldLabel>
+              <FieldLabel htmlFor="channel-name">Name</FieldLabel>
+              <Controller
+                control={control}
+                name="name"
+                render={({ field }) => (
+                  <Input
+                    {...field}
+                    id="channel-name"
+                    placeholder="Slack #alerts"
+                  />
+                )}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="channel-url">URL</FieldLabel>
               <Controller
                 control={control}
                 name="url"
                 render={({ field }) => (
                   <Input
                     {...field}
-                    id="webhook-url"
-                    placeholder="https://example.com/webhook"
+                    id="channel-url"
+                    placeholder={editingId ? "Enter new URL to update" : "slack://xoxb:token@channel"}
                     className="font-mono"
                   />
                 )}
               />
+              <FieldDescription>
+                Shoutrrr URL — supports Slack, Discord, Telegram, Email, and more
+              </FieldDescription>
             </Field>
             <Field>
               <FieldLabel>Events</FieldLabel>
@@ -342,28 +406,14 @@ export function WebhookList() {
                 <FieldDescription>Select one or more</FieldDescription>
               )}
             </Field>
-            <Field>
-              <FieldLabel htmlFor="webhook-secret">Secret</FieldLabel>
-              <Controller
-                control={control}
-                name="secret"
-                render={({ field }) => (
-                  <Input
-                    {...field}
-                    id="webhook-secret"
-                    placeholder={editingId ? "Leave blank to keep current" : "Optional signing secret"}
-                  />
-                )}
-              />
-            </Field>
             <Field orientation="horizontal">
-              <FieldLabel htmlFor="webhook-enabled">Enabled</FieldLabel>
+              <FieldLabel htmlFor="channel-enabled">Enabled</FieldLabel>
               <Controller
                 control={control}
                 name="enabled"
                 render={({ field }) => (
                   <Switch
-                    id="webhook-enabled"
+                    id="channel-enabled"
                     checked={field.value}
                     onCheckedChange={field.onChange}
                   />

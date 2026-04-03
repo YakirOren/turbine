@@ -19,10 +19,10 @@ type handlers struct {
 func (h *handlers) cancelWorkflow(e *core.RequestEvent) error {
 	id := e.Request.PathValue("id")
 	if id == "" {
-		return e.JSON(http.StatusBadRequest, map[string]string{"error": "missing workflow id"})
+		return e.BadRequestError("missing workflow id", nil)
 	}
 	if err := h.rt.Cancel(id); err != nil {
-		return e.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return e.InternalServerError("failed to cancel workflow", err)
 	}
 	return e.JSON(http.StatusOK, map[string]string{"status": "cancelled"})
 }
@@ -30,10 +30,10 @@ func (h *handlers) cancelWorkflow(e *core.RequestEvent) error {
 func (h *handlers) resumeWorkflow(e *core.RequestEvent) error {
 	id := e.Request.PathValue("id")
 	if id == "" {
-		return e.JSON(http.StatusBadRequest, map[string]string{"error": "missing workflow id"})
+		return e.BadRequestError("missing workflow id", nil)
 	}
 	if err := h.rt.Resume(id); err != nil {
-		return e.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return e.InternalServerError("failed to resume workflow", err)
 	}
 	return e.JSON(http.StatusOK, map[string]string{"status": "resumed"})
 }
@@ -70,7 +70,7 @@ func (h *handlers) listQueues(e *core.RequestEvent) error {
 func (h *handlers) queueStats(e *core.RequestEvent) error {
 	name := e.Request.PathValue("name")
 	if name == "" {
-		return e.JSON(http.StatusBadRequest, map[string]string{"error": "missing queue name"})
+		return e.BadRequestError("missing queue name", nil)
 	}
 
 	type stat struct {
@@ -80,11 +80,13 @@ func (h *handlers) queueStats(e *core.RequestEvent) error {
 
 	var stats []stat
 	err := h.app.DB().
-		NewQuery("SELECT status, COUNT(*) as cnt FROM pt_workflow_status WHERE queue_name = {:name} GROUP BY status").
-		Bind(dbx.Params{"name": name}).
+		Select("status", "COUNT(*) as cnt").
+		From("pt_workflow_status").
+		Where(dbx.HashExp{"queue_name": name}).
+		GroupBy("status").
 		All(&stats)
 	if err != nil {
-		return e.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return e.InternalServerError("failed to query queue stats", err)
 	}
 
 	result := map[string]int{
@@ -113,18 +115,18 @@ func (h *handlers) triggerWorkflow(e *core.RequestEvent) error {
 		Input       json.RawMessage `json:"input"`
 	}
 	if err := e.BindBody(&req); err != nil {
-		return e.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return e.BadRequestError("invalid request body", nil)
 	}
 	if req.WorkflowFQN == "" {
-		return e.JSON(http.StatusBadRequest, map[string]string{"error": "workflow_fqn is required"})
+		return e.BadRequestError("workflow_fqn is required", nil)
 	}
 
 	wfID, err := h.rt.TriggerByFQN(req.WorkflowFQN, req.Input)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "not triggerable") {
-			return e.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return e.BadRequestError(err.Error(), nil)
 		}
-		return e.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return e.InternalServerError("failed to trigger workflow", err)
 	}
 
 	return e.JSON(http.StatusOK, map[string]string{"workflow_id": wfID})
@@ -133,16 +135,16 @@ func (h *handlers) triggerWorkflow(e *core.RequestEvent) error {
 func (h *handlers) approveWorkflow(e *core.RequestEvent) error {
 	id := e.Request.PathValue("id")
 	if id == "" {
-		return e.JSON(http.StatusBadRequest, map[string]string{"error": "missing workflow id"})
+		return e.BadRequestError("missing workflow id", nil)
 	}
 
 	// Validate the workflow exists and is actually waiting for approval
 	record, err := h.app.FindRecordById("pt_workflow_status", id)
 	if err != nil {
-		return e.JSON(http.StatusNotFound, map[string]string{"error": "workflow not found"})
+		return e.NotFoundError("workflow not found", nil)
 	}
 	if record.GetString("app_status") != "waiting for approval" {
-		return e.JSON(http.StatusBadRequest, map[string]string{"error": "workflow is not waiting for approval"})
+		return e.BadRequestError("workflow is not waiting for approval", nil)
 	}
 
 	var req struct {
@@ -150,7 +152,7 @@ func (h *handlers) approveWorkflow(e *core.RequestEvent) error {
 		Comment  string `json:"comment"`
 	}
 	if err := e.BindBody(&req); err != nil {
-		return e.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return e.BadRequestError("invalid request body", nil)
 	}
 
 	err = h.rt.SendToWorkflow(id, turbine.ApprovalResult{
@@ -158,10 +160,21 @@ func (h *handlers) approveWorkflow(e *core.RequestEvent) error {
 		Comment:  req.Comment,
 	}, "pt.approval")
 	if err != nil {
-		return e.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return e.InternalServerError("failed to approve workflow", err)
 	}
 
 	return e.JSON(http.StatusOK, map[string]string{"status": "sent"})
+}
+
+func (h *handlers) testAlertChannel(e *core.RequestEvent) error {
+	id := e.Request.PathValue("id")
+	if id == "" {
+		return e.BadRequestError("missing channel id", nil)
+	}
+	if err := h.rt.TestAlertChannel(id); err != nil {
+		return e.InternalServerError("failed to test alert channel", err)
+	}
+	return e.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (h *handlers) calendarStats(e *core.RequestEvent) error {
@@ -171,7 +184,7 @@ func (h *handlers) calendarStats(e *core.RequestEvent) error {
 	toMsStr := q.Get("to_ms")
 	bucketMinsStr := q.Get("bucket_mins")
 	if fromMsStr == "" || toMsStr == "" || bucketMinsStr == "" {
-		return e.JSON(http.StatusBadRequest, map[string]string{"error": "from_ms, to_ms, and bucket_mins query params are required"})
+		return e.BadRequestError("from_ms, to_ms, and bucket_mins query params are required", nil)
 	}
 
 	var fromMs, toMs, bucketMins int64
@@ -182,7 +195,7 @@ func (h *handlers) calendarStats(e *core.RequestEvent) error {
 		n := int64(0)
 		for _, c := range pair.s {
 			if c < '0' || c > '9' {
-				return e.JSON(http.StatusBadRequest, map[string]string{"error": "params must be integers"})
+				return e.BadRequestError("params must be integers", nil)
 			}
 			n = n*10 + int64(c-'0')
 		}
@@ -198,39 +211,33 @@ func (h *handlers) calendarStats(e *core.RequestEvent) error {
 	status := q.Get("status")
 	tag := q.Get("tag")
 
-	where := "created_at_epoch_ms >= {:from} AND created_at_epoch_ms < {:to}"
-	params := dbx.Params{"from": fromMs, "to": toMs, "bucket": bucketMs}
-
-	if name != "" {
-		where += " AND name = {:name}"
-		params["name"] = name
-	}
-	if status != "" {
-		where += " AND status = {:status}"
-		params["status"] = status
-	}
-	if tag != "" {
-		where += " AND tags LIKE {:tag}"
-		params["tag"] = "%" + tag + "%"
-	}
-
 	type bucketStat struct {
 		Bucket int64  `db:"bucket" json:"bucket"`
 		Status string `db:"status" json:"status"`
 		Count  int    `db:"cnt" json:"count"`
 	}
 
+	qb := h.app.DB().
+		Select("(created_at_epoch_ms / {:bucket}) * {:bucket} as bucket", "status", "COUNT(*) as cnt").
+		From("pt_workflow_status").
+		Where(dbx.NewExp("created_at_epoch_ms >= {:from} AND created_at_epoch_ms < {:to}", dbx.Params{"from": fromMs, "to": toMs})).
+		GroupBy("bucket", "status").
+		OrderBy("bucket ASC")
+
+	if name != "" {
+		qb.AndWhere(dbx.HashExp{"name": name})
+	}
+	if status != "" {
+		qb.AndWhere(dbx.HashExp{"status": status})
+	}
+	if tag != "" {
+		qb.AndWhere(dbx.Like("tags", tag))
+	}
+
 	var stats []bucketStat
-	err := h.app.DB().
-		NewQuery(`SELECT (created_at_epoch_ms / {:bucket}) * {:bucket} as bucket, status, COUNT(*) as cnt
-			FROM pt_workflow_status
-			WHERE ` + where + `
-			GROUP BY bucket, status
-			ORDER BY bucket ASC`).
-		Bind(params).
-		All(&stats)
+	err := qb.Build().Bind(dbx.Params{"bucket": bucketMs}).All(&stats)
 	if err != nil {
-		return e.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return e.InternalServerError("failed to query calendar stats", err)
 	}
 
 	type bucketResult struct {

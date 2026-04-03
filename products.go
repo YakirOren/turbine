@@ -52,18 +52,22 @@ func SendProduct(ctx context.Context, fileName string, data io.Reader, metadata 
 	}
 
 	var existingID string
-	dupErr := rt.app.DB().NewQuery(
-		"SELECT id FROM " + collectionProducts + " WHERE workflow_id = {:wid} AND function_id = {:fid} AND file_name = {:fn} LIMIT 1",
-	).Bind(dbx.Params{"wid": workflowID, "fid": functionID, "fn": fileName}).Row(&existingID)
+	dupErr := rt.app.DB().Select("id").
+		From(collectionProducts).
+		Where(dbx.HashExp{"workflow_id": workflowID, "function_id": functionID, "file_name": fileName}).
+		Limit(1).
+		Row(&existingID)
 	if dupErr == nil && existingID != "" {
 		return nil // Already stored — dedup
 	}
 
 	// Look up step name from operation outputs
 	var functionName string
-	_ = rt.app.DB().NewQuery(
-		"SELECT function_name FROM " + collectionOperationOutputs + " WHERE workflow_id = {:wid} AND function_id = {:fid} LIMIT 1",
-	).Bind(dbx.Params{"wid": workflowID, "fid": functionID}).Row(&functionName)
+	_ = rt.app.DB().Select("function_name").
+		From(collectionOperationOutputs).
+		Where(dbx.HashExp{"workflow_id": workflowID, "function_id": functionID}).
+		Limit(1).
+		Row(&functionName)
 
 	// Create record
 	record := core.NewRecord(col)

@@ -38,16 +38,9 @@ import { SchemaFormField, jsonSchemaToFields, getFieldDefaults, type SchemaField
 import { CodeMirrorEditor } from "@/components/codemirror";
 import { TableSkeleton } from "@/components/table-skeleton";
 import { timeAgo } from "@/lib/format";
+import type { PtKvResponse } from "@/types/pocketbase-types";
 
-interface KVRecord {
-  id: string;
-  key: string;
-  value: unknown;
-  schema?: unknown;
-  updated_at_epoch_ms: number;
-  created: string;
-  updated: string;
-}
+type KVRecord = PtKvResponse;
 
 function truncateValue(value: unknown, maxLen = 60): string {
   const str = JSON.stringify(value) ?? "undefined";

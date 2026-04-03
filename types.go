@@ -29,6 +29,7 @@ const (
 	StatusError                       StatusType = "ERROR"
 	StatusCancelled                   StatusType = "CANCELLED"
 	StatusMaxRecoveryAttemptsExceeded StatusType = "MAX_RECOVERY_ATTEMPTS_EXCEEDED"
+	StatusWaitingForApproval          StatusType = "WAITING_FOR_APPROVAL"
 )
 
 // Status contains information about a workflow's current state.
@@ -88,6 +89,7 @@ type StepInfo struct {
 // workflowState holds the runtime state for a workflow execution.
 type workflowState struct {
 	workflowID     string
+	workflowName   string
 	stepID         atomic.Int64
 	isWithinStep   bool
 	recovering     bool
@@ -305,7 +307,7 @@ type systemDatabase interface {
 	listWorkflows(ctx context.Context, input listWorkflowsDBInput) ([]Status, error)
 	updateWorkflowOutcome(ctx context.Context, input updateWorkflowOutcomeDBInput) error
 	awaitWorkflowResult(ctx context.Context, workflowID string, pollInterval time.Duration) (*string, error)
-	cancelWorkflow(ctx context.Context, input cancelWorkflowDBInput) error
+	cancelWorkflow(ctx context.Context, input cancelWorkflowDBInput) (bool, error)
 	resumeWorkflow(ctx context.Context, input resumeWorkflowDBInput) error
 	forkWorkflow(ctx context.Context, input forkWorkflowDBInput) (string, error)
 

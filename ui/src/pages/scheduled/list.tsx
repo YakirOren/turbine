@@ -36,18 +36,9 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { TableSkeleton } from "@/components/table-skeleton";
+import type { PtSchedulesResponse } from "@/types/pocketbase-types";
 
-interface Schedule {
-  id: string;
-  workflow_fqn: string;
-  input: any;
-  type: string;
-  cron_expression: string;
-  jitter: string;
-  scheduled_at: string;
-  enabled: boolean;
-  created: string;
-}
+type Schedule = PtSchedulesResponse;
 
 export function ScheduledList() {
   const queryClient = useQueryClient();

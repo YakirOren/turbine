@@ -45,22 +45,24 @@ type stepRow struct {
 func (h *handlers) stepsTree(e *core.RequestEvent) error {
 	workflowID := e.Request.PathValue("id")
 	if workflowID == "" {
-		return e.JSON(http.StatusBadRequest, map[string]string{"error": "missing workflow id"})
+		return e.BadRequestError("missing workflow id", nil)
 	}
 
 	record, err := h.app.FindRecordById("pt_workflow_status", workflowID)
 	if err != nil {
-		return e.JSON(http.StatusNotFound, map[string]string{"error": "workflow not found"})
+		return e.NotFoundError("workflow not found", nil)
 	}
 	workflowStatus := record.GetString("status")
 
 	var steps []stepRow
 	err = h.app.DB().
-		NewQuery("SELECT function_id, function_name, output, error, child_workflow_id, started_at_epoch_ms, ended_at_epoch_ms FROM pt_operation_outputs WHERE workflow_id = {:wfID} ORDER BY function_id ASC").
-		Bind(dbx.Params{"wfID": workflowID}).
+		Select("function_id", "function_name", "output", "error", "child_workflow_id", "started_at_epoch_ms", "ended_at_epoch_ms").
+		From("pt_operation_outputs").
+		Where(dbx.HashExp{"workflow_id": workflowID}).
+		OrderBy("function_id ASC").
 		All(&steps)
 	if err != nil {
-		return e.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return e.InternalServerError("failed to query workflow steps", err)
 	}
 
 	appStatus := record.GetString("app_status")

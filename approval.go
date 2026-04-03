@@ -51,6 +51,12 @@ func WaitForApproval(ctx Context, opts ...ApprovalOption) (ApprovalResult, error
 
 	ctx.SetAppStatus("waiting for approval", "yellow")
 
+	rt := runtimeFromContext(ctx)
+	wfState, _ := ctx.Value(workflowStateKey).(*workflowState)
+	if rt != nil && wfState != nil && !wfState.recovering {
+		go rt.dispatchEvent(wfState.workflowID, wfState.workflowName, StatusWaitingForApproval, nil, nil)
+	}
+
 	result, err := Recv[*ApprovalResult](ctx, approvalTopic, timeout)
 	if err != nil {
 		return ApprovalResult{}, err

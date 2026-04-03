@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -45,10 +46,37 @@ func CheckInventory(ctx context.Context) (int, error) {
 	return stock, nil
 }
 
+func ReserveStock(ctx context.Context) (bool, error) {
+	logger := turbine.LoggerFrom(ctx)
+	logger.Info("stock reserved")
+	time.Sleep(2 * time.Second)
+	return true, nil
+}
+
+func GenerateInvoice(ctx context.Context) (string, error) {
+	logger := turbine.LoggerFrom(ctx)
+	logger.Info("generating invoice PDF")
+	time.Sleep(1 * time.Second)
+
+	invoiceID := fmt.Sprintf("INV-%d", rand.IntN(100000))
+	content := fmt.Sprintf("Invoice %s\nDate: %s\nAmount: $%.2f", invoiceID, time.Now().Format("2006-01-02"), float64(rand.IntN(10000))/100)
+
+	err := turbine.SendProduct(ctx, invoiceID+".txt", bytes.NewReader([]byte(content)), map[string]any{
+		"type":       "invoice",
+		"invoice_id": invoiceID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to send invoice: %w", err)
+	}
+
+	logger.Info("invoice sent as product", "invoice_id", invoiceID)
+	return invoiceID, nil
+}
+
 func ShipOrder(ctx context.Context) (string, error) {
 	logger := turbine.LoggerFrom(ctx)
-	time.Sleep(3 * time.Second)
-	tracking := fmt.Sprintf("TRACK-%d", rand.IntN(100000))
+	time.Sleep(4 * time.Second)
+	tracking := fmt.Sprintf("tracking_%d", rand.IntN(100000))
 	logger.Info("order shipped", "tracking", tracking)
 	return tracking, nil
 }
@@ -58,6 +86,11 @@ func SendConfirmation(ctx context.Context) (string, error) {
 	logger.Info("confirmation email sent")
 	time.Sleep(1 * time.Second)
 	return "email_sent", nil
+}
+
+type OrderInput struct {
+	OrderID  string `json:"order_id"`
+	Customer string `json:"customer"`
 }
 
 // --- Input types ---
@@ -92,16 +125,19 @@ func EmailWorkflow(ctx turbine.Context, to string) (string, error) {
 }
 
 // OrderWorkflow processes an order end-to-end. Triggerable from the dashboard.
-func OrderWorkflow(ctx turbine.Context, orderID string) (string, error) {
+func OrderWorkflow(ctx turbine.Context, input OrderInput) (string, error) {
+	orderID := input.OrderID
 	ctx.SetAppStatus("validating", "yellow")
 
+	// Step 1: Validate
 	_, err := turbine.Do(ctx, ValidateOrder, turbine.WithStepName("validate"))
 	if err != nil {
 		return "", err
 	}
 
-	ctx.SetAppStatus("processing", "blue")
+	ctx.SetAppStatus("processing-payment", "blue")
 
+	// Steps 2-3: Charge payment and check inventory in parallel
 	chargeCh, err := turbine.DoAsync(ctx, ChargePayment, turbine.WithStepName("charge"))
 	if err != nil {
 		return "", err
@@ -120,8 +156,25 @@ func OrderWorkflow(ctx turbine.Context, orderID string) (string, error) {
 		return "", inventory.Err
 	}
 
+	ctx.SetAppStatus("reserving-stock", "orange")
+
+	// Step 4: Reserve stock
+	_, err = turbine.Do(ctx, ReserveStock, turbine.WithStepName("reserve"))
+	if err != nil {
+		return "", err
+	}
+
+	ctx.SetAppStatus("invoicing", "cyan")
+
+	// Step 5: Generate invoice product
+	_, err = turbine.Do(ctx, GenerateInvoice, turbine.WithStepName("invoice"))
+	if err != nil {
+		return "", err
+	}
+
 	ctx.SetAppStatus("shipping", "purple")
 
+	// Steps 6-7: Ship and send confirmation in parallel
 	shipCh, err := turbine.DoAsync(ctx, ShipOrder, turbine.WithStepName("ship"))
 	if err != nil {
 		return "", err
@@ -142,7 +195,7 @@ func OrderWorkflow(ctx turbine.Context, orderID string) (string, error) {
 
 	ctx.SetAppStatus("fulfilled", "green")
 
-	return fmt.Sprintf("order=%s charge=%s stock=%d tracking=%s %s",
+	return fmt.Sprintf("order %s: charge=%s, stock=%d, tracking=%s, %s",
 		orderID, charge.Result, inventory.Result, ship.Result, email.Result), nil
 }
 
@@ -296,13 +349,34 @@ func NotifyWorkflow(ctx turbine.Context, input NotifyInput) (string, error) {
 	return result, nil
 }
 
+type LogSender struct{}
+
+func (s *LogSender) Send(_ context.Context, product turbine.ProductRecord) error {
+	fmt.Printf("[ProductSender] file=%s url=%s metadata=%v\n", product.FileName, product.FileURL, product.Metadata)
+	return nil
+}
+
 func main() {
 	app := pocketbase.New()
 
-	rt := turbine.Setup(app, turbine.Config{})
+	rt := turbine.Setup(app, turbine.Config{
+		ProductSender: &LogSender{},
+	})
 
 	// Triggerable from dashboard (no schema — raw JSON input)
-	turbine.Register(rt, OrderWorkflow, turbine.WithDashboardTrigger(), turbine.WithTags("orders", "e2e"))
+	turbine.Register(rt, OrderWorkflow,
+		turbine.WithDashboardTrigger(),
+		turbine.WithTags("orders", "e2e"),
+		turbine.WithSummaryFunc(func(in OrderInput) string {
+			return fmt.Sprintf("Order %s for %s", in.OrderID, in.Customer)
+		}),
+		turbine.WithInputSchema(map[string]any{
+			"fields": []map[string]any{
+				{"name": "order_id", "type": "string", "label": "Order ID", "required": true, "placeholder": "ORD-123"},
+				{"name": "customer", "type": "string", "label": "Customer", "required": true, "placeholder": "Alice"},
+			},
+		}),
+	)
 	turbine.Register(rt, ReportWorkflow, turbine.WithDashboardTrigger(), turbine.WithTags("reports"))
 
 	// Triggerable with input schema — typed form in dashboard
@@ -349,6 +423,25 @@ func main() {
 	dashboard.Mount(app, rt)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		e.Router.POST("/order/{id}", func(re *core.RequestEvent) error {
+			id := re.Request.PathValue("id")
+
+			handle, err := turbine.Run(rt, OrderWorkflow, OrderInput{
+				OrderID:  id,
+				Customer: re.Request.URL.Query().Get("customer"),
+			})
+			if err != nil {
+				return re.JSON(500, map[string]string{"error": err.Error()})
+			}
+
+			result, err := handle.GetResult()
+			if err != nil {
+				return re.JSON(500, map[string]string{"error": err.Error()})
+			}
+
+			return re.JSON(200, map[string]string{"result": result})
+		})
+
 		e.Router.POST("/send-email/{to}", func(re *core.RequestEvent) error {
 			to := re.Request.PathValue("to")
 

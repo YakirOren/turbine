@@ -1,7 +1,7 @@
 import { Link, useLocation, Outlet } from "react-router";
 import { useGetIdentity, useLogout } from "@refinedev/core";
 import { useTheme } from "next-themes";
-import { LayoutList, Clock, LogOut, EllipsisVertical, Sun, Moon, Workflow, Database, Settings, Webhook } from "lucide-react";
+import { LayoutList, Clock, LogOut, EllipsisVertical, Sun, Moon, Workflow, Database, Settings, Webhook, Bell } from "lucide-react";
 import { TurbineLogo } from "@/components/turbine-logo";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
@@ -31,6 +31,7 @@ const navItems: NavItem[] = [
     icon: Settings,
     children: [
       { label: "Webhooks", path: "/settings/webhooks", icon: Webhook },
+      { label: "Notifications", path: "/settings/notifications", icon: Bell },
     ],
   },
 ];

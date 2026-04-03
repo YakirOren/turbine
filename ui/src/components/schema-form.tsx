@@ -9,7 +9,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { CodeMirrorEditor } from "@/components/codemirror";
 
 export interface SchemaField {
@@ -32,11 +32,13 @@ export function SchemaFormField({
   value,
   onChange,
   id,
+  error,
 }: {
   field: SchemaField;
   value: unknown;
   onChange: (value: unknown) => void;
   id: string;
+  error?: { message?: string };
 }) {
   const fieldId = `${id}-field-${field.name}`;
   const label = field.label ?? field.name;
@@ -61,7 +63,7 @@ export function SchemaFormField({
 
   if (field.type === "select" && field.options) {
     return (
-      <Field>
+      <Field data-invalid={!!error}>
         <FieldLabel htmlFor={fieldId}>
           {label}
           {field.required && <span className="text-destructive">*</span>}
@@ -70,7 +72,7 @@ export function SchemaFormField({
           <FieldDescription>{field.description}</FieldDescription>
         )}
         <Select value={String(value ?? "")} onValueChange={(v) => onChange(v)}>
-          <SelectTrigger id={fieldId}>
+          <SelectTrigger id={fieldId} aria-invalid={!!error}>
             <SelectValue placeholder={`Select ${label}`} />
           </SelectTrigger>
           <SelectContent>
@@ -81,6 +83,7 @@ export function SchemaFormField({
             ))}
           </SelectContent>
         </Select>
+        <FieldError errors={[error]} />
       </Field>
     );
   }
@@ -88,7 +91,7 @@ export function SchemaFormField({
   if (field.type === "multiselect" && field.options) {
     const selected = Array.isArray(value) ? (value as string[]) : [];
     return (
-      <Field>
+      <Field data-invalid={!!error}>
         <FieldLabel>
           {label}
           {field.required && <span className="text-destructive">*</span>}
@@ -108,13 +111,14 @@ export function SchemaFormField({
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+        <FieldError errors={[error]} />
       </Field>
     );
   }
 
   if (field.type === "textarea") {
     return (
-      <Field>
+      <Field data-invalid={!!error}>
         <FieldLabel htmlFor={fieldId}>
           {label}
           {field.required && <span className="text-destructive">*</span>}
@@ -124,10 +128,12 @@ export function SchemaFormField({
         )}
         <Textarea
           id={fieldId}
+          aria-invalid={!!error}
           value={String(value ?? "")}
           onChange={(e) => onChange(e.target.value)}
           placeholder={field.placeholder ?? ""}
         />
+        <FieldError errors={[error]} />
       </Field>
     );
   }
@@ -135,7 +141,7 @@ export function SchemaFormField({
   if (field.type === "json") {
     const strValue = typeof value === "string" ? value : JSON.stringify(value ?? {}, null, 2);
     return (
-      <Field>
+      <Field data-invalid={!!error}>
         <FieldLabel>
           {label}
           {field.required && <span className="text-destructive">*</span>}
@@ -155,12 +161,13 @@ export function SchemaFormField({
           placeholder={field.placeholder ?? "{}"}
           minHeight="80px"
         />
+        <FieldError errors={[error]} />
       </Field>
     );
   }
 
   return (
-    <Field>
+    <Field data-invalid={!!error}>
       <FieldLabel htmlFor={fieldId}>
         {label}
         {field.required && <span className="text-destructive">*</span>}
@@ -171,6 +178,7 @@ export function SchemaFormField({
       <Input
         id={fieldId}
         type={field.type === "number" ? "number" : "text"}
+        aria-invalid={!!error}
         value={String(value ?? "")}
         onChange={(e) =>
           onChange(
@@ -182,6 +190,7 @@ export function SchemaFormField({
         placeholder={field.placeholder ?? ""}
         className={field.type === "number" ? "font-mono" : ""}
       />
+      <FieldError errors={[error]} />
     </Field>
   );
 }

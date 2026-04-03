@@ -19,6 +19,7 @@ import { LoginPage } from "@/pages/login";
 import { KVList } from "@/pages/kv/index";
 import { SettingsLayout } from "@/pages/settings/index";
 import { WebhookList } from "@/pages/webhooks/index";
+import { NotificationList } from "@/pages/notifications/index";
 
 function App() {
   return (
@@ -66,6 +67,7 @@ function App() {
             <Route path="/settings" element={<SettingsLayout />}>
               <Route index element={<Navigate to="webhooks" replace />} />
               <Route path="webhooks" element={<WebhookList />} />
+              <Route path="notifications" element={<NotificationList />} />
             </Route>
           </Route>
 

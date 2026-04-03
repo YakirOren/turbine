@@ -344,20 +344,15 @@ func (rt *Runtime) syncRegisteredWorkflows() error {
 	})
 
 	// Remove records for workflows that are no longer registered.
-	var registeredFQNs []any
-	rt.workflowRegistry.Range(func(key, _ any) bool {
-		registeredFQNs = append(registeredFQNs, key)
-		return true
-	})
-	if len(registeredFQNs) > 0 {
-		_, err := rt.app.DB().Delete(collectionWorkflows, dbx.NotIn("fqn", registeredFQNs...)).Execute()
-		if err != nil {
-			return err
-		}
-	} else {
-		_, err := rt.app.DB().Delete(collectionWorkflows, nil).Execute()
-		if err != nil {
-			return err
+	existing, err := rt.app.FindAllRecords(collectionWorkflows)
+	if err != nil {
+		return err
+	}
+	for _, rec := range existing {
+		if _, ok := rt.workflowRegistry.Load(rec.GetString("fqn")); !ok {
+			if err := rt.app.Delete(rec); err != nil {
+				rt.app.Logger().Error("failed to delete stale workflow", "source", "system", "fqn", rec.GetString("fqn"), "error", err)
+			}
 		}
 	}
 	return nil

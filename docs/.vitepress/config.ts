@@ -46,6 +46,7 @@ export default defineConfig({
           { text: "Send / Recv", link: "/concepts/communication" },
           { text: "Approvals", link: "/concepts/approvals" },
           { text: "Webhooks", link: "/concepts/webhooks" },
+          { text: "Notifications", link: "/concepts/notifications" },
         ],
       },
       {
@@ -86,6 +87,7 @@ export default defineConfig({
           { text: "Lifecycle", link: "/examples/lifecycle" },
           { text: "App Access", link: "/examples/app-access" },
           { text: "Connector", link: "/examples/connector" },
+          { text: "Products", link: "/examples/products" },
           { text: "Dashboard", link: "/examples/dashboard" },
         ],
       },

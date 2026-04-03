@@ -109,3 +109,5 @@ Products go through these statuses:
 ::: tip
 Products are cascade-deleted when their parent workflow is garbage collected. If you need to keep products longer than the GC retention period, copy them to external storage via a `ProductSender`.
 :::
+
+See the [products example](/examples/products) for a working demo.

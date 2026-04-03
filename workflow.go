@@ -569,6 +569,10 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	}
 	insertResult, err := rt.systemDB.insertStatus(rt.ctx, insertInput)
 	if err != nil {
+		var ptErr *Error
+		if errors.As(err, &ptErr) && ptErr.Code == ErrDeadLetter {
+			go rt.dispatchEvent(workflowID, params.WorkflowName, StatusMaxRecoveryAttemptsExceeded, nil, &ptErr.Message)
+		}
 		return nil, fmt.Errorf("failed to insert workflow: %w", err)
 	}
 
@@ -587,6 +591,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	// Create workflow state
 	wfState := &workflowState{
 		workflowID:     workflowID,
+		workflowName:   params.WorkflowName,
 		recovering:     insertResult.hasSteps,
 		appStatus:      insertResult.appStatus,
 		appStatusColor: insertResult.appStatusColor,
@@ -666,8 +671,8 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 			return
 		}
 
-		// Dispatch webhooks after outcome is recorded
-		go rt.dispatchWebhooks(workflowID, params.WorkflowName, outcomeStatus, encodedOutput, errorMsg)
+		// Dispatch webhooks and notifications after outcome is recorded
+		go rt.dispatchEvent(workflowID, params.WorkflowName, outcomeStatus, encodedOutput, errorMsg)
 
 		outcomeChan <- workflowOutcome[any]{result: result, err: fnErr}
 		close(outcomeChan)
@@ -1086,13 +1091,29 @@ func Retrieve[R any](rt *Runtime, workflowID string) Handle[R] {
 
 // Cancel cancels a workflow by ID.
 func (rt *Runtime) Cancel(workflowID string) error {
+	var transitioned bool
 	err := retry(rt.ctx, func() error {
-		return rt.systemDB.cancelWorkflow(rt.ctx, cancelWorkflowDBInput{workflowID: workflowID})
+		changed, err := rt.systemDB.cancelWorkflow(rt.ctx, cancelWorkflowDBInput{workflowID: workflowID})
+		if err != nil {
+			return err
+		}
+		transitioned = changed
+		return nil
 	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
 	if err != nil {
 		return err
 	}
-	rt.app.Logger().Info("workflow cancelled", "workflow_id", workflowID, "source", "system")
+	if transitioned {
+		rt.app.Logger().Info("workflow cancelled", "workflow_id", workflowID, "source", "system")
+		record, err := rt.app.FindRecordById(collectionStatus, workflowID)
+		if err != nil {
+			rt.app.Logger().Error("failed to look up cancelled workflow for dispatch", "workflow_id", workflowID, "error", err, "source", "system")
+			return nil
+		}
+		name := record.GetString("name")
+		go rt.dispatchEvent(workflowID, name, StatusCancelled, nil, nil)
+	}
+
 	return nil
 }
 

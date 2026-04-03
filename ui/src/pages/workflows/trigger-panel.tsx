@@ -25,17 +25,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Field, FieldLabel, FieldDescription } from "@/components/ui/field";
+import { Field, FieldLabel, FieldDescription, FieldError } from "@/components/ui/field";
 import { SchemaFormField, getFieldDefaults, type InputSchema } from "@/components/schema-form";
+import type { PtWorkflowsResponse } from "@/types/pocketbase-types";
 
-interface RegisteredWorkflow {
-  id: string;
-  name: string;
-  fqn: string;
-  triggerable: boolean;
-  cron_schedule: string;
-  input_schema?: InputSchema;
-}
+type RegisteredWorkflow = PtWorkflowsResponse<InputSchema>;
 
 type TimingMode = "now" | "schedule" | "cron";
 
@@ -62,7 +56,7 @@ export function TriggerRunButton() {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { control, handleSubmit: rhfSubmit, reset, watch, setValue, getValues } = useForm<TriggerFormValues>({
+  const { control, handleSubmit: rhfSubmit, reset, watch, setValue, getValues, setError: setFieldError, formState: { errors: fieldErrors }, clearErrors } = useForm<TriggerFormValues>({
     resolver: zodResolver(triggerFormSchema),
     defaultValues: {
       selectedFqn: "",
@@ -173,32 +167,37 @@ export function TriggerRunButton() {
 
   const handleSubmit = () => {
     setError(null);
+    clearErrors();
     const values = getValues();
 
+    let hasValidationError = false;
     let parsedInput: unknown;
     if (hasSchema) {
       for (const field of schema!.fields) {
         if (field.required && (values.formValues[field.name] === "" || values.formValues[field.name] === undefined)) {
-          setError(`${field.label ?? field.name} is required`);
-          return;
+          setFieldError(`formValues.${field.name}` as any, {
+            message: `${field.label ?? field.name} is required`,
+          });
+          hasValidationError = true;
         }
       }
+      if (hasValidationError) return;
       parsedInput = values.formValues;
     } else {
       try {
         parsedInput = JSON.parse(values.input);
       } catch {
-        setError("Invalid JSON input");
+        setFieldError("input", { message: "Invalid JSON input" });
         return;
       }
     }
 
     if (values.timing === "schedule" && !values.scheduledAt) {
-      setError("Scheduled time is required");
+      setFieldError("scheduledAt", { message: "Scheduled time is required" });
       return;
     }
     if (values.timing === "cron" && !values.cronExpression) {
-      setError("Cron expression is required");
+      setFieldError("cronExpression", { message: "Cron expression is required" });
       return;
     }
 
@@ -280,22 +279,27 @@ export function TriggerRunButton() {
                     setValue("formValues", { ...current, [field.name]: v });
                   }}
                   id={id}
+                  error={(fieldErrors.formValues as any)?.[field.name]}
                 />
               ))}
             </div>
           ) : (
-            <Field>
+            <Field data-invalid={!!fieldErrors.input}>
               <FieldLabel htmlFor={`${id}-input`}>Input</FieldLabel>
               <Controller
                 control={control}
                 name="input"
-                render={({ field }) => (
-                  <Textarea
-                    {...field}
-                    id={`${id}-input`}
-                    className="min-h-[120px] font-mono"
-                    placeholder="{}"
-                  />
+                render={({ field, fieldState }) => (
+                  <>
+                    <Textarea
+                      {...field}
+                      id={`${id}-input`}
+                      aria-invalid={!!fieldState.error}
+                      className="min-h-[120px] font-mono"
+                      placeholder="{}"
+                    />
+                    <FieldError errors={[fieldState.error]} />
+                  </>
                 )}
               />
             </Field>
@@ -329,17 +333,21 @@ export function TriggerRunButton() {
           </Field>
 
           {timing === "schedule" && (
-            <Field>
+            <Field data-invalid={!!fieldErrors.scheduledAt}>
               <FieldLabel htmlFor={`${id}-scheduled-at`}>Scheduled Time</FieldLabel>
               <Controller
                 control={control}
                 name="scheduledAt"
-                render={({ field }) => (
-                  <Input
-                    {...field}
-                    id={`${id}-scheduled-at`}
-                    type="datetime-local"
-                  />
+                render={({ field, fieldState }) => (
+                  <>
+                    <Input
+                      {...field}
+                      id={`${id}-scheduled-at`}
+                      type="datetime-local"
+                      aria-invalid={!!fieldState.error}
+                    />
+                    <FieldError errors={[fieldState.error]} />
+                  </>
                 )}
               />
             </Field>
@@ -347,18 +355,22 @@ export function TriggerRunButton() {
 
           {timing === "cron" && (
             <>
-              <Field>
+              <Field data-invalid={!!fieldErrors.cronExpression}>
                 <FieldLabel htmlFor={`${id}-cron`}>Cron Expression</FieldLabel>
                 <Controller
                   control={control}
                   name="cronExpression"
-                  render={({ field }) => (
-                    <Input
-                      {...field}
-                      id={`${id}-cron`}
-                      className="font-mono"
-                      placeholder="0 * * * *"
-                    />
+                  render={({ field, fieldState }) => (
+                    <>
+                      <Input
+                        {...field}
+                        id={`${id}-cron`}
+                        className="font-mono"
+                        placeholder="0 * * * *"
+                        aria-invalid={!!fieldState.error}
+                      />
+                      <FieldError errors={[fieldState.error]} />
+                    </>
                   )}
                 />
               </Field>

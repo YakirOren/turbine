@@ -2,6 +2,8 @@
 
 Turbine sends HTTP POST requests when workflows complete. Configured via the `pt_webhooks` collection — manageable from the dashboard or the PocketBase API.
 
+For human-readable notifications to Slack, Discord, email, etc., see [Notifications](./notifications.md).
+
 ## Creating a Webhook
 
 Create a record in `pt_webhooks` with:
@@ -20,8 +22,9 @@ Create a record in `pt_webhooks` with:
 | `workflow.SUCCESS` | Workflow completed successfully |
 | `workflow.ERROR` | Workflow failed with an error |
 | `workflow.CANCELLED` | Workflow was cancelled |
-| `workflow.MAX_RECOVERY_ATTEMPTS_EXCEEDED` | Workflow exceeded max recovery retries |
-| `workflow.*` | Any workflow completion |
+| `workflow.WAITING_FOR_APPROVAL` | Workflow is paused at an approval gate |
+| `workflow.MAX_RECOVERY_ATTEMPTS_EXCEEDED` | Workflow exceeded max recovery attempts (dead letter) |
+| `workflow.*` | Any of the above events |
 
 Example events array: `["workflow.SUCCESS", "workflow.ERROR"]`
 

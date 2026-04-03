@@ -15,6 +15,7 @@ const (
 	collectionKV                 = "pt_kv"
 	collectionWebhooks           = "pt_webhooks"
 	collectionWorkflows          = "pt_workflows"
+	collectionAlertChannels      = "pt_alert_channels"
 )
 
 func init() {
@@ -205,6 +206,30 @@ func init() {
 		col.Fields.RemoveByName("summary")
 		return app.Save(col)
 	}, "pt_9_add_summary")
+}
+
+func init() {
+	core.AppMigrations.Register(upCreateAlertChannels, downCreateAlertChannels, "pt_10_create_alert_channels")
+}
+
+func upCreateAlertChannels(app core.App) error {
+	alertChannels := core.NewBaseCollection(collectionAlertChannels)
+	alertChannels.Fields.Add(
+		&core.TextField{Name: "name", Required: true},
+		&core.TextField{Name: "url", Required: true},
+		&core.JSONField{Name: "events", Required: true},
+		&core.BoolField{Name: "enabled"},
+		&core.AutodateField{Name: "created", OnCreate: true},
+	)
+	return app.Save(alertChannels)
+}
+
+func downCreateAlertChannels(app core.App) error {
+	col, err := app.FindCollectionByNameOrId(collectionAlertChannels)
+	if err != nil {
+		return nil
+	}
+	return app.Delete(col)
 }
 
 func upCreateCollections(app core.App) error {

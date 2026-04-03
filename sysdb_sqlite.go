@@ -473,7 +473,7 @@ func (s *sqliteSysDB) awaitWorkflowResult(ctx context.Context, workflowID string
 	}
 }
 
-func (s *sqliteSysDB) cancelWorkflow(ctx context.Context, input cancelWorkflowDBInput) error {
+func (s *sqliteSysDB) cancelWorkflow(ctx context.Context, input cancelWorkflowDBInput) (bool, error) {
 	result, err := s.app.DB().NewQuery(`UPDATE pt_workflow_status
 		SET status = {:status}, updated_at_epoch_ms = {:updated_at}
 		WHERE id = {:id}
@@ -487,16 +487,17 @@ func (s *sqliteSysDB) cancelWorkflow(ctx context.Context, input cancelWorkflowDB
 	}).Execute()
 
 	if err != nil {
-		return fmt.Errorf("failed to update workflow status to CANCELLED: %w", err)
+		return false, fmt.Errorf("failed to update workflow status to CANCELLED: %w", err)
 	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
 		// Either doesn't exist or already in a terminal state — both are fine
 		if err := s.workflowExists(input.workflowID); err != nil {
-			return err
+			return false, err
 		}
+		return false, nil
 	}
-	return nil
+	return true, nil
 }
 
 func (s *sqliteSysDB) resumeWorkflow(ctx context.Context, input resumeWorkflowDBInput) error {

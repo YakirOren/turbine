@@ -1,182 +1,157 @@
-import { useState } from "react";
-import { useList } from "@refinedev/core";
-import type { CrudFilters, CrudSort } from "@refinedev/core";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { StatusBadge, AppStatusBadge } from "@/components/status-badge";
-import { TableSkeleton } from "@/components/table-skeleton";
-import { formatTimestamp, formatDuration } from "@/lib/format";
+import {useState} from "react";
+import type {CrudFilters, CrudSort} from "@refinedev/core";
+import {useList} from "@refinedev/core";
+import {Table, TableBody, TableCell, TableHead, TableHeader, TableRow,} from "@/components/ui/table";
+import {Button} from "@/components/ui/button";
+import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue,} from "@/components/ui/select";
+import {AppStatusBadge, StatusBadge} from "@/components/status-badge";
+import {TableSkeleton} from "@/components/table-skeleton";
+import {formatDuration, formatTimestamp} from "@/lib/format";
+import type {PtWorkflowStatusResponse} from "@/types/pocketbase-types";
 
-export interface WorkflowRecord {
-  id: string;
-  status: string;
-  name: string;
-  executor_id: string;
-  application_version: string;
-  created_at_epoch_ms: number;
-  updated_at_epoch_ms: number;
-  queue_name: string;
-  priority: number;
-  app_status: string;
-  app_status_color: string;
-  summary: string;
-}
+export type WorkflowRecord = PtWorkflowStatusResponse;
 
 interface Props {
-  filters: CrudFilters;
-  sorters: CrudSort[];
-  onRowClick: (record: WorkflowRecord) => void;
+    filters: CrudFilters;
+    sorters: CrudSort[];
+    onRowClick: (record: WorkflowRecord) => void;
 }
 
 const tableColumns = [
-  { key: "created_at_epoch_ms", header: "Created At" },
-  { key: "name", header: "Workflow Name" },
-  { key: "summary", header: "Summary" },
-  { key: "status", header: "Status" },
-  { key: "duration", header: "Duration" },
-  { key: "app_status", header: "App Status" },
+    {key: "created_at_epoch_ms", header: "Created At"},
+    {key: "name", header: "Workflow Name"},
+    {key: "summary", header: "Summary"},
+    {key: "status", header: "Status"},
+    {key: "duration", header: "Duration"},
+    {key: "app_status", header: "App Status"},
 ];
 
-export function WorkflowTable({ filters, sorters, onRowClick }: Props) {
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+export function WorkflowTable({filters, sorters, onRowClick}: Props) {
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
 
-  const { result, query: listQuery } = useList<WorkflowRecord>({
-    resource: "pt_workflow_status",
-    filters,
-    sorters,
-    pagination: { currentPage, pageSize },
-    liveMode: "auto",
-    queryOptions: { refetchInterval: 5000 },
-  });
+    const {result, query: listQuery} = useList<WorkflowRecord>({
+        resource: "pt_workflow_status",
+        filters,
+        sorters,
+        pagination: {currentPage, pageSize},
+        liveMode: "auto",
+        queryOptions: {refetchInterval: 5000},
+    });
 
-  const rows = result.data ?? [];
-  const total = result.total ?? 0;
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+    const rows = result.data ?? [];
+    const total = result.total ?? 0;
+    const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
-  if (listQuery.isLoading) {
-    return <TableSkeleton columns={tableColumns.length} headers={tableColumns.map((c) => c.header)} />;
-  }
+    if (listQuery.isLoading) {
+        return <TableSkeleton columns={tableColumns.length} headers={tableColumns.map((c) => c.header)}/>;
+    }
 
-  return (
-    <div>
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {tableColumns.map((col) => (
-                <TableHead key={col.key}>{col.header}</TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.length ? (
-              rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  className="cursor-pointer"
-                  onClick={() => onRowClick(row)}
-                >
-                  <TableCell>
-                    {row.created_at_epoch_ms
-                      ? formatTimestamp(row.created_at_epoch_ms)
-                      : "\u2014"}
-                  </TableCell>
-                  <TableCell>{row.name}</TableCell>
-                  <TableCell>
+    return (
+        <div>
+            <div className="rounded-md border">
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            {tableColumns.map((col) => (
+                                <TableHead key={col.key}>{col.header}</TableHead>
+                            ))}
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {rows.length ? (
+                            rows.map((row) => (
+                                <TableRow
+                                    key={row.id}
+                                    className="cursor-pointer"
+                                    onClick={() => onRowClick(row)}
+                                >
+                                    <TableCell>
+                                        {row.created_at_epoch_ms
+                                            ? formatTimestamp(row.created_at_epoch_ms)
+                                            : "\u2014"}
+                                    </TableCell>
+                                    <TableCell>{row.name}</TableCell>
+                                    <TableCell>
                     <span className="block font-mono text-xs text-muted-foreground max-w-[300px] truncate">
                       {row.summary || "\u2014"}
                     </span>
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge status={row.status} />
-                  </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {row.created_at_epoch_ms && row.updated_at_epoch_ms && row.updated_at_epoch_ms > row.created_at_epoch_ms
-                      ? formatDuration(row.updated_at_epoch_ms - row.created_at_epoch_ms)
-                      : "\u2014"}
-                  </TableCell>
-                  <TableCell>
-                    <AppStatusBadge
-                      label={row.app_status}
-                      color={row.app_status_color}
-                    />
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={tableColumns.length}
-                  className="h-24 text-center"
-                >
-                  No workflows found.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-      <div className="flex items-center justify-between py-4">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span>Rows per page</span>
-          <Select
-            value={String(pageSize)}
-            onValueChange={(value) => {
-              setPageSize(Number(value));
-              setCurrentPage(1);
-            }}
-          >
-            <SelectTrigger className="h-8 w-[70px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {[10, 25, 50, 100].map((size) => (
-                <SelectItem key={size} value={String(size)}>
-                  {size}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex items-center gap-4">
+                                    </TableCell>
+                                    <TableCell>
+                                        <StatusBadge status={row.status}/>
+                                    </TableCell>
+                                    <TableCell className="font-mono text-xs text-muted-foreground">
+                                        {row.created_at_epoch_ms && row.updated_at_epoch_ms && row.updated_at_epoch_ms > row.created_at_epoch_ms
+                                            ? formatDuration(row.updated_at_epoch_ms - row.created_at_epoch_ms)
+                                            : "\u2014"}
+                                    </TableCell>
+                                    <TableCell>
+                                        <AppStatusBadge
+                                            label={row.app_status}
+                                            color={row.app_status_color}
+                                        />
+                                    </TableCell>
+                                </TableRow>
+                            ))
+                        ) : (
+                            <TableRow>
+                                <TableCell
+                                    colSpan={tableColumns.length}
+                                    className="h-24 text-center"
+                                >
+                                    No workflows found.
+                                </TableCell>
+                            </TableRow>
+                        )}
+                    </TableBody>
+                </Table>
+            </div>
+            <div className="flex items-center justify-between py-4">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <span>Rows per page</span>
+                    <Select
+                        value={String(pageSize)}
+                        onValueChange={(value) => {
+                            setPageSize(Number(value));
+                            setCurrentPage(1);
+                        }}
+                    >
+                        <SelectTrigger className="h-8 w-[70px]">
+                            <SelectValue/>
+                        </SelectTrigger>
+                        <SelectContent>
+                            {[10, 25, 50, 100].map((size) => (
+                                <SelectItem key={size} value={String(size)}>
+                                    {size}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="flex items-center gap-4">
           <span className="text-sm text-muted-foreground">
             Page {currentPage} of {pageCount}
           </span>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCurrentPage(currentPage - 1)}
-              disabled={currentPage <= 1}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCurrentPage(currentPage + 1)}
-              disabled={currentPage >= pageCount}
-            >
-              Next
-            </Button>
-          </div>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCurrentPage(currentPage - 1)}
+                            disabled={currentPage <= 1}
+                        >
+                            Previous
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCurrentPage(currentPage + 1)}
+                            disabled={currentPage >= pageCount}
+                        >
+                            Next
+                        </Button>
+                    </div>
+                </div>
+            </div>
         </div>
-      </div>
-    </div>
-  );
+    );
 }

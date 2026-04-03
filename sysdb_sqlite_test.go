@@ -211,7 +211,7 @@ func TestCancelWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = sysDB.cancelWorkflow(context.Background(), cancelWorkflowDBInput{workflowID: wfID})
+	_, err = sysDB.cancelWorkflow(context.Background(), cancelWorkflowDBInput{workflowID: wfID})
 	if err != nil {
 		t.Fatalf("cancelWorkflow failed: %v", err)
 	}
