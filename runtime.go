@@ -55,6 +55,10 @@ type Runtime struct {
 	// Disabled compile-time schedules (key = schedule name, value = struct{}{})
 	disabledSchedules *sync.Map
 
+	// Cached dispatch targets — reloaded via collection hooks
+	webhookCache      atomic.Value // []cachedWebhook
+	alertChannelCache atomic.Value // []cachedAlertChannel
+
 	productSender ProductSender
 }
 
@@ -147,6 +151,10 @@ func (rt *Runtime) Launch() error {
 	if err := rt.scheduleManager.loadExisting(rt); err != nil {
 		rt.app.Logger().Error("failed to load schedules", "error", err)
 	}
+
+	// Cache dispatch targets and register hooks for invalidation
+	rt.reloadDispatchCaches()
+	rt.registerDispatchHooks()
 
 	// Register garbage collection cron job if retention is positive
 	if rt.config.GCRetention > 0 {

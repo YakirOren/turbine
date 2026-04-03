@@ -10,6 +10,12 @@ import (
 	"time"
 )
 
+type cachedWebhook struct {
+	url    string
+	secret string
+	events []string
+}
+
 type webhookPayload struct {
 	Event      string `json:"event"`
 	WorkflowID string `json:"workflow_id"`
@@ -20,9 +26,30 @@ type webhookPayload struct {
 	Timestamp  string `json:"timestamp"`
 }
 
-func (rt *Runtime) dispatchWebhooks(workflowID, name string, status StatusType, output *string, errorMsg *string) {
+func (rt *Runtime) reloadWebhookCache() {
 	records, err := rt.app.FindAllRecords(collectionWebhooks)
-	if err != nil || len(records) == 0 {
+	if err != nil {
+		rt.app.Logger().Error("failed to load webhooks for cache", "error", err)
+		return
+	}
+
+	var webhooks []cachedWebhook
+	for _, r := range records {
+		if !r.GetBool("enabled") {
+			continue
+		}
+		webhooks = append(webhooks, cachedWebhook{
+			url:    r.GetString("url"),
+			secret: r.GetString("secret"),
+			events: parseEvents(r.Get("events")),
+		})
+	}
+	rt.webhookCache.Store(webhooks)
+}
+
+func (rt *Runtime) dispatchWebhooks(workflowID, name string, status StatusType, output *string, errorMsg *string) {
+	webhooks, _ := rt.webhookCache.Load().([]cachedWebhook)
+	if len(webhooks) == 0 {
 		return
 	}
 
@@ -53,30 +80,10 @@ func (rt *Runtime) dispatchWebhooks(workflowID, name string, status StatusType, 
 		return
 	}
 
-	for _, record := range records {
-		if !record.GetBool("enabled") {
+	for _, wh := range webhooks {
+		if !matchesEvent(wh.events, eventName) {
 			continue
 		}
-
-		var events []string
-		eventsRaw := record.Get("events")
-		if b, err := json.Marshal(eventsRaw); err == nil {
-			_ = json.Unmarshal(b, &events)
-		}
-
-		matched := false
-		for _, ev := range events {
-			if ev == eventName || ev == "workflow.*" {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			continue
-		}
-
-		url := record.GetString("url")
-		secret := record.GetString("secret")
 
 		go func(url, secret string) {
 			req, err := http.NewRequest("POST", url, bytes.NewReader(body))
@@ -100,6 +107,6 @@ func (rt *Runtime) dispatchWebhooks(workflowID, name string, status StatusType, 
 				return
 			}
 			resp.Body.Close()
-		}(url, secret)
+		}(wh.url, wh.secret)
 	}
 }

@@ -1,46 +1,51 @@
 package turbine
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 
 	"github.com/nicholas-fedor/shoutrrr"
 )
 
-func (rt *Runtime) dispatchNotifications(workflowID, name string, status StatusType, errorMsg *string) {
+type cachedAlertChannel struct {
+	url    string
+	events []string
+}
+
+func (rt *Runtime) reloadAlertChannelCache() {
 	records, err := rt.app.FindAllRecords(collectionAlertChannels)
-	if err != nil || len(records) == 0 {
+	if err != nil {
+		rt.app.Logger().Error("failed to load alert channels for cache", "error", err)
+		return
+	}
+
+	var channels []cachedAlertChannel
+	for _, r := range records {
+		if !r.GetBool("enabled") {
+			continue
+		}
+		channels = append(channels, cachedAlertChannel{
+			url:    r.GetString("url"),
+			events: parseEvents(r.Get("events")),
+		})
+	}
+	rt.alertChannelCache.Store(channels)
+}
+
+func (rt *Runtime) dispatchNotifications(workflowID, name string, status StatusType, errorMsg *string) {
+	channels, _ := rt.alertChannelCache.Load().([]cachedAlertChannel)
+	if len(channels) == 0 {
 		return
 	}
 
 	eventName := "workflow." + string(status)
-
 	message := formatNotificationMessage(workflowID, name, status, errorMsg)
 
-	for _, record := range records {
-		if !record.GetBool("enabled") {
+	for _, ch := range channels {
+		if !matchesEvent(ch.events, eventName) {
 			continue
 		}
 
-		var events []string
-		eventsRaw := record.Get("events")
-		if b, err := json.Marshal(eventsRaw); err == nil {
-			_ = json.Unmarshal(b, &events)
-		}
-
-		matched := false
-		for _, ev := range events {
-			if ev == eventName || ev == "workflow.*" {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			continue
-		}
-
-		rawURL := record.GetString("url")
 		go func(rawURL string) {
 			if err := shoutrrr.Send(rawURL, message); err != nil {
 				scheme := extractScheme(rawURL)
@@ -50,7 +55,7 @@ func (rt *Runtime) dispatchNotifications(workflowID, name string, status StatusT
 					"source", "system",
 				)
 			}
-		}(rawURL)
+		}(ch.url)
 	}
 }
 

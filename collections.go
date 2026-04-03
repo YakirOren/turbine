@@ -232,6 +232,28 @@ func downCreateAlertChannels(app core.App) error {
 	return app.Delete(col)
 }
 
+func init() {
+	core.AppMigrations.Register(func(app core.App) error {
+		col, err := app.FindCollectionByNameOrId(collectionStatus)
+		if err != nil {
+			return nil // collection created by pt_1 which includes these indexes
+		}
+		col.AddIndex("idx_workflow_status_queue_status", false, "queue_name, status", "")
+		col.AddIndex("idx_workflow_status_created", false, "created_at_epoch_ms", "")
+		col.AddIndex("idx_workflow_status_queue_partition", false, "queue_name, status, queue_partition_key", "")
+		return app.Save(col)
+	}, func(app core.App) error {
+		col, err := app.FindCollectionByNameOrId(collectionStatus)
+		if err != nil {
+			return nil
+		}
+		col.RemoveIndex("idx_workflow_status_queue_status")
+		col.RemoveIndex("idx_workflow_status_created")
+		col.RemoveIndex("idx_workflow_status_queue_partition")
+		return app.Save(col)
+	}, "pt_11_add_performance_indexes")
+}
+
 func upCreateCollections(app core.App) error {
 	// 1. Workflow status
 	wfStatus := core.NewBaseCollection(collectionStatus)
@@ -260,6 +282,9 @@ func upCreateCollections(app core.App) error {
 	)
 	wfStatus.AddIndex("idx_workflow_status_executor", false, "executor_id, status, application_version", "")
 	wfStatus.AddIndex("idx_workflow_status_dedup", true, "queue_name, deduplication_id", "deduplication_id != ''")
+	wfStatus.AddIndex("idx_workflow_status_queue_status", false, "queue_name, status", "")
+	wfStatus.AddIndex("idx_workflow_status_created", false, "created_at_epoch_ms", "")
+	wfStatus.AddIndex("idx_workflow_status_queue_partition", false, "queue_name, status, queue_partition_key", "")
 	if err := app.Save(wfStatus); err != nil {
 		return err
 	}
