@@ -16,19 +16,17 @@ const TIME_RANGES = [
 ];
 
 const STATUSES = [
-  "PENDING",
-  "ENQUEUED",
-  "SUCCESS",
-  "ERROR",
-  "CANCELLED",
-  "MAX_RECOVERY_ATTEMPTS_EXCEEDED",
+  { value: "PENDING", label: "Pending", dot: "bg-yellow-400" },
+  { value: "ENQUEUED", label: "Enqueued", dot: "bg-blue-400" },
+  { value: "SUCCESS", label: "Success", dot: "bg-green-400" },
+  { value: "ERROR", label: "Error", dot: "bg-red-400" },
+  { value: "CANCELLED", label: "Cancelled", dot: "bg-gray-400" },
+  { value: "MAX_RECOVERY_ATTEMPTS_EXCEEDED", label: "Max Retries", dot: "bg-red-400" },
 ];
 
 export interface WorkflowFilters {
   timeRange: string;
   name: string;
-  workflowId: string;
-  appVersion: string;
   status: string;
 }
 
@@ -61,24 +59,10 @@ export function WorkflowFilterBar({ filters, onChange }: Props) {
       </Select>
 
       <Input
-        placeholder="Workflow name"
+        placeholder="Search by name..."
         value={filters.name}
         onChange={(e) => update("name", e.target.value)}
-        className="w-44"
-      />
-
-      <Input
-        placeholder="Workflow ID"
-        value={filters.workflowId}
-        onChange={(e) => update("workflowId", e.target.value)}
-        className="w-44"
-      />
-
-      <Input
-        placeholder="App version"
-        value={filters.appVersion}
-        onChange={(e) => update("appVersion", e.target.value)}
-        className="w-36"
+        className="w-52"
       />
 
       <Select
@@ -91,8 +75,11 @@ export function WorkflowFilterBar({ filters, onChange }: Props) {
         <SelectContent>
           <SelectItem value="all">All statuses</SelectItem>
           {STATUSES.map((s) => (
-            <SelectItem key={s} value={s}>
-              {s}
+            <SelectItem key={s.value} value={s.value}>
+              <span className="flex items-center gap-2">
+                <span className={`h-2 w-2 rounded-full ${s.dot}`} />
+                {s.label}
+              </span>
             </SelectItem>
           ))}
         </SelectContent>

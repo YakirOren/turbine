@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/YakirOren/pocketflow"
+	"github.com/YakirOren/turbine"
 	"github.com/pocketbase/pocketbase"
 )
 
@@ -14,8 +14,8 @@ func DoCleanup(ctx context.Context) (int, error) {
 	return 42, nil
 }
 
-func Cleanup(ctx pocketflow.Context, scheduledAt time.Time) (string, error) {
-	_, err := pocketflow.Do(ctx, DoCleanup, pocketflow.WithStepName("cleanup"))
+func Cleanup(ctx turbine.Context, scheduledAt time.Time) (string, error) {
+	_, err := turbine.Do(ctx, DoCleanup, turbine.WithStepName("cleanup"))
 	if err != nil {
 		return "", err
 	}
@@ -25,10 +25,10 @@ func Cleanup(ctx pocketflow.Context, scheduledAt time.Time) (string, error) {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Setup(app, pocketflow.Config{})
+	rt := turbine.Setup(app, turbine.Config{})
 
 	// Run cleanup every hour
-	pocketflow.Register(rt, Cleanup, pocketflow.WithSchedule("0 * * * *"))
+	turbine.Register(rt, Cleanup, turbine.WithSchedule("0 * * * *"))
 
 	if err := app.Start(); err != nil {
 		log.Fatal(err)

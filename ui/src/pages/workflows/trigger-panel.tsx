@@ -54,7 +54,7 @@ export function TriggerRunButton() {
     if (!open) return;
     setLoadingWorkflows(true);
     pbClient
-      .send<RegisteredWorkflow[]>("/api/pf/registered", { method: "GET" })
+      .send<RegisteredWorkflow[]>("/api/pt/registered", { method: "GET" })
       .then((data) => {
         setWorkflows(data.filter((w) => w.triggerable));
       })
@@ -118,7 +118,7 @@ export function TriggerRunButton() {
 
       if (timing === "now") {
         const res = await pbClient.send<{ workflow_id: string }>(
-          "/api/pf/trigger",
+          "/api/pt/trigger",
           {
             method: "POST",
             body: {
@@ -136,7 +136,7 @@ export function TriggerRunButton() {
           return;
         }
         const res = await pbClient.send<{ id: string }>(
-          "/api/pf/schedules",
+          "/api/pt/schedules",
           {
             method: "POST",
             body: {
@@ -156,7 +156,7 @@ export function TriggerRunButton() {
           return;
         }
         const res = await pbClient.send<{ id: string }>(
-          "/api/pf/schedules",
+          "/api/pt/schedules",
           {
             method: "POST",
             body: {

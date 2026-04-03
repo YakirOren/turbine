@@ -73,7 +73,7 @@ func TestBuildStepsTree_Empty(t *testing.T) {
 func TestBuildStepsTree_SleepBarrier(t *testing.T) {
 	steps := []stepRow{
 		{FunctionID: 0, FunctionName: "work", StartedAtMs: 0, EndedAtMs: 100},
-		{FunctionID: 1, FunctionName: "pf.sleep", StartedAtMs: 100, EndedAtMs: 5000},
+		{FunctionID: 1, FunctionName: "pt.sleep", StartedAtMs: 100, EndedAtMs: 5000},
 		{FunctionID: 2, FunctionName: "after_sleep", StartedAtMs: 5010, EndedAtMs: 5100},
 	}
 
@@ -112,6 +112,64 @@ func TestBuildStepsTree_ErrorStatus(t *testing.T) {
 	if resultNode.Status != "error" {
 		t.Fatalf("expected error status on result node, got %s", resultNode.Status)
 	}
+}
+
+func TestBuildStepsTree_DoAsyncParallel(t *testing.T) {
+	// Simulates: validate → (charge || inventory) → reserve → (ship || confirm)
+	steps := []stepRow{
+		{FunctionID: 0, FunctionName: "validate", StartedAtMs: 0, EndedAtMs: 100},
+		{FunctionID: 1, FunctionName: "charge", StartedAtMs: 100, EndedAtMs: 300},
+		{FunctionID: 2, FunctionName: "inventory", StartedAtMs: 100, EndedAtMs: 250},
+		{FunctionID: 3, FunctionName: "reserve", StartedAtMs: 300, EndedAtMs: 400},
+		{FunctionID: 4, FunctionName: "ship", StartedAtMs: 400, EndedAtMs: 700},
+		{FunctionID: 5, FunctionName: "confirm", StartedAtMs: 400, EndedAtMs: 450},
+	}
+
+	_, edges := buildStepsTree(steps, "SUCCESS")
+
+	// Expected edges:
+	// 0→1, 0→2 (parallel group 1)
+	// 1→3, 2→3 (converge to reserve)
+	// 3→4, 3→5 (parallel group 2)
+	// 4→result, 5→result (end)
+	if len(edges) != 8 {
+		t.Fatalf("expected 8 edges, got %d: %+v", len(edges), edges)
+	}
+	assertEdge(t, edges[0], "0", "1")
+	assertEdge(t, edges[1], "0", "2")
+	assertEdge(t, edges[2], "1", "3")
+	assertEdge(t, edges[3], "2", "3")
+	assertEdge(t, edges[4], "3", "4")
+	assertEdge(t, edges[5], "3", "5")
+	assertEdge(t, edges[6], "4", "result")
+	assertEdge(t, edges[7], "5", "result")
+}
+
+func TestBuildStepsTree_RealWorldDoAsync(t *testing.T) {
+	// Real timing data from the dashboard example
+	steps := []stepRow{
+		{FunctionID: 0, FunctionName: "validate", StartedAtMs: 1773417398118, EndedAtMs: 1773417398219},
+		{FunctionID: 1, FunctionName: "charge", StartedAtMs: 1773417398221, EndedAtMs: 1773417398422},
+		{FunctionID: 2, FunctionName: "inventory", StartedAtMs: 1773417398221, EndedAtMs: 1773417398372},
+		{FunctionID: 3, FunctionName: "reserve", StartedAtMs: 1773417398424, EndedAtMs: 1773417398526},
+		{FunctionID: 4, FunctionName: "ship", StartedAtMs: 1773417398528, EndedAtMs: 1773417398829},
+		{FunctionID: 5, FunctionName: "confirm", StartedAtMs: 1773417398529, EndedAtMs: 1773417398580},
+	}
+
+	_, edges := buildStepsTree(steps, "SUCCESS")
+
+	// validate → (charge || inventory) → reserve → (ship || confirm) → result
+	if len(edges) != 8 {
+		t.Fatalf("expected 8 edges, got %d: %+v", len(edges), edges)
+	}
+	assertEdge(t, edges[0], "0", "1")
+	assertEdge(t, edges[1], "0", "2")
+	assertEdge(t, edges[2], "1", "3")
+	assertEdge(t, edges[3], "2", "3")
+	assertEdge(t, edges[4], "3", "4")
+	assertEdge(t, edges[5], "3", "5")
+	assertEdge(t, edges[6], "4", "result")
+	assertEdge(t, edges[7], "5", "result")
 }
 
 func assertEdge(t *testing.T, edge stepsTreeEdge, source, target string) {

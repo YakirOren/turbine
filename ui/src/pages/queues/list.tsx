@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import type { CrudFilters, CrudSort } from "@refinedev/core";
+import { LayoutList } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -35,22 +36,24 @@ export function QueueList() {
   const [stats, setStats] = useState<QueueStats | null>(null);
   const [nameFilter, setNameFilter] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     pbClient
-      .send<QueueInfo[]>("/api/pf/queues", { method: "GET" })
+      .send<QueueInfo[]>("/api/pt/queues", { method: "GET" })
       .then((data) => {
         setQueues(data);
         if (data.length > 0) {
           setSelectedQueue((prev) => prev || data[0].name);
         }
-      });
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
     if (!selectedQueue) return;
     pbClient
-      .send<QueueStats>(`/api/pf/queues/${encodeURIComponent(selectedQueue)}/stats`, {
+      .send<QueueStats>(`/api/pt/queues/${encodeURIComponent(selectedQueue)}/stats`, {
         method: "GET",
       })
       .then(setStats);
@@ -72,6 +75,31 @@ export function QueueList() {
   const sorters: CrudSort[] = [
     { field: "created_at_epoch_ms", order: "desc" },
   ];
+
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center text-muted-foreground">
+        Loading...
+      </div>
+    );
+  }
+
+  if (queues.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+        <LayoutList className="h-8 w-8" />
+        <div className="text-center">
+          <p>No queues registered.</p>
+          <p className="mt-1 text-xs">
+            Register a queue with{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono">
+              rt.Queue("name")
+            </code>
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

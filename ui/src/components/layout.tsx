@@ -1,7 +1,8 @@
 import { Link, useLocation, Outlet } from "react-router";
 import { useGetIdentity, useLogout } from "@refinedev/core";
 import { useTheme } from "next-themes";
-import { Workflow, LayoutList, Clock, LogOut, EllipsisVertical, Sun, Moon } from "lucide-react";
+import { LayoutList, Clock, LogOut, EllipsisVertical, Sun, Moon, Workflow } from "lucide-react";
+import { TurbineLogo } from "@/components/turbine-logo";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -27,10 +28,10 @@ export function Layout() {
   return (
     <div className="flex h-screen">
       <aside className="flex h-screen w-56 flex-col border-r bg-background">
-        <div className="flex h-14 items-center border-b px-4">
-          <Workflow className="mr-2 h-5 w-5" />
-          <span className="text-lg font-semibold">PocketFlow</span>
-        </div>
+        <Link to="/workflows" draggable={false} className="group flex h-14 items-center border-b px-4">
+          <TurbineLogo className="mr-2 h-7 w-7 shrink-0 transition-transform duration-700 ease-in-out group-hover:rotate-[360deg]" />
+          <span className="text-lg font-semibold">Turbine</span>
+        </Link>
         <nav className="flex-1 space-y-1 p-3">
           {navItems.map((item) => {
             const isActive = location.pathname.startsWith(item.path);

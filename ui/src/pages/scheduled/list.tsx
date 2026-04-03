@@ -37,8 +37,8 @@ export function ScheduledList() {
 
   useEffect(() => {
     Promise.all([
-      pbClient.send<RegisteredWorkflow[]>("/api/pf/registered", { method: "GET" }),
-      pbClient.send<UISchedule[]>("/api/pf/schedules", { method: "GET" }),
+      pbClient.send<RegisteredWorkflow[]>("/api/pt/registered", { method: "GET" }),
+      pbClient.send<UISchedule[]>("/api/pt/schedules", { method: "GET" }),
     ])
       .then(([registered, schedules]) => {
         setCompileTime(registered.filter((w) => w.cronSchedule));
@@ -54,7 +54,7 @@ export function ScheduledList() {
     const previous = uiSchedules;
     setUISchedules((prev) => prev.filter((s) => s.id !== id));
     try {
-      await pbClient.send(`/api/pf/schedules/${id}`, { method: "DELETE" });
+      await pbClient.send(`/api/pt/schedules/${id}`, { method: "DELETE" });
     } catch {
       setUISchedules(previous);
       setDeleteError("Failed to delete schedule. Please try again.");
@@ -80,7 +80,7 @@ export function ScheduledList() {
           <p className="mt-1 text-xs">
             Schedule a workflow with{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 font-mono">
-              pocketflow.WithSchedule("*/5 * * * *")
+              turbine.WithSchedule("*/5 * * * *")
             </code>
           </p>
         </div>

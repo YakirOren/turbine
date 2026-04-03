@@ -1,4 +1,4 @@
-package pocketflow
+package turbine
 
 import (
 	"context"
@@ -12,11 +12,18 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
+// ErrShuttingDown is returned when a workflow is rejected because the runtime is draining.
+var ErrShuttingDown = errors.New("turbine: runtime is shutting down")
+
 // Runtime is the core durable execution runtime for PocketBase.
 // Create with New(), register workflows before Launch(), then Shutdown() when done.
 type Runtime struct {
 	ctx           context.Context
 	ctxCancelFunc context.CancelCauseFunc
+
+	draining        atomic.Bool
+	drainCtx        context.Context
+	drainCancelFunc context.CancelFunc
 
 	launched atomic.Bool
 
@@ -43,6 +50,8 @@ type Runtime struct {
 	activeWorkflowIDs *sync.Map
 
 	scheduleManager *scheduleManager
+
+	productSender ProductSender
 }
 
 // New creates a new Runtime. Must be called before Launch().
@@ -61,6 +70,7 @@ func New(app core.App, config Config) *Runtime {
 	}
 
 	baseCtx, cancelFunc := context.WithCancelCause(context.Background())
+	drainCtx, drainCancel := context.WithCancel(baseCtx)
 	eb := newEventBus()
 
 	sysDB := newSQLiteSysDB(app, eb)
@@ -68,6 +78,8 @@ func New(app core.App, config Config) *Runtime {
 	rt := &Runtime{
 		ctx:                     baseCtx,
 		ctxCancelFunc:           cancelFunc,
+		drainCtx:                drainCtx,
+		drainCancelFunc:         drainCancel,
 		app:                     app,
 		systemDB:                sysDB,
 		config:                  &config,
@@ -77,10 +89,11 @@ func New(app core.App, config Config) *Runtime {
 		workflowRegistry:        &sync.Map{},
 		workflowCustomNameToFQN: &sync.Map{},
 		activeWorkflowIDs:       &sync.Map{},
+		productSender:           config.ProductSender,
 	}
 
 	rt.queueRunner = newQueueRunner()
-	newWorkflowQueue(rt, _PF_INTERNAL_QUEUE_NAME)
+	newWorkflowQueue(rt, _PT_INTERNAL_QUEUE_NAME)
 	rt.scheduleManager = newScheduleManager()
 
 	return rt
@@ -89,7 +102,7 @@ func New(app core.App, config Config) *Runtime {
 // Launch starts the runtime: ensures collections, launches sysdb, starts queue runner, and recovers pending workflows.
 func (rt *Runtime) Launch() error {
 	if rt.launched.Load() {
-		return fmt.Errorf("pocketflow: runtime is already launched")
+		return fmt.Errorf("turbine: runtime is already launched")
 	}
 
 	rt.applicationID = rt.app.Settings().Meta.AppName
@@ -100,7 +113,7 @@ func (rt *Runtime) Launch() error {
 	// to avoid racing between recovery and dequeue
 	handles, err := recoverPendingWorkflows(rt, []string{rt.executorID})
 	if err != nil {
-		return fmt.Errorf("pocketflow: failed to recover workflows: %w", err)
+		return fmt.Errorf("turbine: failed to recover workflows: %w", err)
 	}
 	if len(handles) > 0 {
 		rt.app.Logger().Info("recovered pending workflows", "count", len(handles))
@@ -122,7 +135,7 @@ func (rt *Runtime) Launch() error {
 
 	// Register garbage collection cron job if retention is positive
 	if rt.config.GCRetention > 0 {
-		if err := rt.app.Cron().Add("pocketflow_gc", rt.config.GCSchedule, func() {
+		if err := rt.app.Cron().Add("turbine_gc", rt.config.GCSchedule, func() {
 			if !rt.launched.Load() {
 				return
 			}
@@ -133,21 +146,38 @@ func (rt *Runtime) Launch() error {
 				rt.app.Logger().Error("workflow garbage collection failed", "error", err)
 			}
 		}); err != nil {
-			return fmt.Errorf("pocketflow: failed to register GC cron job: %w", err)
+			return fmt.Errorf("turbine: failed to register GC cron job: %w", err)
 		}
 	}
 
-	rt.app.Logger().Info("pocketflow launched", "app_name", rt.applicationID, "executor_id", rt.executorID)
+	rt.app.Logger().Info("turbine launched", "app_name", rt.applicationID, "executor_id", rt.executorID)
 	return nil
 }
 
-// Shutdown gracefully stops the runtime.
+// IsDraining returns true if the runtime is in the process of shutting down.
+func (rt *Runtime) IsDraining() bool { return rt.draining.Load() }
+
+// Shutdown gracefully stops the runtime with a two-phase approach:
+// 1. Drain — stop accepting new work, let running workflows finish naturally
+// 2. Force — if timeout expires, cancel root context to kill remaining workflows
 func (rt *Runtime) Shutdown(timeout time.Duration) {
-	rt.app.Logger().Debug("pocketflow shutting down")
+	rt.app.Logger().Info("turbine shutting down")
 
-	rt.ctxCancelFunc(errors.New("pocketflow shutdown"))
+	// Phase 1: Drain — stop accepting new work
+	rt.draining.Store(true)
+	rt.launched.Store(false)
+	rt.drainCancelFunc() // unblock queue runners and schedule timers
 
-	// Wait for workflows
+	// Wait for queue runners to exit
+	if rt.queueRunner != nil {
+		select {
+		case <-rt.queueRunner.completionChan:
+		case <-time.After(timeout):
+			rt.app.Logger().Warn("timeout waiting for queue runner to drain")
+		}
+	}
+
+	// Wait for in-flight workflows
 	done := make(chan struct{})
 	go func() {
 		rt.workflowsWg.Wait()
@@ -155,24 +185,20 @@ func (rt *Runtime) Shutdown(timeout time.Duration) {
 	}()
 	select {
 	case <-done:
+		// all workflows completed gracefully
 	case <-time.After(timeout):
-		rt.app.Logger().Warn("timeout waiting for workflows to complete")
-	}
-
-	// Wait for queue runner
-	if rt.queueRunner != nil && rt.launched.Load() {
+		// Phase 2: Force cancel
+		rt.app.Logger().Warn("timeout waiting for workflows, force-cancelling")
+		rt.ctxCancelFunc(errors.New("turbine shutdown timeout"))
 		select {
-		case <-rt.queueRunner.completionChan:
-		case <-time.After(timeout):
-			rt.app.Logger().Warn("timeout waiting for queue runner")
+		case <-done:
+		case <-time.After(5 * time.Second):
 		}
 	}
 
 	if rt.systemDB != nil {
 		rt.systemDB.shutdown(rt.ctx, timeout)
 	}
-
-	rt.launched.Store(false)
 }
 
 // GarbageCollect removes completed workflows older than the configured retention period.
@@ -189,6 +215,12 @@ func (rt *Runtime) GetApplicationID() string      { return rt.applicationID }
 func (rt *Runtime) IsLaunched() bool              { return rt.launched.Load() }
 func (rt *Runtime) App() core.App                { return rt.app }
 func (rt *Runtime) Queues() []WorkflowQueue      { return rt.queueRunner.listQueues() }
+
+// SetProductSender sets the product sender after construction.
+// Use this when the sender needs a reference to the runtime (e.g., WorkflowSender).
+func (rt *Runtime) SetProductSender(sender ProductSender) {
+	rt.productSender = sender
+}
 
 // ScheduledWorkflow describes a registered scheduled workflow.
 type ScheduledWorkflow struct {
@@ -260,7 +292,7 @@ func (rt *Runtime) triggerByFQNWithOpts(fqn string, rawInput json.RawMessage, ex
 	encoded := string(rawInput)
 	opts := append([]WorkflowOption{
 		withAlreadyEncodedInput(),
-		WithQueue(_PF_INTERNAL_QUEUE_NAME),
+		WithQueue(_PT_INTERNAL_QUEUE_NAME),
 	}, extraOpts...)
 
 	handle, err := entry.wrappedFunction(rt, &encoded, opts...)

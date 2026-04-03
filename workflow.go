@@ -1,4 +1,4 @@
-package pocketflow
+package turbine
 
 import (
 	"context"
@@ -330,7 +330,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 		entry.CronSchedule = regOpts.cronSchedule
 		rt.workflowRegistry.Store(fqn, entry)
 
-		cronJobID := fmt.Sprintf("pf_sched_%s", customName)
+		cronJobID := fmt.Sprintf("pt_sched_%s", customName)
 		if err := rt.app.Cron().Add(cronJobID, regOpts.cronSchedule, func() {
 			if !rt.launched.Load() {
 				return
@@ -339,7 +339,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 			wfID := fmt.Sprintf("sched-%s-%s", customName, scheduledTime.UTC().Format(time.RFC3339))
 			_, err := wrapped(rt, scheduledTime,
 				WithID(wfID),
-				WithQueue(_PF_INTERNAL_QUEUE_NAME),
+				WithQueue(_PT_INTERNAL_QUEUE_NAME),
 			)
 			if err != nil {
 				rt.app.Logger().Error("failed to run scheduled workflow", "name", customName, "error", err)
@@ -400,6 +400,11 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	params := workflowOptions{ApplicationVersion: rt.applicationVersion}
 	for _, opt := range opts {
 		opt(&params)
+	}
+
+	// Reject new workflows during drain (allow dequeue and recovery to finish)
+	if rt.draining.Load() && !params.isDequeue && !params.isRecovery {
+		return nil, ErrShuttingDown
 	}
 
 	// Lookup registry for registration-time options
@@ -497,7 +502,12 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	}
 
 	// Create workflow state
-	wfState := &workflowState{workflowID: workflowID}
+	wfState := &workflowState{
+		workflowID:     workflowID,
+		recovering:     insertResult.hasSteps,
+		appStatus:      insertResult.appStatus,
+		appStatusColor: insertResult.appStatusColor,
+	}
 	wfState.stepID.Store(-1)
 	baseCtx := context.WithValue(rt.ctx, workflowStateKey, wfState)
 
@@ -509,7 +519,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		baseCtx, cancelTimeout = context.WithDeadline(baseCtx, insertResult.workflowDeadline)
 	}
 
-	wfCtx := &pfContext{Context: baseCtx, runtime: rt}
+	wfCtx := &ptContext{Context: baseCtx, runtime: rt}
 
 	rt.app.Logger().Info("workflow started", "workflow_id", workflowID, "name", wfStatus.Name, "source", "system")
 
@@ -527,7 +537,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 
 		// Handle workflow ID conflict — another goroutine owns this workflow ID.
 		// Wait for the existing workflow to complete and return its result.
-		if errors.Is(fnErr, &PFError{Code: ErrConflictingID}) {
+		if errors.Is(fnErr, &PTError{Code: ErrConflictingID}) {
 			rt.app.Logger().Warn("workflow ID conflict, waiting for existing workflow", "workflow_id", workflowID)
 			encoded, awaitErr := retryWithResult(rt.ctx, func() (*string, error) {
 				return rt.systemDB.awaitWorkflowResult(rt.ctx, workflowID, _DB_RETRY_INTERVAL)
@@ -595,12 +605,13 @@ const (
 )
 
 type stepOptions struct {
-	maxRetries    int
-	backoffFactor float64
-	baseInterval  time.Duration
-	maxInterval   time.Duration
-	stepName      string
-	preStepID     *int
+	maxRetries     int
+	backoffFactor  float64
+	baseInterval   time.Duration
+	maxInterval    time.Duration
+	stepName       string
+	preStepID      *int
+	skipCheckpoint bool
 }
 
 func (opts *stepOptions) setDefaults() {
@@ -644,6 +655,13 @@ func WithMaxInterval(interval time.Duration) StepOption {
 
 func WithNextStepID(stepID int) StepOption {
 	return func(opts *stepOptions) { opts.preStepID = &stepID }
+}
+
+// WithoutCheckpoint skips persisting the step result to the database.
+// The step will always re-execute during recovery instead of replaying from a checkpoint.
+// Use this for steps that establish non-serializable resources like network connections.
+func WithoutCheckpoint() StepOption {
+	return func(opts *stepOptions) { opts.skipCheckpoint = true }
 }
 
 // Do executes a function as a durable step within a workflow.
@@ -701,23 +719,29 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn StepFunc, opts ...St
 		stepID = wfState.nextStepID()
 	}
 
-	// Check if already executed
-	recorded, err := retryWithResult(ctx, func() (*recordedResult, error) {
-		return rt.systemDB.checkOperationExecution(ctx, checkOperationExecutionDBInput{
-			workflowUUID: wfState.workflowID,
-			functionID:   stepID,
-		})
-	}, withRetrierLogger(rt.app.Logger()))
-	if err != nil {
-		return nil, fmt.Errorf("checking step execution: %w", err)
-	}
-	if recorded != nil {
-		rt.app.Logger().Debug("step replayed from checkpoint", "workflow_id", wfState.workflowID, "step", stepOpts.stepName, "step_id", stepID, "source", "system")
-		var stepErr error
-		if recorded.errorMsg != nil && *recorded.errorMsg != "" {
-			stepErr = errors.New(*recorded.errorMsg)
+	if !stepOpts.skipCheckpoint {
+		// Check if already executed
+		recorded, err := retryWithResult(ctx, func() (*recordedResult, error) {
+			return rt.systemDB.checkOperationExecution(ctx, checkOperationExecutionDBInput{
+				workflowUUID: wfState.workflowID,
+				functionID:   stepID,
+			})
+		}, withRetrierLogger(rt.app.Logger()))
+		if err != nil {
+			return nil, fmt.Errorf("checking step execution: %w", err)
 		}
-		return stepCheckpointedOutcome{value: recorded.output}, stepErr
+		if recorded != nil {
+			rt.app.Logger().Debug("step replayed from checkpoint", "workflow_id", wfState.workflowID, "step", stepOpts.stepName, "step_id", stepID, "source", "system")
+			wfState.recovering = true
+			var stepErr error
+			if recorded.errorMsg != nil && *recorded.errorMsg != "" {
+				stepErr = errors.New(*recorded.errorMsg)
+			}
+			return stepCheckpointedOutcome{value: recorded.output}, stepErr
+		}
+
+		// Clear recovering flag — we've passed replay and are executing new steps
+		wfState.recovering = false
 	}
 
 	// Execute with retry
@@ -729,40 +753,42 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn StepFunc, opts ...St
 
 	stepOutput, stepErr := executeStepWithRetry(ctx, rt, stepOpts, func() (any, error) { return fn(stepCtx) })
 
-	// Serialize and record
-	ser := newJSONSerializer[any]()
-	encodedOutput, serErr := ser.Encode(stepOutput)
-	if serErr != nil {
-		return nil, fmt.Errorf("failed to serialize step output: %w", serErr)
-	}
-
 	endTime := time.Now()
-	var errorMsg *string
-	if stepErr != nil {
-		s := stepErr.Error()
-		errorMsg = &s
-	}
-
-	recErr := retry(ctx, func() error {
-		return rt.systemDB.recordOperationResult(ctx, recordOperationResultDBInput{
-			workflowUUID: wfState.workflowID,
-			functionID:   stepID,
-			functionName: stepOpts.stepName,
-			output:       encodedOutput,
-			errorMsg:     errorMsg,
-			startedAt:    startTime.UnixMilli(),
-			endedAt:      endTime.UnixMilli(),
-		})
-	}, withRetrierLogger(rt.app.Logger()))
-	if recErr != nil {
-		return nil, fmt.Errorf("recording step result: %w", recErr)
-	}
-
 	dur := endTime.Sub(startTime)
 	if stepErr != nil {
 		rt.app.Logger().Error("step failed", "workflow_id", wfState.workflowID, "step", stepOpts.stepName, "step_id", stepID, "duration", dur, "error", stepErr.Error(), "source", "system")
 	} else {
 		rt.app.Logger().Info("step completed", "workflow_id", wfState.workflowID, "step", stepOpts.stepName, "step_id", stepID, "duration", dur, "source", "system")
+	}
+
+	if !stepOpts.skipCheckpoint {
+		// Serialize and record
+		ser := newJSONSerializer[any]()
+		encodedOutput, serErr := ser.Encode(stepOutput)
+		if serErr != nil {
+			return nil, fmt.Errorf("failed to serialize step output: %w", serErr)
+		}
+
+		var errorMsg *string
+		if stepErr != nil {
+			s := stepErr.Error()
+			errorMsg = &s
+		}
+
+		recErr := retry(ctx, func() error {
+			return rt.systemDB.recordOperationResult(ctx, recordOperationResultDBInput{
+				workflowUUID: wfState.workflowID,
+				functionID:   stepID,
+				functionName: stepOpts.stepName,
+				output:       encodedOutput,
+				errorMsg:     errorMsg,
+				startedAt:    startTime.UnixMilli(),
+				endedAt:      endTime.UnixMilli(),
+			})
+		}, withRetrierLogger(rt.app.Logger()))
+		if recErr != nil {
+			return nil, fmt.Errorf("recording step result: %w", recErr)
+		}
 	}
 
 	return stepOutput, stepErr
@@ -839,7 +865,7 @@ func Send(ctx Context, destinationID string, message any, topic string) error {
 				Topic:           topic,
 				Message:         encoded,
 			})
-		}, WithStepName("pf.send"))
+		}, WithStepName("pt.send"))
 		return err
 	}
 
@@ -900,7 +926,7 @@ func SetValue(ctx Context, key string, value any) error {
 			Key:          key,
 			Value:        encoded,
 		})
-	}, WithStepName("pf.setEvent"))
+	}, WithStepName("pt.setEvent"))
 	return err
 }
 
@@ -951,7 +977,7 @@ func Pause(ctx Context, duration time.Duration) error {
 			}
 		}
 		return wakeUpTime.UnixMilli(), nil
-	}, WithStepName("pf.sleep"))
+	}, WithStepName("pt.sleep"))
 	if err != nil {
 		return err
 	}
@@ -982,20 +1008,30 @@ func Retrieve[R any](rt *Runtime, workflowID string) Handle[R] {
 
 // Cancel cancels a workflow by ID.
 func (rt *Runtime) Cancel(workflowID string) error {
-	return retry(rt.ctx, func() error {
+	err := retry(rt.ctx, func() error {
 		return rt.systemDB.cancelWorkflow(rt.ctx, cancelWorkflowDBInput{workflowID: workflowID})
 	}, withRetrierLogger(rt.app.Logger()))
+	if err != nil {
+		return err
+	}
+	rt.app.Logger().Info("workflow cancelled", "workflow_id", workflowID, "source", "system")
+	return nil
 }
 
 // Resume resumes a cancelled workflow.
 func (rt *Runtime) Resume(workflowID string) error {
-	return retry(rt.ctx, func() error {
+	err := retry(rt.ctx, func() error {
 		return rt.systemDB.resumeWorkflow(rt.ctx, resumeWorkflowDBInput{
 			workflowID: workflowID,
 			executorID: rt.executorID,
 			appVersion: rt.applicationVersion,
 		})
 	}, withRetrierLogger(rt.app.Logger()))
+	if err != nil {
+		return err
+	}
+	rt.app.Logger().Info("workflow resumed", "workflow_id", workflowID, "source", "system")
+	return nil
 }
 
 // List returns workflows matching the given filters.

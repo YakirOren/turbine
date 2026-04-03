@@ -14,14 +14,24 @@ interface StepNodeData {
   functionId?: number;
   childWorkflowId?: string | null;
   onChildClick?: (childId: string) => void;
+  hasInput?: boolean;
+  hasOutput?: boolean;
+  durationMs?: number | null;
+  selected?: boolean;
   [key: string]: unknown;
 }
 
 const statusIcon: Record<string, React.ReactNode> = {
-  success: <CheckCircle className="h-4 w-4 text-green-400" />,
-  error: <XCircle className="h-4 w-4 text-red-400" />,
-  running: <Loader2 className="h-4 w-4 animate-spin text-blue-400" />,
+  success: <CheckCircle className="h-3 w-3 text-green-400" />,
+  error: <XCircle className="h-3 w-3 text-red-400" />,
+  running: <Loader2 className="h-3 w-3 animate-spin text-blue-400" />,
 };
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 60000).toFixed(1)}m`;
+}
 
 const statusBorder: Record<string, string> = {
   success: "border-green-500/40",
@@ -34,21 +44,20 @@ export function StepNode({ data }: NodeProps) {
   return (
     <div
       className={cn(
-        "rounded-lg border bg-card px-4 py-2 shadow-sm",
+        "whitespace-nowrap rounded border bg-card px-2 py-1 shadow-sm cursor-pointer",
+        d.selected ? "ring-2 ring-primary" : "",
         statusBorder[d.status] ?? "border-border"
       )}
     >
-      <Handle type="target" position={Position.Top} className="!bg-muted-foreground" />
-      <div className="flex items-center gap-2">
-        {statusIcon[d.status] ?? <Circle className="h-4 w-4 text-muted-foreground" />}
-        <span className="text-sm font-medium">{d.label}</span>
-        {d.functionId != null && (
-          <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-            #{d.functionId}
-          </span>
+      {d.hasInput !== false && <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />}
+      <div className="flex items-center gap-1.5 justify-center">
+        {statusIcon[d.status] ?? <Circle className="h-3 w-3 text-muted-foreground" />}
+        <span className="text-xs font-medium">{d.label}</span>
+        {d.durationMs != null && (
+          <span className="text-[10px] text-muted-foreground">{formatDuration(d.durationMs)}</span>
         )}
       </div>
-      <Handle type="source" position={Position.Bottom} className="!bg-muted-foreground" />
+      {d.hasOutput !== false && <Handle type="source" position={Position.Right} className="!bg-muted-foreground" />}
     </div>
   );
 }
@@ -58,23 +67,21 @@ export function ChildWorkflowNode({ data }: NodeProps) {
   return (
     <div
       className={cn(
-        "cursor-pointer rounded-lg border border-dashed bg-card px-4 py-2 shadow-sm hover:border-primary",
+        "whitespace-nowrap cursor-pointer rounded border border-dashed bg-card px-2 py-1 shadow-sm hover:border-primary",
         statusBorder[d.status] ?? "border-border"
       )}
       onClick={() => d.childWorkflowId && d.onChildClick?.(d.childWorkflowId)}
     >
-      <Handle type="target" position={Position.Top} className="!bg-muted-foreground" />
-      <div className="flex items-center gap-2">
-        <GitBranch className="h-4 w-4 text-muted-foreground" />
-        {statusIcon[d.status] ?? <Circle className="h-4 w-4" />}
-        <span className="text-sm font-medium">{d.label}</span>
-        {d.functionId != null && (
-          <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-            #{d.functionId}
-          </span>
+      {d.hasInput !== false && <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />}
+      <div className="flex items-center gap-1.5">
+        <GitBranch className="h-3 w-3 text-muted-foreground" />
+        {statusIcon[d.status] ?? <Circle className="h-3 w-3" />}
+        <span className="text-xs font-medium">{d.label}</span>
+        {d.durationMs != null && (
+          <span className="text-[10px] text-muted-foreground">{formatDuration(d.durationMs)}</span>
         )}
       </div>
-      <Handle type="source" position={Position.Bottom} className="!bg-muted-foreground" />
+      {d.hasOutput !== false && <Handle type="source" position={Position.Right} className="!bg-muted-foreground" />}
     </div>
   );
 }
@@ -85,7 +92,7 @@ export function WorkflowResultNode({ data }: NodeProps) {
   return (
     <div
       className={cn(
-        "rounded-full border px-4 py-2 text-center",
+        "rounded-full border px-3 py-1 text-center",
         isError
           ? "border-red-500/40 bg-red-500/10 text-red-400"
           : d.status === "running"
@@ -93,10 +100,10 @@ export function WorkflowResultNode({ data }: NodeProps) {
             : "border-green-500/40 bg-green-500/10 text-green-400"
       )}
     >
-      <Handle type="target" position={Position.Top} className="!bg-muted-foreground" />
-      <div className="flex items-center justify-center gap-2">
+      <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />
+      <div className="flex items-center justify-center gap-1.5">
         {statusIcon[d.status]}
-        <span className="text-sm font-semibold">{d.label}</span>
+        <span className="text-xs font-semibold">{d.label}</span>
       </div>
     </div>
   );

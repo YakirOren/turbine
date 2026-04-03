@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/YakirOren/pocketflow"
+	"github.com/YakirOren/turbine"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -23,13 +23,13 @@ func FulfillOrder(ctx context.Context) (bool, error) {
 // OrderWorkflow demonstrates durable steps.
 // Each step's result is saved — if the process crashes mid-workflow,
 // it resumes from the last completed step without re-executing it.
-func OrderWorkflow(ctx pocketflow.Context, orderID string) (string, error) {
-	chargeID, err := pocketflow.Do(ctx, ChargePayment, pocketflow.WithStepName("charge"))
+func OrderWorkflow(ctx turbine.Context, orderID string) (string, error) {
+	chargeID, err := turbine.Do(ctx, ChargePayment, turbine.WithStepName("charge"))
 	if err != nil {
 		return "", err
 	}
 
-	_, err = pocketflow.Do(ctx, FulfillOrder, pocketflow.WithStepName("fulfill"))
+	_, err = turbine.Do(ctx, FulfillOrder, turbine.WithStepName("fulfill"))
 	if err != nil {
 		return "", err
 	}
@@ -40,15 +40,15 @@ func OrderWorkflow(ctx pocketflow.Context, orderID string) (string, error) {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Setup(app, pocketflow.Config{})
+	rt := turbine.Setup(app, turbine.Config{})
 
-	pocketflow.Register(rt, OrderWorkflow)
+	turbine.Register(rt, OrderWorkflow)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/order/{id}", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			handle, err := pocketflow.Run(rt, OrderWorkflow, id)
+			handle, err := turbine.Run(rt, OrderWorkflow, id)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}

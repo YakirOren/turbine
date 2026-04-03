@@ -6,16 +6,16 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/YakirOren/pocketflow"
+	"github.com/YakirOren/turbine"
 	"github.com/pocketbase/pocketbase/core"
 )
 
 //go:embed dist/*
 var dashboardFS embed.FS
 
-// Mount serves the embedded dashboard SPA at /_/pocketflow/ and registers
-// custom API endpoints at /api/pf/. All routes require superuser auth.
-func Mount(app core.App, rt *pocketflow.Runtime) {
+// Mount serves the embedded dashboard SPA at /_/turbine/ and registers
+// custom API endpoints at /api/pt/. All routes require superuser auth.
+func Mount(app core.App, rt *turbine.Runtime) {
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		subFS, err := fs.Sub(dashboardFS, "dist")
 		if err != nil {
@@ -27,9 +27,9 @@ func Mount(app core.App, rt *pocketflow.Runtime) {
 			return err
 		}
 
-		fileServer := http.StripPrefix("/_/pocketflow/", http.FileServerFS(subFS))
+		fileServer := http.StripPrefix("/_/turbine/", http.FileServerFS(subFS))
 
-		se.Router.GET("/_/pocketflow/{path...}", func(e *core.RequestEvent) error {
+		se.Router.GET("/_/turbine/{path...}", func(e *core.RequestEvent) error {
 			if !e.HasSuperuserAuth() {
 				return e.Redirect(http.StatusTemporaryRedirect, "/_/")
 			}

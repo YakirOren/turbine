@@ -1,8 +1,7 @@
-package pocketflow
+package turbine
 
 import (
 	"context"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -17,7 +16,7 @@ func setupSysDB(t *testing.T) (*sqliteSysDB, func()) {
 		t.Fatal(err)
 	}
 	eb := newEventBus()
-	sysDB := newSQLiteSysDB(app, eb, slog.Default())
+	sysDB := newSQLiteSysDB(app, eb)
 	sysDB.launch(context.Background())
 	return sysDB, app.Cleanup
 }
@@ -426,6 +425,60 @@ func TestGetWorkflowSteps(t *testing.T) {
 	}
 	if steps[0].functionID != 1 || steps[1].functionID != 2 {
 		t.Fatalf("unexpected step order: %v", steps)
+	}
+}
+
+func TestUpdateAppStatus(t *testing.T) {
+	sysDB, cleanup := setupSysDB(t)
+	defer cleanup()
+
+	wfID := "wf-app-status-1"
+	input := insertStatusDBInput{
+		status: makeStatus(wfID),
+	}
+	_, err := sysDB.insertStatus(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set app status
+	err = sysDB.updateAppStatus(context.Background(), updateAppStatusDBInput{
+		workflowID:     wfID,
+		appStatus:      "pending-approval",
+		appStatusColor: "yellow",
+	})
+	if err != nil {
+		t.Fatalf("updateAppStatus failed: %v", err)
+	}
+
+	// Verify via listWorkflows
+	workflows, err := sysDB.listWorkflows(context.Background(), listWorkflowsDBInput{
+		workflowIDs: []string{wfID},
+	})
+	if err != nil {
+		t.Fatalf("listWorkflows failed: %v", err)
+	}
+	if len(workflows) != 1 {
+		t.Fatalf("expected 1 workflow, got %d", len(workflows))
+	}
+	if workflows[0].AppStatus != "pending-approval" {
+		t.Fatalf("expected app_status 'pending-approval', got %q", workflows[0].AppStatus)
+	}
+	if workflows[0].AppStatusColor != "yellow" {
+		t.Fatalf("expected app_status_color 'yellow', got %q", workflows[0].AppStatusColor)
+	}
+}
+
+func TestValidateAppStatusColor(t *testing.T) {
+	for _, color := range []string{"green", "red", "yellow", "blue", "gray", "lime", "orange", "purple", "pink", "cyan"} {
+		if err := validateAppStatusColor(color); err != nil {
+			t.Fatalf("expected valid color %q, got error: %v", color, err)
+		}
+	}
+	for _, color := range []string{"", "neon", "darkblue", "GREEN"} {
+		if err := validateAppStatusColor(color); err == nil {
+			t.Fatalf("expected error for invalid color %q", color)
+		}
 	}
 }
 

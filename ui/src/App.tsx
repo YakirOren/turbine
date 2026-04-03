@@ -19,7 +19,7 @@ import { LoginPage } from "@/pages/login";
 
 function App() {
   return (
-    <BrowserRouter basename={import.meta.env.DEV ? "/" : "/_/pocketflow"}>
+    <BrowserRouter basename={import.meta.env.DEV ? "/" : "/_/turbine"}>
       <Refine
         routerProvider={routerProvider}
         dataProvider={pbDataProvider}
@@ -27,7 +27,7 @@ function App() {
         liveProvider={pbLiveProvider}
         resources={[
           {
-            name: "pf_workflow_status",
+            name: "pt_workflow_status",
             list: "/workflows",
             meta: { label: "Workflows" },
           },
@@ -52,7 +52,7 @@ function App() {
             <Route
               index
               element={
-                <NavigateToResource resource="pf_workflow_status" />
+                <NavigateToResource resource="pt_workflow_status" />
               }
             />
             <Route path="/workflows" element={<WorkflowList />} />
@@ -65,7 +65,7 @@ function App() {
           <Route
             element={
               <Authenticated key="auth-pages" fallback={<Outlet />}>
-                <NavigateToResource resource="pf_workflow_status" />
+                <NavigateToResource resource="pt_workflow_status" />
               </Authenticated>
             }
           >

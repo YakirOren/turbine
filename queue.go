@@ -1,8 +1,6 @@
-package pocketflow
+package turbine
 
 import (
-	"context"
-	"log/slog"
 	"sync"
 )
 
@@ -52,15 +50,13 @@ func WithPartitionQueue() QueueOption {
 
 
 type queueRunner struct {
-	logger              *slog.Logger
 	workflowQueueRegistry map[string]WorkflowQueue
 	queueGoroutinesWg   sync.WaitGroup
 	completionChan      chan struct{}
 }
 
-func newQueueRunner(logger *slog.Logger) *queueRunner {
+func newQueueRunner() *queueRunner {
 	return &queueRunner{
-		logger:              logger,
 		workflowQueueRegistry: make(map[string]WorkflowQueue),
 		completionChan:      make(chan struct{}, 1),
 	}
@@ -93,7 +89,7 @@ func (qr *queueRunner) run(rt *Runtime) {
 	if len(queuesToListen) == 0 {
 		queuesToListen = qr.workflowQueueRegistry
 	} else {
-		queuesToListen[_PF_INTERNAL_QUEUE_NAME] = qr.workflowQueueRegistry[_PF_INTERNAL_QUEUE_NAME]
+		queuesToListen[_PT_INTERNAL_QUEUE_NAME] = qr.workflowQueueRegistry[_PT_INTERNAL_QUEUE_NAME]
 	}
 
 	for _, q := range queuesToListen {
@@ -102,14 +98,19 @@ func (qr *queueRunner) run(rt *Runtime) {
 	}
 
 	qr.queueGoroutinesWg.Wait()
-	qr.logger.Debug("all queue goroutines completed")
+	rt.app.Logger().Debug("all queue goroutines completed")
 	qr.completionChan <- struct{}{}
 }
 
 func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 	defer qr.queueGoroutinesWg.Done()
-	queueLogger := qr.logger.With("queue_name", queue.Name)
+	queueLogger := rt.app.Logger().With("queue_name", queue.Name)
 	for {
+		if rt.draining.Load() {
+			queueLogger.Debug("queue goroutine stopping, runtime is draining")
+			return
+		}
+
 		skipDequeue := false
 
 		partitionKeys := []string{""}
@@ -172,11 +173,11 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 		}
 
 		// Wait for enqueue event or shutdown
-		enqueueCh := rt.systemDB.waitForEnqueue(rt.ctx, queue.Name)
+		enqueueCh := rt.systemDB.waitForEnqueue(rt.drainCtx, queue.Name)
 		select {
-		case <-rt.ctx.Done():
+		case <-rt.drainCtx.Done():
 			rt.systemDB.stopWaitForEnqueue(queue.Name, enqueueCh)
-			queueLogger.Debug("queue goroutine stopping", "cause", context.Cause(rt.ctx))
+			queueLogger.Debug("queue goroutine stopping", "cause", "draining")
 			return
 		case <-enqueueCh:
 			// Workflow enqueued — immediately dequeue

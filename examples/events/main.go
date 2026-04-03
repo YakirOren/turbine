@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/YakirOren/pocketflow"
+	"github.com/YakirOren/turbine"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -17,44 +17,44 @@ func ProcessRequest(ctx context.Context) (bool, error) {
 }
 
 // ApprovalWorkflow waits for an external approval signal via events.
-func ApprovalWorkflow(ctx pocketflow.Context, requestID string) (string, error) {
-	if err := pocketflow.SetValue(ctx, "status", "waiting_approval"); err != nil {
+func ApprovalWorkflow(ctx turbine.Context, requestID string) (string, error) {
+	if err := turbine.SetValue(ctx, "status", "waiting_approval"); err != nil {
 		return "", err
 	}
 
 	// Wait up to 1 hour for approval
-	approved, err := pocketflow.Recv[bool](ctx, "approval", 1*time.Hour)
+	approved, err := turbine.Recv[bool](ctx, "approval", 1*time.Hour)
 	if err != nil {
 		return "", err
 	}
 
 	if !approved {
-		pocketflow.SetValue(ctx, "status", "rejected")
+		turbine.SetValue(ctx, "status", "rejected")
 		return fmt.Sprintf("request %s rejected", requestID), nil
 	}
 
-	_, err = pocketflow.Do(ctx, ProcessRequest, pocketflow.WithStepName("process"))
+	_, err = turbine.Do(ctx, ProcessRequest, turbine.WithStepName("process"))
 	if err != nil {
 		return "", err
 	}
 
-	pocketflow.SetValue(ctx, "status", "completed")
+	turbine.SetValue(ctx, "status", "completed")
 	return fmt.Sprintf("request %s approved and processed", requestID), nil
 }
 
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Setup(app, pocketflow.Config{})
+	rt := turbine.Setup(app, turbine.Config{})
 
-	pocketflow.Register(rt, ApprovalWorkflow)
+	turbine.Register(rt, ApprovalWorkflow)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/request/{id}", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			handle, err := pocketflow.Run(rt, ApprovalWorkflow, id,
-				pocketflow.WithID("approval-"+id),
+			handle, err := turbine.Run(rt, ApprovalWorkflow, id,
+				turbine.WithID("approval-"+id),
 			)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
@@ -68,7 +68,7 @@ func main() {
 		e.Router.GET("/request/{id}/status", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			status, err := pocketflow.GetValue[string](rt.NewContext(re.Request.Context()), "approval-"+id, "status", 5*time.Second)
+			status, err := turbine.GetValue[string](rt.NewContext(re.Request.Context()), "approval-"+id, "status", 5*time.Second)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
@@ -79,7 +79,7 @@ func main() {
 		e.Router.POST("/request/{id}/approve", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			if err := pocketflow.Send(rt.NewContext(re.Request.Context()), "approval-"+id, true, "approval"); err != nil {
+			if err := turbine.Send(rt.NewContext(re.Request.Context()), "approval-"+id, true, "approval"); err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
 

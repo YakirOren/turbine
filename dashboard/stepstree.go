@@ -48,7 +48,7 @@ func (h *handlers) stepsTree(e *core.RequestEvent) error {
 		return e.JSON(http.StatusBadRequest, map[string]string{"error": "missing workflow id"})
 	}
 
-	record, err := h.app.FindRecordById("pf_workflow_status", workflowID)
+	record, err := h.app.FindRecordById("pt_workflow_status", workflowID)
 	if err != nil {
 		return e.JSON(http.StatusNotFound, map[string]string{"error": "workflow not found"})
 	}
@@ -56,7 +56,7 @@ func (h *handlers) stepsTree(e *core.RequestEvent) error {
 
 	var steps []stepRow
 	err = h.app.DB().
-		NewQuery("SELECT function_id, function_name, output, error, child_workflow_id, started_at_epoch_ms, ended_at_epoch_ms FROM pf_operation_outputs WHERE workflow_id = {:wfID} ORDER BY function_id ASC").
+		NewQuery("SELECT function_id, function_name, output, error, child_workflow_id, started_at_epoch_ms, ended_at_epoch_ms FROM pt_operation_outputs WHERE workflow_id = {:wfID} ORDER BY function_id ASC").
 		Bind(dbx.Params{"wfID": workflowID}).
 		All(&steps)
 	if err != nil {
@@ -72,8 +72,15 @@ func (h *handlers) stepsTree(e *core.RequestEvent) error {
 	})
 }
 
+func abs(x int64) int64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 func isBarrierStep(name string) bool {
-	return name == "pf.sleep" || name == "pf.getResult"
+	return name == "pt.sleep" || name == "pt.getResult"
 }
 
 func buildStepsTree(steps []stepRow, workflowStatus string) ([]stepsTreeNode, []stepsTreeEdge) {
@@ -130,14 +137,17 @@ func buildStepsTree(steps []stepRow, workflowStatus string) ([]stepsTreeNode, []
 		return nodes, edges
 	}
 
+	// Detect parallel groups by checking if consecutive steps have overlapping
+	// execution windows. Two steps overlap if the later one started before
+	// the earlier one ended.
 	type group struct {
 		parentID string
 		members  []string
 		maxEnd   int64
 	}
 
+	var prevSequentialID string
 	var lastSequentialID string
-	var lastSequentialEnd int64
 	var currentGroup *group
 
 	for i, s := range steps {
@@ -145,42 +155,80 @@ func buildStepsTree(steps []stepRow, workflowStatus string) ([]stepsTreeNode, []
 
 		if i == 0 {
 			lastSequentialID = sid
-			if !isBarrierStep(s.FunctionName) {
-				lastSequentialEnd = s.EndedAtMs
-			}
 			continue
 		}
 
-		isParallel := s.StartedAtMs < lastSequentialEnd && !isBarrierStep(s.FunctionName) && lastSequentialEnd > 0
+		if isBarrierStep(s.FunctionName) {
+			if currentGroup != nil {
+				for _, memberID := range currentGroup.members {
+					edges = append(edges, stepsTreeEdge{Source: memberID, Target: sid})
+				}
+				currentGroup = nil
+			} else {
+				edges = append(edges, stepsTreeEdge{Source: lastSequentialID, Target: sid})
+			}
+			prevSequentialID = lastSequentialID
+			lastSequentialID = sid
+			continue
+		}
+
+		// Check overlap with previous step (the one right before in function_id order)
+		prev := steps[i-1]
+		// Two steps are parallel if they started at approximately the same time
+		// (within 50ms), which is the pattern for DoAsync calls
+		const startToleranceMs int64 = 50
+		isParallel := !isBarrierStep(prev.FunctionName) && abs(s.StartedAtMs-prev.StartedAtMs) <= startToleranceMs
 
 		if isParallel {
 			if currentGroup == nil {
-				currentGroup = &group{
-					parentID: lastSequentialID,
-					members:  []string{sid},
-					maxEnd:   s.EndedAtMs,
+				prevSid := strconv.Itoa(prev.FunctionID)
+
+				if prevSequentialID == "" || prevSid == lastSequentialID && prevSequentialID == "" {
+					// Previous step is the very first node — it becomes the parent
+					currentGroup = &group{
+						parentID: prevSid,
+						members:  []string{sid},
+						maxEnd:   s.EndedAtMs,
+					}
+					edges = append(edges, stepsTreeEdge{Source: prevSid, Target: sid})
+				} else {
+					// Previous step is a parallel sibling — rewire it into a group
+					// The step before prev (prevSequentialID) becomes the parent
+					parentID := prevSequentialID
+					currentGroup = &group{
+						parentID: parentID,
+						members:  []string{prevSid, sid},
+						maxEnd:   s.EndedAtMs,
+					}
+					if prev.EndedAtMs > currentGroup.maxEnd {
+						currentGroup.maxEnd = prev.EndedAtMs
+					}
+					// Remove the sequential edge we already added for prev
+					// and replace with parallel edges from parent
+					edges = edges[:len(edges)-1]
+					edges = append(edges,
+						stepsTreeEdge{Source: parentID, Target: prevSid},
+						stepsTreeEdge{Source: parentID, Target: sid},
+					)
 				}
 			} else {
 				currentGroup.members = append(currentGroup.members, sid)
 				if s.EndedAtMs > currentGroup.maxEnd {
 					currentGroup.maxEnd = s.EndedAtMs
 				}
+				edges = append(edges, stepsTreeEdge{Source: currentGroup.parentID, Target: sid})
 			}
-			edges = append(edges, stepsTreeEdge{Source: currentGroup.parentID, Target: sid})
 		} else {
 			if currentGroup != nil {
 				for _, memberID := range currentGroup.members {
 					edges = append(edges, stepsTreeEdge{Source: memberID, Target: sid})
 				}
-				lastSequentialEnd = currentGroup.maxEnd
 				currentGroup = nil
 			} else {
 				edges = append(edges, stepsTreeEdge{Source: lastSequentialID, Target: sid})
 			}
+			prevSequentialID = lastSequentialID
 			lastSequentialID = sid
-			if !isBarrierStep(s.FunctionName) {
-				lastSequentialEnd = s.EndedAtMs
-			}
 		}
 	}
 

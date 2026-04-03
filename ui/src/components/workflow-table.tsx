@@ -10,9 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/status-badge";
-import { Ban, Play } from "lucide-react";
-import { pbClient } from "@/providers/pocketbase";
+import { StatusBadge, AppStatusBadge } from "@/components/status-badge";
 
 export interface WorkflowRecord {
   id: string;
@@ -24,6 +22,8 @@ export interface WorkflowRecord {
   updated_at_epoch_ms: number;
   queue_name: string;
   priority: number;
+  app_status: string;
+  app_status_color: string;
 }
 
 interface Props {
@@ -47,89 +47,31 @@ export function WorkflowTable({ filters, sorters, onRowClick }: Props) {
       header: "Workflow Name",
     },
     {
-      accessorKey: "id",
-      header: "Workflow ID",
-      cell: ({ getValue }) => {
-        const id = getValue<string>();
-        return (
-          <span className="font-mono text-xs" title={id}>
-            {id.slice(0, 8)}...
-          </span>
-        );
-      },
-    },
-    {
-      accessorKey: "application_version",
-      header: "App Version",
-      cell: ({ getValue }) => {
-        const v = getValue<string>();
-        return v ? (
-          <span className="font-mono text-xs">{v.slice(0, 8)}</span>
-        ) : (
-          "\u2014"
-        );
-      },
-    },
-    {
       accessorKey: "status",
       header: "Status",
       cell: ({ getValue }) => <StatusBadge status={getValue<string>()} />,
     },
     {
-      id: "actions",
-      header: "Actions",
-      cell: ({ row }) => {
-        const { id, status } = row.original;
-        const canCancel = status === "PENDING" || status === "ENQUEUED";
-        const canResume =
-          status === "ERROR" ||
-          status === "CANCELLED" ||
-          status === "MAX_RECOVERY_ATTEMPTS_EXCEEDED";
-
-        return (
-          <div className="flex gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={!canCancel}
-              onClick={(e) => {
-                e.stopPropagation();
-                pbClient.send(`/api/pf/workflows/${id}/cancel`, {
-                  method: "POST",
-                });
-              }}
-              title="Cancel"
-            >
-              <Ban className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={!canResume}
-              onClick={(e) => {
-                e.stopPropagation();
-                pbClient.send(`/api/pf/workflows/${id}/resume`, {
-                  method: "POST",
-                });
-              }}
-              title="Resume"
-            >
-              <Play className="h-4 w-4" />
-            </Button>
-          </div>
-        );
-      },
+      id: "app_status",
+      header: "App Status",
+      cell: ({ row }) => (
+        <AppStatusBadge
+          label={row.original.app_status}
+          color={row.original.app_status_color}
+        />
+      ),
     },
   ];
 
   const { reactTable: table } = useTable<WorkflowRecord>({
     columns,
     refineCoreProps: {
-      resource: "pf_workflow_status",
+      resource: "pt_workflow_status",
       filters: { permanent: filters },
       sorters: { permanent: sorters },
       pagination: { pageSize: 25 },
       liveMode: "auto",
+      queryOptions: { refetchInterval: 5000 },
     },
     getCoreRowModel: getCoreRowModel(),
   });

@@ -6,13 +6,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/YakirOren/pocketflow"
+	"github.com/YakirOren/turbine"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
 
 type handlers struct {
-	rt  *pocketflow.Runtime
+	rt  *turbine.Runtime
 	app core.App
 }
 
@@ -42,7 +42,7 @@ func (h *handlers) listQueues(e *core.RequestEvent) error {
 	queues := h.rt.Queues()
 	result := make([]map[string]any, 0, len(queues))
 	for _, q := range queues {
-		if q.Name == "_pf_internal_queue" {
+		if q.Name == "_pt_internal_queue" {
 			continue
 		}
 		entry := map[string]any{
@@ -80,7 +80,7 @@ func (h *handlers) queueStats(e *core.RequestEvent) error {
 
 	var stats []stat
 	err := h.app.DB().
-		NewQuery("SELECT status, COUNT(*) as cnt FROM pf_workflow_status WHERE queue_name = {:name} GROUP BY status").
+		NewQuery("SELECT status, COUNT(*) as cnt FROM pt_workflow_status WHERE queue_name = {:name} GROUP BY status").
 		Bind(dbx.Params{"name": name}).
 		All(&stats)
 	if err != nil {
@@ -94,12 +94,12 @@ func (h *handlers) queueStats(e *core.RequestEvent) error {
 		"failed":    0,
 	}
 	for _, s := range stats {
-		switch pocketflow.StatusType(s.Status) {
-		case pocketflow.StatusEnqueued, pocketflow.StatusPending:
+		switch turbine.StatusType(s.Status) {
+		case turbine.StatusEnqueued, turbine.StatusPending:
 			result["enqueued"] += s.Count
-		case pocketflow.StatusSuccess:
+		case turbine.StatusSuccess:
 			result["completed"] += s.Count
-		case pocketflow.StatusError, pocketflow.StatusMaxRecoveryAttemptsExceeded:
+		case turbine.StatusError, turbine.StatusMaxRecoveryAttemptsExceeded:
 			result["failed"] += s.Count
 		}
 	}
@@ -110,7 +110,7 @@ func (h *handlers) queueStats(e *core.RequestEvent) error {
 func (h *handlers) listScheduled(e *core.RequestEvent) error {
 	scheduled := h.rt.ScheduledWorkflows()
 	if scheduled == nil {
-		scheduled = []pocketflow.ScheduledWorkflow{}
+		scheduled = []turbine.ScheduledWorkflow{}
 	}
 	return e.JSON(http.StatusOK, scheduled)
 }
@@ -118,7 +118,7 @@ func (h *handlers) listScheduled(e *core.RequestEvent) error {
 func (h *handlers) listRegistered(e *core.RequestEvent) error {
 	registered := h.rt.RegisteredWorkflows()
 	if registered == nil {
-		registered = []pocketflow.RegisteredWorkflow{}
+		registered = []turbine.RegisteredWorkflow{}
 	}
 	return e.JSON(http.StatusOK, registered)
 }
@@ -147,7 +147,7 @@ func (h *handlers) triggerWorkflow(e *core.RequestEvent) error {
 }
 
 func (h *handlers) listSchedules(e *core.RequestEvent) error {
-	records, err := h.app.FindAllRecords("pf_schedules")
+	records, err := h.app.FindAllRecords("pt_schedules")
 	if err != nil {
 		return e.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
@@ -203,7 +203,7 @@ func (h *handlers) createSchedule(e *core.RequestEvent) error {
 		return e.JSON(http.StatusBadRequest, map[string]string{"error": "workflow not found or not triggerable"})
 	}
 
-	col, err := h.app.FindCollectionByNameOrId("pf_schedules")
+	col, err := h.app.FindCollectionByNameOrId("pt_schedules")
 	if err != nil {
 		return e.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
@@ -233,7 +233,7 @@ func (h *handlers) deleteSchedule(e *core.RequestEvent) error {
 		return e.JSON(http.StatusBadRequest, map[string]string{"error": "missing schedule id"})
 	}
 
-	record, err := h.app.FindRecordById("pf_schedules", id)
+	record, err := h.app.FindRecordById("pt_schedules", id)
 	if err != nil {
 		return e.JSON(http.StatusNotFound, map[string]string{"error": "schedule not found"})
 	}

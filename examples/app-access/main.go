@@ -5,16 +5,17 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/YakirOren/pocketflow"
+	"github.com/YakirOren/turbine"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 )
 
 // CreateUserNote demonstrates accessing the PocketBase app from within a workflow.
 // The workflow creates a record in a "notes" collection as a durable step.
-func CreateUserNote(ctx pocketflow.Context, input NoteInput) (string, error) {
-	noteID, err := pocketflow.Do(ctx, func(stepCtx context.Context) (string, error) {
-		collection, err := ctx.App().FindCollectionByNameOrId("notes")
+func CreateUserNote(ctx turbine.Context, input NoteInput) (string, error) {
+	noteID, err := turbine.Do(ctx, func(stepCtx context.Context) (string, error) {
+		app := turbine.AppFrom(stepCtx)
+		collection, err := app.FindCollectionByNameOrId("notes")
 		if err != nil {
 			return "", fmt.Errorf("collection not found: %w", err)
 		}
@@ -24,12 +25,12 @@ func CreateUserNote(ctx pocketflow.Context, input NoteInput) (string, error) {
 		record.Set("title", input.Title)
 		record.Set("body", input.Body)
 
-		if err := ctx.App().Save(record); err != nil {
+		if err := app.Save(record); err != nil {
 			return "", fmt.Errorf("failed to save note: %w", err)
 		}
 
 		return record.Id, nil
-	}, pocketflow.WithStepName("create-note"))
+	}, turbine.WithStepName("create-note"))
 	if err != nil {
 		return "", err
 	}
@@ -46,9 +47,9 @@ type NoteInput struct {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Setup(app, pocketflow.Config{})
+	rt := turbine.Setup(app, turbine.Config{})
 
-	pocketflow.Register(rt, CreateUserNote)
+	turbine.Register(rt, CreateUserNote)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/notes", func(re *core.RequestEvent) error {
@@ -58,7 +59,7 @@ func main() {
 				Body:   re.Request.FormValue("body"),
 			}
 
-			handle, err := pocketflow.Run(rt, CreateUserNote, input)
+			handle, err := turbine.Run(rt, CreateUserNote, input)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}

@@ -3,9 +3,11 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+const isDev = process.env.NODE_ENV !== "production";
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  base: "/_/pocketflow/",
+  base: isDev ? "/" : "/_/turbine/",
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -15,10 +17,6 @@ export default defineConfig({
     port: 5174,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8090",
-        changeOrigin: true,
-      },
-      "/_": {
         target: "http://127.0.0.1:8090",
         changeOrigin: true,
       },

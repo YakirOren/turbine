@@ -1,4 +1,4 @@
-package pocketflow
+package turbine
 
 func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]Handle[any], error) {
 	appVersion := []string{}
@@ -13,7 +13,7 @@ func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]Handle[any], 
 			applicationVersion: appVersion,
 			loadInput:          true,
 		})
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()))
 	if err != nil {
 		return nil, err
 	}
@@ -24,9 +24,9 @@ func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]Handle[any], 
 		if wf.QueueName != "" {
 			cleared, err := retryWithResult(rt.ctx, func() (bool, error) {
 				return rt.systemDB.clearQueueAssignment(rt.ctx, wf.ID)
-			}, withRetrierLogger(rt.logger))
+			}, withRetrierLogger(rt.app.Logger()))
 			if err != nil {
-				rt.logger.Error("error clearing queue assignment", "workflow_id", wf.ID, "error", err)
+				rt.app.Logger().Error("error clearing queue assignment", "workflow_id", wf.ID, "error", err)
 				continue
 			}
 			if cleared {
@@ -39,13 +39,13 @@ func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]Handle[any], 
 
 		wfFQN, ok := rt.workflowCustomNameToFQN.Load(wf.Name)
 		if !ok {
-			rt.logger.Error("workflow not found in registry for recovery", "workflow_name", wf.Name)
+			rt.app.Logger().Error("workflow not found in registry for recovery", "workflow_name", wf.Name)
 			continue
 		}
 
 		registeredAny, exists := rt.workflowRegistry.Load(wfFQN.(string))
 		if !exists {
-			rt.logger.Error("workflow function not found in registry", "workflow_id", wf.ID, "name", wf.Name)
+			rt.app.Logger().Error("workflow function not found in registry", "workflow_id", wf.ID, "name", wf.Name)
 			continue
 		}
 		registered := registeredAny.(workflowRegistryEntry)

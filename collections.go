@@ -1,20 +1,57 @@
-package pocketflow
+package turbine
 
 import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
 const (
-	collectionStatus             = "pf_workflow_status"
-	collectionOperationOutputs   = "pf_operation_outputs"
-	collectionNotifications      = "pf_notifications"
-	collectionWorkflowEvents     = "pf_workflow_events"
-	collectionWorkflowEventsHist = "pf_workflow_events_history"
-	collectionSchedules          = "pf_schedules"
+	collectionStatus             = "pt_workflow_status"
+	collectionOperationOutputs   = "pt_operation_outputs"
+	collectionNotifications      = "pt_notifications"
+	collectionWorkflowEvents     = "pt_workflow_events"
+	collectionWorkflowEventsHist = "pt_workflow_events_history"
+	collectionSchedules          = "pt_schedules"
+	collectionProducts           = "pt_products"
 )
 
 func init() {
-	core.AppMigrations.Register(upCreateCollections, downCreateCollections, "pf_1_create_collections")
+	core.AppMigrations.Register(upCreateCollections, downCreateCollections, "pt_1_create_collections")
+}
+
+func init() {
+	core.AppMigrations.Register(upCreateProducts, downCreateProducts, "pt_2_create_products")
+}
+
+func upCreateProducts(app core.App) error {
+	wfStatus, err := app.FindCollectionByNameOrId(collectionStatus)
+	if err != nil {
+		return err
+	}
+
+	products := core.NewBaseCollection(collectionProducts)
+	products.Fields.Add(
+		&core.RelationField{Name: "workflow_id", CollectionId: wfStatus.Id, Required: true, CascadeDelete: true, MaxSelect: 1},
+		&core.NumberField{Name: "function_id"},
+		&core.TextField{Name: "function_name"},
+		&core.FileField{Name: "file", MaxSize: 0, MaxSelect: 1},
+		&core.TextField{Name: "file_name", Required: true},
+		&core.JSONField{Name: "metadata"},
+		&core.NumberField{Name: "size"},
+		&core.TextField{Name: "status", Required: true},
+		&core.TextField{Name: "error"},
+		&core.AutodateField{Name: "created", OnCreate: true},
+	)
+	products.AddIndex("idx_products_workflow", false, "workflow_id", "")
+	products.AddIndex("idx_products_dedup", true, "workflow_id, function_id, file_name", "")
+	return app.Save(products)
+}
+
+func downCreateProducts(app core.App) error {
+	col, err := app.FindCollectionByNameOrId(collectionProducts)
+	if err != nil {
+		return nil
+	}
+	return app.Delete(col)
 }
 
 func upCreateCollections(app core.App) error {
@@ -40,6 +77,8 @@ func upCreateCollections(app core.App) error {
 		&core.NumberField{Name: "workflow_deadline_epoch_ms"},
 		&core.TextField{Name: "owner_xid"},
 		&core.NumberField{Name: "parent_function_id"},
+		&core.TextField{Name: "app_status"},
+		&core.TextField{Name: "app_status_color"},
 	)
 	wfStatus.AddIndex("idx_workflow_status_executor", false, "executor_id, status, application_version", "")
 	wfStatus.AddIndex("idx_workflow_status_dedup", true, "queue_name, deduplication_id", "deduplication_id != ''")

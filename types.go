@@ -1,10 +1,23 @@
-package pocketflow
+package turbine
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 )
+
+var validAppStatusColors = map[string]bool{
+	"green": true, "red": true, "yellow": true, "blue": true, "gray": true,
+	"lime": true, "orange": true, "purple": true, "pink": true, "cyan": true,
+}
+
+func validateAppStatusColor(color string) error {
+	if !validAppStatusColors[color] {
+		return fmt.Errorf("invalid app status color %q: must be one of green, red, yellow, blue, gray, lime, orange, purple, pink, cyan", color)
+	}
+	return nil
+}
 
 // StatusType represents the current execution state of a workflow.
 type StatusType string
@@ -41,6 +54,8 @@ type Status struct {
 	QueuePartitionKey  string             `json:"queue_partition_key,omitempty"`
 	ForkedFrom         string             `json:"forked_from,omitempty"`
 	ParentWorkflowID   string             `json:"parent_workflow_id,omitempty"`
+	AppStatus          string             `json:"app_status,omitempty"`
+	AppStatusColor     string             `json:"app_status_color,omitempty"`
 }
 
 // Handle provides methods to interact with a running or completed workflow.
@@ -70,9 +85,12 @@ type StepInfo struct {
 
 // workflowState holds the runtime state for a workflow execution.
 type workflowState struct {
-	workflowID   string
-	stepID       atomic.Int64
-	isWithinStep bool
+	workflowID     string
+	stepID         atomic.Int64
+	isWithinStep   bool
+	recovering     bool
+	appStatus      string
+	appStatusColor string
 }
 
 func (ws *workflowState) nextStepID() int {
@@ -89,6 +107,9 @@ type insertWorkflowResult struct {
 	timeout          time.Duration
 	workflowDeadline time.Time
 	ownerXID         string
+	appStatus        string
+	appStatusColor   string
+	hasSteps         bool
 }
 
 type insertStatusDBInput struct {
@@ -229,6 +250,12 @@ type dequeuedWorkflow struct {
 	input      *string
 }
 
+type updateAppStatusDBInput struct {
+	workflowID     string
+	appStatus      string
+	appStatusColor string
+}
+
 type garbageCollectWorkflowsInput struct {
 	cutoffTime time.Time
 }
@@ -237,6 +264,21 @@ type garbageCollectWorkflowsInput struct {
 type RateLimiter struct {
 	Limit  int
 	Period time.Duration
+}
+
+// ProductSender is the interface for sending products to external systems.
+// Users implement this to define custom destinations.
+type ProductSender interface {
+	Send(ctx context.Context, product ProductRecord) error
+}
+
+// ProductRecord is the reference to a stored product passed to ProductSender.Send().
+type ProductRecord struct {
+	ID       string         `json:"id"`
+	FileName string         `json:"file_name"`
+	Size     int            `json:"size"`
+	Metadata map[string]any `json:"metadata"`
+	FileURL  string         `json:"file_url"`
 }
 
 // systemDatabase is the internal interface for database operations.
@@ -270,6 +312,8 @@ type systemDatabase interface {
 	getQueuePartitions(ctx context.Context, queueName string) ([]string, error)
 	waitForEnqueue(ctx context.Context, queueName string) chan struct{}
 	stopWaitForEnqueue(queueName string, ch chan struct{})
+
+	updateAppStatus(ctx context.Context, input updateAppStatusDBInput) error
 
 	garbageCollectWorkflows(ctx context.Context, input garbageCollectWorkflowsInput) error
 }

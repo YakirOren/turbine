@@ -1,4 +1,4 @@
-package pocketflow
+package turbine
 
 import (
 	"context"
@@ -28,7 +28,7 @@ func (sm *scheduleManager) registerOnce(rt *Runtime, recordID string, fqn string
 		delay = 0
 	}
 
-	ctx, cancel := context.WithCancel(rt.ctx)
+	ctx, cancel := context.WithCancel(rt.drainCtx)
 	sm.mu.Lock()
 	sm.timers[recordID] = cancel
 	sm.mu.Unlock()
@@ -64,7 +64,7 @@ func (sm *scheduleManager) registerOnce(rt *Runtime, recordID string, fqn string
 }
 
 func (sm *scheduleManager) registerCron(rt *Runtime, recordID string, fqn string, rawInput json.RawMessage, cronExpr string, jitter time.Duration) error {
-	cronJobID := fmt.Sprintf("pf_ui_sched_%s", recordID)
+	cronJobID := fmt.Sprintf("pt_ui_sched_%s", recordID)
 	return rt.app.Cron().Add(cronJobID, cronExpr, func() {
 		if !rt.launched.Load() {
 			return
@@ -73,7 +73,7 @@ func (sm *scheduleManager) registerCron(rt *Runtime, recordID string, fqn string
 			delay := time.Duration(rand.N(jitter))
 			select {
 			case <-time.After(delay):
-			case <-rt.ctx.Done():
+			case <-rt.drainCtx.Done():
 				return
 			}
 		}
@@ -85,7 +85,7 @@ func (sm *scheduleManager) registerCron(rt *Runtime, recordID string, fqn string
 }
 
 func (sm *scheduleManager) removeCron(rt *Runtime, recordID string) {
-	cronJobID := fmt.Sprintf("pf_ui_sched_%s", recordID)
+	cronJobID := fmt.Sprintf("pt_ui_sched_%s", recordID)
 	rt.app.Cron().Remove(cronJobID)
 }
 

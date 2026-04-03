@@ -1,4 +1,4 @@
-package pocketflow
+package turbine
 
 import (
 	"crypto/sha256"
@@ -12,7 +12,7 @@ import (
 func computeApplicationVersion() string {
 	hash, err := getBinaryHash()
 	if err != nil {
-		fmt.Printf("pocketflow: Failed to compute binary hash: %v\n", err)
+		fmt.Printf("turbine: Failed to compute binary hash: %v\n", err)
 		return ""
 	}
 	return hash

@@ -1,4 +1,4 @@
-package pocketflow
+package turbine
 
 import (
 	"time"
@@ -6,7 +6,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-// Setup hooks pocketflow into PocketBase's lifecycle as a plugin.
+// Setup hooks turbine into PocketBase's lifecycle as a plugin.
 // Returns the Runtime so you can register workflows before app.Start().
 func Setup(app core.App, config Config) *Runtime {
 	rt := New(app, config)

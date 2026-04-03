@@ -1,4 +1,4 @@
-module github.com/YakirOren/pocketflow
+module github.com/YakirOren/turbine
 
 go 1.25.7
 
