@@ -18,12 +18,28 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+
+interface SchemaField {
+  name: string;
+  type: "string" | "number" | "boolean" | "select";
+  label?: string;
+  required?: boolean;
+  default?: unknown;
+  options?: string[];
+  placeholder?: string;
+}
+
+interface InputSchema {
+  fields: SchemaField[];
+}
 
 interface RegisteredWorkflow {
   name: string;
   fqn: string;
   triggerable: boolean;
   cronSchedule: string;
+  inputSchema?: InputSchema;
 }
 
 type TimingMode = "now" | "schedule" | "cron";
@@ -33,6 +49,81 @@ const TIMING_OPTIONS: { value: TimingMode; label: string }[] = [
   { value: "schedule", label: "Schedule" },
   { value: "cron", label: "Cron" },
 ];
+
+function SchemaFormField({
+  field,
+  value,
+  onChange,
+  id,
+}: {
+  field: SchemaField;
+  value: unknown;
+  onChange: (value: unknown) => void;
+  id: string;
+}) {
+  const fieldId = `${id}-field-${field.name}`;
+
+  if (field.type === "boolean") {
+    return (
+      <div className="flex items-center justify-between py-1">
+        <label htmlFor={fieldId} className="text-sm font-medium">
+          {field.label ?? field.name}
+        </label>
+        <Switch
+          id={fieldId}
+          checked={!!value}
+          onCheckedChange={(checked) => onChange(checked)}
+        />
+      </div>
+    );
+  }
+
+  if (field.type === "select" && field.options) {
+    return (
+      <div className="space-y-1.5">
+        <label htmlFor={fieldId} className="text-sm font-medium">
+          {field.label ?? field.name}
+          {field.required && <span className="text-destructive ml-0.5">*</span>}
+        </label>
+        <Select value={String(value ?? "")} onValueChange={(v) => onChange(v)}>
+          <SelectTrigger id={fieldId}>
+            <SelectValue placeholder={`Select ${field.label ?? field.name}`} />
+          </SelectTrigger>
+          <SelectContent>
+            {field.options.map((opt) => (
+              <SelectItem key={opt} value={opt}>
+                {opt}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={fieldId} className="text-sm font-medium">
+        {field.label ?? field.name}
+        {field.required && <span className="text-destructive ml-0.5">*</span>}
+      </label>
+      <Input
+        id={fieldId}
+        type={field.type === "number" ? "number" : "text"}
+        value={String(value ?? "")}
+        onChange={(e) =>
+          onChange(
+            field.type === "number"
+              ? e.target.value === "" ? 0 : Number(e.target.value)
+              : e.target.value
+          )
+        }
+        placeholder={field.placeholder ?? ""}
+        className={field.type === "number" ? "font-mono" : ""}
+      />
+    </div>
+  );
+}
 
 export function TriggerRunButton() {
   const id = useId();
@@ -49,6 +140,12 @@ export function TriggerRunButton() {
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const resultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [formValues, setFormValues] = useState<Record<string, unknown>>({});
+
+  const selectedWorkflow = workflows.find((w) => w.fqn === selectedFqn);
+  const schema = selectedWorkflow?.inputSchema;
+  const hasSchema = schema?.fields && schema.fields.length > 0;
 
   useEffect(() => {
     if (!open) return;
@@ -71,6 +168,26 @@ export function TriggerRunButton() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!selectedFqn) return;
+    const wf = workflows.find((w) => w.fqn === selectedFqn);
+    if (wf?.inputSchema?.fields) {
+      const defaults: Record<string, unknown> = {};
+      for (const field of wf.inputSchema.fields) {
+        if (field.default !== undefined) {
+          defaults[field.name] = field.default;
+        } else if (field.type === "boolean") {
+          defaults[field.name] = false;
+        } else if (field.type === "number") {
+          defaults[field.name] = 0;
+        } else {
+          defaults[field.name] = "";
+        }
+      }
+      setFormValues(defaults);
+    }
+  }, [selectedFqn, workflows]);
+
   const scheduleResultDismiss = () => {
     if (resultTimerRef.current !== null) {
       clearTimeout(resultTimerRef.current);
@@ -92,6 +209,7 @@ export function TriggerRunButton() {
     setScheduledAt("");
     setCronExpression("");
     setJitter("");
+    setFormValues({});
     setResult(null);
     setError(null);
   };
@@ -108,12 +226,23 @@ export function TriggerRunButton() {
 
     try {
       let parsedInput: unknown;
-      try {
-        parsedInput = JSON.parse(input);
-      } catch {
-        setError("Invalid JSON input");
-        setSubmitting(false);
-        return;
+      if (hasSchema) {
+        for (const field of schema!.fields) {
+          if (field.required && (formValues[field.name] === "" || formValues[field.name] === undefined)) {
+            setError(`${field.label ?? field.name} is required`);
+            setSubmitting(false);
+            return;
+          }
+        }
+        parsedInput = formValues;
+      } else {
+        try {
+          parsedInput = JSON.parse(input);
+        } catch {
+          setError("Invalid JSON input");
+          setSubmitting(false);
+          return;
+        }
       }
 
       if (timing === "now") {
@@ -242,18 +371,35 @@ export function TriggerRunButton() {
             </Select>
           </div>
 
-          <div className="space-y-1.5">
-            <label htmlFor={`${id}-input`} className="text-sm font-medium">
-              Input
-            </label>
-            <textarea
-              id={`${id}-input`}
-              className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="{}"
-            />
-          </div>
+          {hasSchema ? (
+            <div className="space-y-3">
+              <span className="text-sm font-medium">Input</span>
+              {schema!.fields.map((field) => (
+                <SchemaFormField
+                  key={field.name}
+                  field={field}
+                  value={formValues[field.name]}
+                  onChange={(v) =>
+                    setFormValues((prev) => ({ ...prev, [field.name]: v }))
+                  }
+                  id={id}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <label htmlFor={`${id}-input`} className="text-sm font-medium">
+                Input
+              </label>
+              <textarea
+                id={`${id}-input`}
+                className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="{}"
+              />
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <span id={`${id}-timing-label`} className="text-sm font-medium">

@@ -1,4 +1,5 @@
-import { Input } from "@/components/ui/input";
+import { useEffect, useState } from "react";
+import { pbClient } from "@/providers/pocketbase";
 import {
   Select,
   SelectContent,
@@ -28,6 +29,7 @@ export interface WorkflowFilters {
   timeRange: string;
   name: string;
   status: string;
+  tag: string;
 }
 
 interface Props {
@@ -36,6 +38,24 @@ interface Props {
 }
 
 export function WorkflowFilterBar({ filters, onChange }: Props) {
+  const [workflowNames, setWorkflowNames] = useState<string[]>([]);
+
+  useEffect(() => {
+    pbClient
+      .send<{ name: string }[]>("/api/pt/registered", { method: "GET" })
+      .then((data) => setWorkflowNames(data.map((w) => w.name)))
+      .catch(() => {});
+  }, []);
+
+  const [tags, setTags] = useState<string[]>([]);
+
+  useEffect(() => {
+    pbClient
+      .send<string[]>("/api/pt/tags", { method: "GET" })
+      .then(setTags)
+      .catch(() => {});
+  }, []);
+
   const update = (key: keyof WorkflowFilters, value: string) => {
     onChange({ ...filters, [key]: value });
   };
@@ -58,12 +78,22 @@ export function WorkflowFilterBar({ filters, onChange }: Props) {
         </SelectContent>
       </Select>
 
-      <Input
-        placeholder="Search by name..."
-        value={filters.name}
-        onChange={(e) => update("name", e.target.value)}
-        className="w-52"
-      />
+      <Select
+        value={filters.name || "all"}
+        onValueChange={(v) => update("name", v === "all" ? "" : v)}
+      >
+        <SelectTrigger className="w-52">
+          <SelectValue placeholder="All workflows" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All workflows</SelectItem>
+          {workflowNames.map((name) => (
+            <SelectItem key={name} value={name}>
+              {name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       <Select
         value={filters.status}
@@ -80,6 +110,23 @@ export function WorkflowFilterBar({ filters, onChange }: Props) {
                 <span className={`h-2 w-2 rounded-full ${s.dot}`} />
                 {s.label}
               </span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <Select
+        value={filters.tag || "all"}
+        onValueChange={(v) => update("tag", v === "all" ? "" : v)}
+      >
+        <SelectTrigger className="w-36">
+          <SelectValue placeholder="All tags" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All tags</SelectItem>
+          {tags.map((t) => (
+            <SelectItem key={t} value={t}>
+              {t}
             </SelectItem>
           ))}
         </SelectContent>

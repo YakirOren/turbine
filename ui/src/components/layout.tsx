@@ -1,7 +1,7 @@
 import { Link, useLocation, Outlet } from "react-router";
 import { useGetIdentity, useLogout } from "@refinedev/core";
 import { useTheme } from "next-themes";
-import { LayoutList, Clock, LogOut, EllipsisVertical, Sun, Moon, Workflow } from "lucide-react";
+import { LayoutList, Clock, LogOut, EllipsisVertical, Sun, Moon, Workflow, Calendar, Database, Webhook } from "lucide-react";
 import { TurbineLogo } from "@/components/turbine-logo";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
@@ -17,6 +17,9 @@ const navItems = [
   { label: "Workflows", path: "/workflows", icon: Workflow },
   { label: "Queues", path: "/queues", icon: LayoutList },
   { label: "Scheduled", path: "/scheduled", icon: Clock },
+  { label: "Calendar", path: "/calendar", icon: Calendar },
+  { label: "KV Store", path: "/kv", icon: Database },
+  { label: "Webhooks", path: "/webhooks", icon: Webhook },
 ];
 
 export function Layout() {

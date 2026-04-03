@@ -11,7 +11,7 @@ func TestBuildStepsTree_Sequential(t *testing.T) {
 		{FunctionID: 2, FunctionName: "step_c", StartedAtMs: 210, EndedAtMs: 300},
 	}
 
-	nodes, edges := buildStepsTree(steps, "SUCCESS")
+	nodes, edges := buildStepsTree(steps, "SUCCESS", "")
 
 	if len(nodes) != 4 {
 		t.Fatalf("expected 4 nodes, got %d", len(nodes))
@@ -33,7 +33,7 @@ func TestBuildStepsTree_ParallelGroup(t *testing.T) {
 		{FunctionID: 4, FunctionName: "postprocess", StartedAtMs: 110, EndedAtMs: 150},
 	}
 
-	nodes, edges := buildStepsTree(steps, "SUCCESS")
+	nodes, edges := buildStepsTree(steps, "SUCCESS", "")
 
 	if len(nodes) != 6 {
 		t.Fatalf("expected 6 nodes, got %d", len(nodes))
@@ -48,7 +48,7 @@ func TestBuildStepsTree_SingleStep(t *testing.T) {
 		{FunctionID: 0, FunctionName: "only_step", StartedAtMs: 0, EndedAtMs: 100},
 	}
 
-	nodes, edges := buildStepsTree(steps, "SUCCESS")
+	nodes, edges := buildStepsTree(steps, "SUCCESS", "")
 
 	if len(nodes) != 2 {
 		t.Fatalf("expected 2 nodes, got %d", len(nodes))
@@ -60,7 +60,7 @@ func TestBuildStepsTree_SingleStep(t *testing.T) {
 }
 
 func TestBuildStepsTree_Empty(t *testing.T) {
-	nodes, edges := buildStepsTree([]stepRow{}, "PENDING")
+	nodes, edges := buildStepsTree([]stepRow{}, "PENDING", "")
 
 	if len(nodes) != 0 {
 		t.Fatalf("expected 0 nodes, got %d", len(nodes))
@@ -77,7 +77,7 @@ func TestBuildStepsTree_SleepBarrier(t *testing.T) {
 		{FunctionID: 2, FunctionName: "after_sleep", StartedAtMs: 5010, EndedAtMs: 5100},
 	}
 
-	_, edges := buildStepsTree(steps, "SUCCESS")
+	_, edges := buildStepsTree(steps, "SUCCESS", "")
 
 	if len(edges) != 3 {
 		t.Fatalf("expected 3 edges (sequential), got %d: %+v", len(edges), edges)
@@ -92,7 +92,7 @@ func TestBuildStepsTree_ChildWorkflowNode(t *testing.T) {
 		{FunctionID: 0, FunctionName: "launch_child", StartedAtMs: 0, EndedAtMs: 100, ChildWorkflowID: &childID},
 	}
 
-	nodes, _ := buildStepsTree(steps, "SUCCESS")
+	nodes, _ := buildStepsTree(steps, "SUCCESS", "")
 
 	if nodes[0].Type != "child-workflow" {
 		t.Fatalf("expected child-workflow type, got %s", nodes[0].Type)
@@ -105,7 +105,7 @@ func TestBuildStepsTree_ChildWorkflowNode(t *testing.T) {
 func TestBuildStepsTree_ErrorStatus(t *testing.T) {
 	nodes, _ := buildStepsTree(
 		[]stepRow{{FunctionID: 0, FunctionName: "x", StartedAtMs: 0, EndedAtMs: 1}},
-		"ERROR",
+		"ERROR", "",
 	)
 
 	resultNode := nodes[len(nodes)-1]
@@ -125,7 +125,7 @@ func TestBuildStepsTree_DoAsyncParallel(t *testing.T) {
 		{FunctionID: 5, FunctionName: "confirm", StartedAtMs: 400, EndedAtMs: 450},
 	}
 
-	_, edges := buildStepsTree(steps, "SUCCESS")
+	_, edges := buildStepsTree(steps, "SUCCESS", "")
 
 	// Expected edges:
 	// 0→1, 0→2 (parallel group 1)
@@ -156,7 +156,7 @@ func TestBuildStepsTree_RealWorldDoAsync(t *testing.T) {
 		{FunctionID: 5, FunctionName: "confirm", StartedAtMs: 1773417398529, EndedAtMs: 1773417398580},
 	}
 
-	_, edges := buildStepsTree(steps, "SUCCESS")
+	_, edges := buildStepsTree(steps, "SUCCESS", "")
 
 	// validate → (charge || inventory) → reserve → (ship || confirm) → result
 	if len(edges) != 8 {
@@ -170,6 +170,62 @@ func TestBuildStepsTree_RealWorldDoAsync(t *testing.T) {
 	assertEdge(t, edges[5], "3", "5")
 	assertEdge(t, edges[6], "4", "result")
 	assertEdge(t, edges[7], "5", "result")
+}
+
+func TestBuildStepsTree_ApprovalNode(t *testing.T) {
+	steps := []stepRow{
+		{FunctionID: 1, FunctionName: "prepare-data", StartedAtMs: 1000, EndedAtMs: 2000},
+	}
+	nodes, edges := buildStepsTree(steps, "PENDING", "waiting for approval")
+
+	if len(nodes) != 3 {
+		t.Fatalf("expected 3 nodes, got %d", len(nodes))
+	}
+
+	var approvalNode *stepsTreeNode
+	for i := range nodes {
+		if nodes[i].Type == "approval" {
+			approvalNode = &nodes[i]
+			break
+		}
+	}
+	if approvalNode == nil {
+		t.Fatal("expected an approval node")
+	}
+	if approvalNode.Status != "running" {
+		t.Fatalf("expected approval node status 'running', got %q", approvalNode.Status)
+	}
+	if approvalNode.Name != "Waiting for Approval" {
+		t.Fatalf("expected name 'Waiting for Approval', got %q", approvalNode.Name)
+	}
+
+	hasEdge := func(src, tgt string) bool {
+		for _, e := range edges {
+			if e.Source == src && e.Target == tgt {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasEdge("1", "approval-wait") {
+		t.Fatal("expected edge from step 1 to approval-wait")
+	}
+	if !hasEdge("approval-wait", "result") {
+		t.Fatal("expected edge from approval-wait to result")
+	}
+}
+
+func TestBuildStepsTree_NoApprovalNodeWhenNotWaiting(t *testing.T) {
+	steps := []stepRow{
+		{FunctionID: 1, FunctionName: "do-work", StartedAtMs: 1000, EndedAtMs: 2000},
+	}
+	nodes, _ := buildStepsTree(steps, "SUCCESS", "")
+
+	for _, n := range nodes {
+		if n.Type == "approval" {
+			t.Fatal("should not have approval node when not waiting")
+		}
+	}
 }
 
 func assertEdge(t *testing.T, edge stepsTreeEdge, source, target string) {

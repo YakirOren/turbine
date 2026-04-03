@@ -55,6 +55,7 @@ type workflowOptions struct {
 	QueuePartitionKey   string
 	Timeout             time.Duration
 	Deadline            time.Time
+	Tags                []string
 	alreadyEncodedInput bool
 	isDequeue           bool
 	isRecovery          bool
@@ -117,6 +118,10 @@ func withIsDequeue() WorkflowOption {
 
 func withIsRecovery() WorkflowOption {
 	return func(p *workflowOptions) { p.isRecovery = true }
+}
+
+func withTags(tags []string) WorkflowOption {
+	return func(o *workflowOptions) { o.Tags = tags }
 }
 
 /*******************************/
@@ -224,6 +229,8 @@ type workflowRegistryEntry struct {
 	FQN             string
 	CronSchedule    string
 	Triggerable     bool
+	InputSchema     map[string]any
+	Tags            []string
 }
 
 type workflowRegistrationOptions struct {
@@ -231,6 +238,8 @@ type workflowRegistrationOptions struct {
 	name         string
 	cronSchedule string
 	triggerable  bool
+	inputSchema  map[string]any
+	tags         []string
 }
 
 // WorkflowRegistrationOption configures workflow registration.
@@ -252,6 +261,16 @@ func WithSchedule(cronExpr string) WorkflowRegistrationOption {
 
 func WithDashboardTrigger() WorkflowRegistrationOption {
 	return func(p *workflowRegistrationOptions) { p.triggerable = true }
+}
+
+// WithInputSchema attaches a JSON schema to the workflow, enabling the
+// dashboard to render a typed form instead of a raw JSON textarea.
+func WithInputSchema(schema map[string]any) WorkflowRegistrationOption {
+	return func(p *workflowRegistrationOptions) { p.inputSchema = schema }
+}
+
+func WithTags(tags ...string) WorkflowRegistrationOption {
+	return func(p *workflowRegistrationOptions) { p.tags = tags }
 }
 
 func resolveWorkflowFunctionName[P any, R any](fn Workflow[P, R]) string {
@@ -297,7 +316,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 	})
 
 	wrapped := wrappedWorkflowFunc(func(rt *Runtime, input any, opts ...WorkflowOption) (Handle[any], error) {
-		opts = append(opts, withWorkflowName(fqn))
+		opts = append(opts, withWorkflowName(fqn), withTags(regOpts.tags))
 		return runWorkflowInternal(rt, typedErasedWF, input, opts...)
 	})
 
@@ -307,6 +326,8 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 		MaxRetries:      regOpts.maxRetries,
 		Name:            regOpts.name,
 		Triggerable:     regOpts.triggerable,
+		InputSchema:     regOpts.inputSchema,
+		Tags:            regOpts.tags,
 	}
 
 	if _, exists := rt.workflowRegistry.LoadOrStore(fqn, entry); exists {
@@ -326,8 +347,9 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 			panic(fmt.Sprintf("scheduled workflow must accept time.Time as input, got %s", reflect.TypeFor[P]().String()))
 		}
 
-		// Update entry with cron schedule
+		// Update entry with cron schedule and tags
 		entry.CronSchedule = regOpts.cronSchedule
+		entry.Tags = regOpts.tags
 		rt.workflowRegistry.Store(fqn, entry)
 
 		cronJobID := fmt.Sprintf("pt_sched_%s", customName)
@@ -419,6 +441,9 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	if registered.Name != "" {
 		params.WorkflowName = registered.Name
 	}
+	if len(params.Tags) == 0 && len(registered.Tags) > 0 {
+		params.Tags = registered.Tags
+	}
 
 	// Validate queue options
 	if params.QueuePartitionKey != "" && params.QueueName == "" {
@@ -475,6 +500,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		QueuePartitionKey:  params.QueuePartitionKey,
 		Timeout:            params.Timeout,
 		Deadline:           params.Deadline,
+		Tags:               params.Tags,
 	}
 
 	ownerXID := core.GenerateDefaultRandomId()
@@ -583,6 +609,9 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 			close(outcomeChan)
 			return
 		}
+
+		// Dispatch webhooks after outcome is recorded
+		go rt.dispatchWebhooks(workflowID, params.WorkflowName, outcomeStatus, encodedOutput, errorMsg)
 
 		outcomeChan <- workflowOutcome[any]{result: result, err: fnErr}
 		close(outcomeChan)

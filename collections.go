@@ -13,6 +13,7 @@ const (
 	collectionSchedules          = "pt_schedules"
 	collectionProducts           = "pt_products"
 	collectionKV                 = "pt_kv"
+	collectionWebhooks           = "pt_webhooks"
 )
 
 func init() {
@@ -72,6 +73,48 @@ func upCreateKV(app core.App) error {
 
 func downCreateKV(app core.App) error {
 	col, err := app.FindCollectionByNameOrId(collectionKV)
+	if err != nil {
+		return nil
+	}
+	return app.Delete(col)
+}
+
+func init() {
+	core.AppMigrations.Register(func(app core.App) error {
+		col, err := app.FindCollectionByNameOrId(collectionStatus)
+		if err != nil {
+			return err
+		}
+		col.Fields.Add(&core.JSONField{Name: "tags"})
+		return app.Save(col)
+	}, func(app core.App) error {
+		col, err := app.FindCollectionByNameOrId(collectionStatus)
+		if err != nil {
+			return nil
+		}
+		col.Fields.RemoveByName("tags")
+		return app.Save(col)
+	}, "pt_4_add_tags")
+}
+
+func init() {
+	core.AppMigrations.Register(upCreateWebhooks, downCreateWebhooks, "pt_5_create_webhooks")
+}
+
+func upCreateWebhooks(app core.App) error {
+	webhooks := core.NewBaseCollection(collectionWebhooks)
+	webhooks.Fields.Add(
+		&core.TextField{Name: "url", Required: true},
+		&core.JSONField{Name: "events", Required: true},
+		&core.BoolField{Name: "enabled"},
+		&core.TextField{Name: "secret"},
+		&core.AutodateField{Name: "created", OnCreate: true},
+	)
+	return app.Save(webhooks)
+}
+
+func downCreateWebhooks(app core.App) error {
+	col, err := app.FindCollectionByNameOrId(collectionWebhooks)
 	if err != nil {
 		return nil
 	}

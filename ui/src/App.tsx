@@ -16,6 +16,9 @@ import { WorkflowSteps } from "@/pages/workflows/steps";
 import { QueueList } from "@/pages/queues/list";
 import { ScheduledList } from "@/pages/scheduled/list";
 import { LoginPage } from "@/pages/login";
+import { CalendarView } from "@/pages/calendar/index";
+import { KVList } from "@/pages/kv/index";
+import { WebhookList } from "@/pages/webhooks/index";
 
 function App() {
   return (
@@ -59,6 +62,9 @@ function App() {
             <Route path="/workflows/:id/steps" element={<WorkflowSteps />} />
             <Route path="/queues" element={<QueueList />} />
             <Route path="/scheduled" element={<ScheduledList />} />
+            <Route path="/calendar" element={<CalendarView />} />
+            <Route path="/kv" element={<KVList />} />
+            <Route path="/webhooks" element={<WebhookList />} />
           </Route>
 
           {/* Public routes — logged-in users redirected to dashboard */}

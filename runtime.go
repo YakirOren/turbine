@@ -251,10 +251,12 @@ func (rt *Runtime) ScheduledWorkflows() []ScheduledWorkflow {
 }
 
 type RegisteredWorkflow struct {
-	Name         string `json:"name"`
-	FQN          string `json:"fqn"`
-	Triggerable  bool   `json:"triggerable"`
-	CronSchedule string `json:"cronSchedule"`
+	Name         string         `json:"name"`
+	FQN          string         `json:"fqn"`
+	Triggerable  bool           `json:"triggerable"`
+	CronSchedule string         `json:"cronSchedule"`
+	InputSchema  map[string]any `json:"inputSchema,omitempty"`
+	Tags         []string       `json:"tags,omitempty"`
 }
 
 func (rt *Runtime) RegisteredWorkflows() []RegisteredWorkflow {
@@ -273,6 +275,8 @@ func (rt *Runtime) RegisteredWorkflows() []RegisteredWorkflow {
 			FQN:          entry.FQN,
 			Triggerable:  entry.Triggerable,
 			CronSchedule: entry.CronSchedule,
+			InputSchema:  entry.InputSchema,
+			Tags:         entry.Tags,
 		})
 		return true
 	})
@@ -304,6 +308,13 @@ func (rt *Runtime) triggerByFQNWithOpts(fqn string, rawInput json.RawMessage, ex
 
 func (rt *Runtime) TriggerByFQN(fqn string, rawInput json.RawMessage) (string, error) {
 	return rt.triggerByFQNWithOpts(fqn, rawInput)
+}
+
+// SendToWorkflow sends a message to a workflow from outside a workflow context.
+// This is used by HTTP handlers and other external callers.
+func (rt *Runtime) SendToWorkflow(workflowID string, message any, topic string) error {
+	ctx := rt.NewContext(rt.ctx)
+	return Send(ctx, workflowID, message, topic)
 }
 
 func (rt *Runtime) IsTriggerable(fqn string) bool {

@@ -3,6 +3,7 @@ package turbine
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -119,14 +120,14 @@ func (s *sqliteSysDB) insertStatus(ctx context.Context, input insertStatusDBInpu
 		created_at_epoch_ms, recovery_attempts, updated_at_epoch_ms,
 		workflow_timeout_ms, workflow_deadline_epoch_ms,
 		inputs, deduplication_id, priority, queue_partition_key,
-		owner_xid, parent_workflow_id
+		owner_xid, parent_workflow_id, tags
 	) VALUES(
 		{:id}, {:status}, {:name}, {:queue_name},
 		{:executor_id}, {:app_version}, {:app_id},
 		{:created_at}, {:attempts}, {:updated_at},
 		{:timeout_ms}, {:deadline_ms},
 		{:inputs}, {:dedup_id}, {:priority}, {:partition_key},
-		{:owner_xid}, {:parent_wf_id}
+		{:owner_xid}, {:parent_wf_id}, {:tags}
 	)
 	ON CONFLICT (id)
 	DO UPDATE SET
@@ -183,6 +184,13 @@ func (s *sqliteSysDB) insertStatus(ctx context.Context, input insertStatusDBInpu
 		"partition_key":    queuePartitionKey,
 		"owner_xid":        ownerXID,
 		"parent_wf_id":     parentWorkflowID,
+		"tags": func() string {
+			if len(input.status.Tags) == 0 {
+				return "[]"
+			}
+			b, _ := json.Marshal(input.status.Tags)
+			return string(b)
+		}(),
 		"enqueued_status1": string(StatusEnqueued),
 		"enqueued_status2": string(StatusEnqueued),
 		"recovery_inc":     recoveryIncrement,
@@ -241,7 +249,7 @@ func (s *sqliteSysDB) listWorkflows(ctx context.Context, input listWorkflowsDBIn
 		"application_version", "application_id", "recovery_attempts", "queue_name",
 		"workflow_timeout_ms", "workflow_deadline_epoch_ms",
 		"deduplication_id", "priority", "queue_partition_key", "forked_from_workflow_id", "parent_workflow_id",
-		"app_status", "app_status_color",
+		"app_status", "app_status_color", "tags",
 	}
 	if input.loadInput {
 		cols = append(cols, "inputs")
@@ -315,6 +323,7 @@ func (s *sqliteSysDB) listWorkflows(ctx context.Context, input listWorkflowsDBIn
 		var queueName, appVersion, dedupID, partitionKey, forkedFrom, parentWfID sql.NullString
 		var appStatus, appStatusColor sql.NullString
 		var inputStr sql.NullString
+		var tagsStr sql.NullString
 
 		scanArgs := []any{
 			&wf.ID, &wf.Status, &wf.Name, &wf.ExecutorID,
@@ -322,7 +331,7 @@ func (s *sqliteSysDB) listWorkflows(ctx context.Context, input listWorkflowsDBIn
 			&appVersion, &wf.ApplicationID, &wf.Attempts,
 			&queueName, &timeoutMs, &deadlineMs,
 			&dedupID, &wf.Priority, &partitionKey, &forkedFrom, &parentWfID,
-			&appStatus, &appStatusColor,
+			&appStatus, &appStatusColor, &tagsStr,
 		}
 		if input.loadInput {
 			scanArgs = append(scanArgs, &inputStr)
@@ -367,6 +376,9 @@ func (s *sqliteSysDB) listWorkflows(ctx context.Context, input listWorkflowsDBIn
 		}
 		if input.loadInput && inputStr.Valid {
 			wf.Input = &inputStr.String
+		}
+		if tagsStr.Valid && tagsStr.String != "" {
+			json.Unmarshal([]byte(tagsStr.String), &wf.Tags)
 		}
 
 		workflows = append(workflows, wf)

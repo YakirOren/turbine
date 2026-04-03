@@ -23,7 +23,7 @@ import {Tabs, TabsContent, TabsList, TabsTrigger} from "@/components/ui/tabs";
 import {AppStatusBadge, ProductStatusBadge, StatusBadge} from "@/components/status-badge";
 import {nodeTypes} from "@/components/step-node";
 import {pbClient} from "@/providers/pocketbase";
-import {ArrowLeft, ChevronRight, Cog, FileText, Package, RefreshCw} from "lucide-react";
+import {ArrowLeft, ChevronRight, Cog, FileText, Package, RefreshCw, X as XIcon} from "lucide-react";
 
 function timeAgo(epochMs: number): string {
     const diff = Date.now() - epochMs;
@@ -198,6 +198,11 @@ function StepFlowContent({workflowId}: { workflowId: string }) {
 
     const stepsData = stepsQuery.data?.data as StepsTreeResponse | undefined;
     const stepsDataUpdatedAt = stepsQuery.dataUpdatedAt;
+
+    const selectedStep = useMemo(() => {
+        if (selectedStepId == null || !stepsData) return null;
+        return stepsData.nodes.find((n) => n.functionId === selectedStepId) ?? null;
+    }, [selectedStepId, stepsData]);
 
     // Build/update React Flow nodes from steps data
     useEffect(() => {
@@ -377,6 +382,42 @@ function StepFlowContent({workflowId}: { workflowId: string }) {
                     </ReactFlow>
                 )}
             </div>
+
+            {/* Step detail */}
+            {selectedStep && (
+                <div className="mx-4 mt-2 rounded-md border p-3">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                            <span>{selectedStep.name}</span>
+                            <StatusBadge status={selectedStep.status === "success" ? "SUCCESS" : selectedStep.status === "error" ? "ERROR" : "PENDING"} />
+                            {selectedStep.startedAtMs > 0 && selectedStep.endedAtMs > 0 && (
+                                <span className="font-mono text-xs text-muted-foreground">
+                                    {formatDuration(selectedStep.endedAtMs - selectedStep.startedAtMs)}
+                                </span>
+                            )}
+                        </div>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setSelectedStepId(null)}>
+                            <XIcon className="h-3.5 w-3.5" />
+                        </Button>
+                    </div>
+                    {selectedStep.error && (
+                        <pre className="mt-2 max-h-32 overflow-auto rounded bg-red-500/10 p-2 text-xs text-red-400">
+                            {selectedStep.error}
+                        </pre>
+                    )}
+                    {selectedStep.output && (
+                        <pre className="mt-2 max-h-48 overflow-auto rounded bg-muted p-2 font-mono text-xs">
+                            {(() => {
+                                try { return JSON.stringify(JSON.parse(selectedStep.output), null, 2); }
+                                catch { return selectedStep.output; }
+                            })()}
+                        </pre>
+                    )}
+                    {!selectedStep.output && !selectedStep.error && selectedStep.status === "running" && (
+                        <p className="mt-2 text-xs text-muted-foreground">Step is still running...</p>
+                    )}
+                </div>
+            )}
 
             {/* Logs & Products */}
             <Tabs defaultValue="logs" className="flex-1 flex flex-col overflow-hidden">

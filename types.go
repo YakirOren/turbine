@@ -56,6 +56,7 @@ type Status struct {
 	ParentWorkflowID   string             `json:"parent_workflow_id,omitempty"`
 	AppStatus          string             `json:"app_status,omitempty"`
 	AppStatusColor     string             `json:"app_status_color,omitempty"`
+	Tags               []string           `json:"tags,omitempty"`
 }
 
 // Handle provides methods to interact with a running or completed workflow.

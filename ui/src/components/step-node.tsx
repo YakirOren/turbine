@@ -109,8 +109,27 @@ export function WorkflowResultNode({ data }: NodeProps) {
   );
 }
 
+export function ApprovalNode({ data }: NodeProps) {
+  const d = data as StepNodeData;
+  return (
+    <div
+      className={cn(
+        "whitespace-nowrap rounded border border-yellow-500/40 bg-yellow-500/10 px-2 py-1 shadow-sm",
+      )}
+    >
+      <Handle type="target" position={Position.Left} className="!bg-muted-foreground" />
+      <div className="flex items-center gap-1.5 justify-center">
+        <Loader2 className="h-3 w-3 animate-spin text-yellow-500" />
+        <span className="text-xs font-medium text-yellow-600 dark:text-yellow-400">{d.label}</span>
+      </div>
+      <Handle type="source" position={Position.Right} className="!bg-muted-foreground" />
+    </div>
+  );
+}
+
 export const nodeTypes = {
   step: StepNode,
   "child-workflow": ChildWorkflowNode,
   "workflow-result": WorkflowResultNode,
+  approval: ApprovalNode,
 };

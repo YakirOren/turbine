@@ -26,7 +26,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Ban, Play, Copy, ChevronDown, GitBranch, Trash2 } from "lucide-react";
+import { Ban, Play, Copy, ChevronDown, GitBranch, Trash2, CheckCircle, XCircle } from "lucide-react";
 import { useNavigate } from "react-router";
 import { pbClient } from "@/providers/pocketbase";
 
@@ -124,6 +124,24 @@ export function WorkflowSidebar({
     }
   };
 
+  const [approvalLoading, setApprovalLoading] = useState<"approve" | "reject" | null>(null);
+
+  const handleApproval = async (approved: boolean) => {
+    setApprovalLoading(approved ? "approve" : "reject");
+    try {
+      await pbClient.send(`/api/pt/workflows/${workflowId}/approve`, {
+        method: "POST",
+        body: { approved, comment: "" },
+      });
+      invalidate({ resource: "pt_workflow_status", invalidates: ["detail", "list"] });
+      toast.success(approved ? "Workflow approved" : "Workflow rejected");
+    } catch {
+      toast.error("Failed to send approval decision");
+    } finally {
+      setApprovalLoading(null);
+    }
+  };
+
   const { query } = useShow({
     resource: "pt_workflow_status",
     id: workflowId ?? "",
@@ -204,6 +222,30 @@ export function WorkflowSidebar({
                     <Play className="mr-1 h-4 w-4" />
                     {actionLoading === "resume" ? "Resuming..." : "Resume"}
                   </Button>
+                )}
+                {typeof record.app_status === "string" && record.app_status === "waiting for approval" && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-green-500/40 text-green-600 hover:bg-green-500/10 dark:text-green-400"
+                      disabled={approvalLoading !== null}
+                      onClick={() => handleApproval(true)}
+                    >
+                      <CheckCircle className="mr-1 h-4 w-4" />
+                      {approvalLoading === "approve" ? "Approving..." : "Approve"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-red-500/40 text-red-600 hover:bg-red-500/10 dark:text-red-400"
+                      disabled={approvalLoading !== null}
+                      onClick={() => handleApproval(false)}
+                    >
+                      <XCircle className="mr-1 h-4 w-4" />
+                      {approvalLoading === "reject" ? "Rejecting..." : "Reject"}
+                    </Button>
+                  </>
                 )}
                 <div className="flex-1" />
                 <AlertDialog>

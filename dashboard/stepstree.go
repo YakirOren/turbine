@@ -63,7 +63,8 @@ func (h *handlers) stepsTree(e *core.RequestEvent) error {
 		return e.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
-	nodes, edges := buildStepsTree(steps, workflowStatus)
+	appStatus := record.GetString("app_status")
+	nodes, edges := buildStepsTree(steps, workflowStatus, appStatus)
 
 	return e.JSON(http.StatusOK, stepsTreeResponse{
 		Nodes:          nodes,
@@ -83,7 +84,7 @@ func isBarrierStep(name string) bool {
 	return name == "pt.sleep" || name == "pt.getResult"
 }
 
-func buildStepsTree(steps []stepRow, workflowStatus string) ([]stepsTreeNode, []stepsTreeEdge) {
+func buildStepsTree(steps []stepRow, workflowStatus string, appStatus string) ([]stepsTreeNode, []stepsTreeEdge) {
 	if len(steps) == 0 {
 		return []stepsTreeNode{}, []stepsTreeEdge{}
 	}
@@ -132,8 +133,25 @@ func buildStepsTree(steps []stepRow, workflowStatus string) ([]stepsTreeNode, []
 		Status: resultStatus,
 	})
 
+	// Track whether we need to inject a synthetic approval node
+	approvalNodeID := ""
+	if appStatus == "waiting for approval" && workflowStatus != "SUCCESS" && workflowStatus != "ERROR" && workflowStatus != "CANCELLED" && workflowStatus != "MAX_RECOVERY_ATTEMPTS_EXCEEDED" {
+		approvalNodeID = "approval-wait"
+		nodes = append(nodes, stepsTreeNode{
+			ID:     approvalNodeID,
+			Name:   "Waiting for Approval",
+			Type:   "approval",
+			Status: "running",
+		})
+	}
+
 	if len(steps) == 1 {
-		edges = append(edges, stepsTreeEdge{Source: strconv.Itoa(steps[0].FunctionID), Target: resultNodeID})
+		if approvalNodeID != "" {
+			edges = append(edges, stepsTreeEdge{Source: strconv.Itoa(steps[0].FunctionID), Target: approvalNodeID})
+			edges = append(edges, stepsTreeEdge{Source: approvalNodeID, Target: resultNodeID})
+		} else {
+			edges = append(edges, stepsTreeEdge{Source: strconv.Itoa(steps[0].FunctionID), Target: resultNodeID})
+		}
 		return nodes, edges
 	}
 
@@ -232,12 +250,23 @@ func buildStepsTree(steps []stepRow, workflowStatus string) ([]stepsTreeNode, []
 		}
 	}
 
+	// Connect final step(s) to result — or approval node if present
+	finalTarget := resultNodeID
+	if approvalNodeID != "" {
+		finalTarget = approvalNodeID
+	}
+
 	if currentGroup != nil {
 		for _, memberID := range currentGroup.members {
-			edges = append(edges, stepsTreeEdge{Source: memberID, Target: resultNodeID})
+			edges = append(edges, stepsTreeEdge{Source: memberID, Target: finalTarget})
 		}
 	} else {
-		edges = append(edges, stepsTreeEdge{Source: lastSequentialID, Target: resultNodeID})
+		edges = append(edges, stepsTreeEdge{Source: lastSequentialID, Target: finalTarget})
+	}
+
+	// If approval node was injected, connect it to the result node
+	if approvalNodeID != "" {
+		edges = append(edges, stepsTreeEdge{Source: approvalNodeID, Target: resultNodeID})
 	}
 
 	return nodes, edges
