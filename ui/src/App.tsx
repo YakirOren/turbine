@@ -1,8 +1,9 @@
 import { Refine, Authenticated } from "@refinedev/core";
 import routerProvider, {
   NavigateToResource,
+  CatchAllNavigate,
 } from "@refinedev/react-router";
-import { BrowserRouter, Routes, Route } from "react-router";
+import { BrowserRouter, Routes, Route, Outlet } from "react-router";
 
 import {
   pbDataProvider,
@@ -11,17 +12,14 @@ import {
 } from "@/providers/pocketbase";
 import { Layout } from "@/components/layout";
 import { WorkflowList } from "@/pages/workflows/list";
+import { WorkflowSteps } from "@/pages/workflows/steps";
 import { QueueList } from "@/pages/queues/list";
-
-// Redirect to PocketBase admin login (outside basename, so we use window.location)
-function RedirectToAdmin() {
-  window.location.href = "/_/";
-  return null;
-}
+import { ScheduledList } from "@/pages/scheduled/list";
+import { LoginPage } from "@/pages/login";
 
 function App() {
   return (
-    <BrowserRouter basename="/_/pocketflow">
+    <BrowserRouter basename={import.meta.env.DEV ? "/" : "/_/pocketflow"}>
       <Refine
         routerProvider={routerProvider}
         dataProvider={pbDataProvider}
@@ -40,11 +38,12 @@ function App() {
         }}
       >
         <Routes>
+          {/* Authenticated routes */}
           <Route
             element={
               <Authenticated
                 key="authenticated-routes"
-                fallback={<RedirectToAdmin />}
+                fallback={<CatchAllNavigate to="/login" />}
               >
                 <Layout />
               </Authenticated>
@@ -57,7 +56,20 @@ function App() {
               }
             />
             <Route path="/workflows" element={<WorkflowList />} />
+            <Route path="/workflows/:id/steps" element={<WorkflowSteps />} />
             <Route path="/queues" element={<QueueList />} />
+            <Route path="/scheduled" element={<ScheduledList />} />
+          </Route>
+
+          {/* Public routes — logged-in users redirected to dashboard */}
+          <Route
+            element={
+              <Authenticated key="auth-pages" fallback={<Outlet />}>
+                <NavigateToResource resource="pf_workflow_status" />
+              </Authenticated>
+            }
+          >
+            <Route path="/login" element={<LoginPage />} />
           </Route>
         </Routes>
       </Refine>

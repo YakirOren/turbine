@@ -6,7 +6,18 @@ const pb = new PocketBase("/", store);
 
 export const pbClient = pb;
 export const pbDataProvider = dataProvider(pb);
-export const pbAuthProvider = authProvider(pb, {
+const baseAuthProvider = authProvider(pb, {
   collection: "_superusers",
 });
+
+export const pbAuthProvider = {
+  ...baseAuthProvider,
+  onError: async (error: any) => {
+    if (error?.status === 401 || error?.status === 403) {
+      pb.authStore.clear();
+      return { redirectTo: "/login", logout: true, error };
+    }
+    return baseAuthProvider.onError(error);
+  },
+};
 export const pbLiveProvider = liveProvider(pb);

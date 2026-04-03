@@ -1,7 +1,9 @@
 import { Link, useLocation, Outlet } from "react-router";
 import { useGetIdentity, useLogout } from "@refinedev/core";
-import { Workflow, LayoutList, LogOut, EllipsisVertical } from "lucide-react";
+import { useTheme } from "next-themes";
+import { Workflow, LayoutList, Clock, LogOut, EllipsisVertical, Sun, Moon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Switch } from "@/components/ui/switch";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -13,12 +15,14 @@ import {
 const navItems = [
   { label: "Workflows", path: "/workflows", icon: Workflow },
   { label: "Queues", path: "/queues", icon: LayoutList },
+  { label: "Scheduled", path: "/scheduled", icon: Clock },
 ];
 
 export function Layout() {
   const location = useLocation();
   const { data: identity } = useGetIdentity<{ email?: string }>();
   const { mutate: logout } = useLogout();
+  const { theme, setTheme } = useTheme();
 
   return (
     <div className="flex h-screen">
@@ -34,6 +38,7 @@ export function Layout() {
               <Link
                 key={item.path}
                 to={item.path}
+                draggable={false}
                 className={cn(
                   "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                   isActive
@@ -47,6 +52,16 @@ export function Layout() {
             );
           })}
         </nav>
+        <div className="flex items-center justify-between border-t px-4 py-3">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Sun className="h-4 w-4" />
+            <Switch
+              checked={theme === "dark"}
+              onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")}
+            />
+            <Moon className="h-4 w-4" />
+          </div>
+        </div>
         <div className="flex items-center gap-3 border-t px-4 py-3">
           <Avatar className="h-8 w-8">
             <AvatarFallback className="text-xs">
@@ -64,7 +79,7 @@ export function Layout() {
             </DropdownMenuTrigger>
             <DropdownMenuContent side="top" align="end">
               <DropdownMenuItem
-                onClick={() => logout()}
+                onClick={() => logout({ redirectPath: "/login" })}
                 className="text-destructive focus:text-destructive"
               >
                 <LogOut className="mr-2 h-4 w-4" />
