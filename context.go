@@ -4,14 +4,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+
+	"github.com/pocketbase/pocketbase/core"
 )
 
 type runtimeContextKey struct{}
 
 // Context is the unified context for pocketflow workflows.
-// It embeds context.Context and provides access to the runtime's logger and workflow ID.
+// It embeds context.Context and provides access to the PocketBase app, logger, and workflow ID.
 type Context interface {
 	context.Context
+	App() core.App
 	Logger() *slog.Logger
 	WorkflowID() (string, error)
 }
@@ -20,6 +23,10 @@ type Context interface {
 type pfContext struct {
 	context.Context
 	runtime *Runtime
+}
+
+func (c *pfContext) App() core.App {
+	return c.runtime.app
 }
 
 func (c *pfContext) Logger() *slog.Logger {

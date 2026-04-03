@@ -181,3 +181,5 @@ func (rt *Runtime) GetApplicationVersion() string { return rt.applicationVersion
 func (rt *Runtime) GetExecutorID() string         { return rt.executorID }
 func (rt *Runtime) GetApplicationID() string      { return rt.applicationID }
 func (rt *Runtime) IsLaunched() bool              { return rt.launched.Load() }
+func (rt *Runtime) App() core.App                { return rt.app }
+func (rt *Runtime) Queues() []WorkflowQueue      { return rt.queueRunner.listQueues() }
