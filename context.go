@@ -19,7 +19,7 @@ type Context interface {
 	App() core.App
 	Logger() *slog.Logger
 	WorkflowID() (string, error)
-	SetAppStatus(label, color string) error
+	SetAppStatus(label, color string)
 }
 
 // ptContext is the private implementation of Context.
@@ -52,32 +52,10 @@ func (c *ptContext) WorkflowID() (string, error) {
 	return wfState.workflowID, nil
 }
 
-func (c *ptContext) SetAppStatus(label, color string) error {
-	if label == "" {
-		return fmt.Errorf("app status label must not be empty")
+func (c *ptContext) SetAppStatus(label, color string) {
+	if err := setAppStatus(c.Context, c.runtime, label, color); err != nil {
+		c.runtime.app.Logger().Error("SetAppStatus failed", "error", err, "source", "system")
 	}
-	if err := validateAppStatusColor(color); err != nil {
-		return err
-	}
-	wfState, ok := c.Context.Value(workflowStateKey).(*workflowState)
-	if !ok || wfState == nil {
-		return fmt.Errorf("not within a workflow")
-	}
-	if wfState.recovering || (wfState.appStatus == label && wfState.appStatusColor == color) {
-		return nil
-	}
-	err := c.runtime.systemDB.updateAppStatus(c.Context, updateAppStatusDBInput{
-		workflowID:     wfState.workflowID,
-		appStatus:      label,
-		appStatusColor: color,
-	})
-	if err != nil {
-		return err
-	}
-	wfState.appStatus = label
-	wfState.appStatusColor = color
-	c.runtime.app.Logger().Info("app status changed", "workflow_id", wfState.workflowID, "app_status", label, "app_status_color", color, "source", "system")
-	return nil
 }
 
 // Value overrides context.Context.Value so the runtime is discoverable
@@ -114,15 +92,19 @@ func FromContext(ctx context.Context) (Context, bool) {
 // SetAppStatus sets a user-defined application status on the current workflow.
 // It can be called from a step's context.Context (same pattern as LoggerFrom/AppFrom).
 func SetAppStatus(ctx context.Context, label, color string) error {
+	rt := runtimeFromContext(ctx)
+	if rt == nil {
+		return fmt.Errorf("not within a turbine context")
+	}
+	return setAppStatus(ctx, rt, label, color)
+}
+
+func setAppStatus(ctx context.Context, rt *Runtime, label, color string) error {
 	if label == "" {
 		return fmt.Errorf("app status label must not be empty")
 	}
 	if err := validateAppStatusColor(color); err != nil {
 		return err
-	}
-	rt := runtimeFromContext(ctx)
-	if rt == nil {
-		return fmt.Errorf("not within a turbine context")
 	}
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {

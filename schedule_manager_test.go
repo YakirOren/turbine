@@ -25,7 +25,7 @@ func TestScheduleManagerOnceFiresAndCleansUp(t *testing.T) {
 
 	fqn := resolveWorkflowFunctionName(myWF)
 	scheduledAt := time.Now().Add(1 * time.Second)
-	record, err := createScheduleRecord(rt.app, fqn, json.RawMessage(`{"test":true}`), "once", "", scheduledAt)
+	record, err := createSchedule(rt.app, fqn, json.RawMessage(`{"test":true}`), scheduleTypeOnce, "", scheduledAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestScheduleManagerOncePastFiresImmediately(t *testing.T) {
 	fqn := resolveWorkflowFunctionName(myWF)
 	pastTime := time.Now().Add(-1 * time.Hour)
 
-	record, err := createScheduleRecord(rt.app, fqn, json.RawMessage(`{}`), "once", "", pastTime)
+	record, err := createSchedule(rt.app, fqn, json.RawMessage(`{}`), scheduleTypeOnce, "", pastTime)
 	if err != nil {
 		t.Fatal(err)
 	}

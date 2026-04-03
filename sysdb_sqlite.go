@@ -16,7 +16,7 @@ import (
 
 const (
 	_PT_INTERNAL_QUEUE_NAME = "_pt_internal_queue"
-	_DB_RETRY_INTERVAL        = 1 * time.Second
+	_DB_RETRY_INTERVAL      = 1 * time.Second
 )
 
 type sqliteSysDB struct {
@@ -166,24 +166,24 @@ func (s *sqliteSysDB) insertStatus(ctx context.Context, input insertStatusDBInpu
 	}
 
 	err := s.app.DB().NewQuery(query).Bind(dbx.Params{
-		"id":               input.status.ID,
-		"status":           input.status.Status,
-		"name":             input.status.Name,
-		"queue_name":       input.status.QueueName,
-		"executor_id":      input.status.ExecutorID,
-		"app_version":      applicationVersion,
-		"app_id":           input.status.ApplicationID,
-		"created_at":       input.status.CreatedAt.Round(time.Millisecond).UnixMilli(),
-		"attempts":         attempts,
-		"updated_at":       updatedAt.UnixMilli(),
-		"timeout_ms":       timeoutMs,
-		"deadline_ms":      deadline,
-		"inputs":           inputs,
-		"dedup_id":         deduplicationID,
-		"priority":         input.status.Priority,
-		"partition_key":    queuePartitionKey,
-		"owner_xid":        ownerXID,
-		"parent_wf_id":     parentWorkflowID,
+		"id":            input.status.ID,
+		"status":        input.status.Status,
+		"name":          input.status.Name,
+		"queue_name":    input.status.QueueName,
+		"executor_id":   input.status.ExecutorID,
+		"app_version":   applicationVersion,
+		"app_id":        input.status.ApplicationID,
+		"created_at":    input.status.CreatedAt.Round(time.Millisecond).UnixMilli(),
+		"attempts":      attempts,
+		"updated_at":    updatedAt.UnixMilli(),
+		"timeout_ms":    timeoutMs,
+		"deadline_ms":   deadline,
+		"inputs":        inputs,
+		"dedup_id":      deduplicationID,
+		"priority":      input.status.Priority,
+		"partition_key": queuePartitionKey,
+		"owner_xid":     ownerXID,
+		"parent_wf_id":  parentWorkflowID,
 		"tags": func() string {
 			if len(input.status.Tags) == 0 {
 				return "[]"
@@ -205,7 +205,7 @@ func (s *sqliteSysDB) insertStatus(ctx context.Context, input insertStatusDBInpu
 	}
 	if err != nil {
 		if isSQLiteUniqueViolation(err) {
-			return nil, newErrDeduplicatedError(input.status.ID, input.status.QueueName, input.status.DeduplicationID)
+			return nil, newErrDeduplicated(input.status.ID, input.status.QueueName, input.status.DeduplicationID)
 		}
 		return nil, fmt.Errorf("failed to insert workflow status: %w", err)
 	}
@@ -378,7 +378,9 @@ func (s *sqliteSysDB) listWorkflows(ctx context.Context, input listWorkflowsDBIn
 			wf.Input = &inputStr.String
 		}
 		if tagsStr.Valid && tagsStr.String != "" {
-			json.Unmarshal([]byte(tagsStr.String), &wf.Tags)
+			if unmarshalErr := json.Unmarshal([]byte(tagsStr.String), &wf.Tags); unmarshalErr != nil {
+				s.app.Logger().Warn("failed to parse workflow tags", "workflow_id", wf.ID, "error", unmarshalErr)
+			}
 		}
 
 		workflows = append(workflows, wf)
@@ -453,7 +455,7 @@ func (s *sqliteSysDB) awaitWorkflowResult(ctx context.Context, workflowID string
 			}
 			return output, errors.New(errorStr.String)
 		case StatusCancelled:
-			return output, newErrAwaitCancelledError(workflowID)
+			return output, newErrAwaitCancelled(workflowID)
 		case StatusMaxRecoveryAttemptsExceeded:
 			return output, newErrDeadLetter(workflowID, attempts-2)
 		default:
@@ -648,7 +650,7 @@ func (s *sqliteSysDB) recordOperationResult(ctx context.Context, input recordOpe
 
 	if err != nil {
 		if isSQLiteUniqueViolation(err) {
-			return newWorkflowConflictIDError(input.workflowUUID)
+			return newErrConflictingID(input.workflowUUID)
 		}
 		return err
 	}
@@ -670,7 +672,7 @@ func (s *sqliteSysDB) checkOperationExecution(ctx context.Context, input checkOp
 	}
 
 	if workflowStatus == StatusCancelled {
-		return nil, newErrCancelledError(input.workflowUUID)
+		return nil, newErrCancelled(input.workflowUUID)
 	}
 
 	// Check operation outputs

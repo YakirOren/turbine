@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { pbClient } from "@/providers/pocketbase";
 import {
   Select,
@@ -7,6 +8,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox";
 
 const TIME_RANGES = [
   { label: "Last 1h", value: "1h" },
@@ -38,23 +47,21 @@ interface Props {
 }
 
 export function WorkflowFilterBar({ filters, onChange }: Props) {
-  const [workflowNames, setWorkflowNames] = useState<string[]>([]);
+  const { data: registeredWorkflows = [] } = useQuery<{ name: string; tags: string[] }[]>({
+    queryKey: ["registered-workflows"],
+    queryFn: () =>
+      pbClient.collection("pt_workflows").getFullList<{ name: string; tags: string[] }>(),
+    staleTime: 10 * 60 * 1000,
+  });
+  const workflowNames = registeredWorkflows.map((w) => w.name);
 
-  useEffect(() => {
-    pbClient
-      .send<{ name: string }[]>("/api/pt/registered", { method: "GET" })
-      .then((data) => setWorkflowNames(data.map((w) => w.name)))
-      .catch(() => {});
-  }, []);
-
-  const [tags, setTags] = useState<string[]>([]);
-
-  useEffect(() => {
-    pbClient
-      .send<string[]>("/api/pt/tags", { method: "GET" })
-      .then(setTags)
-      .catch(() => {});
-  }, []);
+  const tags = useMemo(() => {
+    const tagSet = new Set<string>();
+    for (const w of registeredWorkflows) {
+      for (const t of w.tags ?? []) tagSet.add(t);
+    }
+    return [...tagSet].sort();
+  }, [registeredWorkflows]);
 
   const update = (key: keyof WorkflowFilters, value: string) => {
     onChange({ ...filters, [key]: value });
@@ -78,22 +85,27 @@ export function WorkflowFilterBar({ filters, onChange }: Props) {
         </SelectContent>
       </Select>
 
-      <Select
-        value={filters.name || "all"}
-        onValueChange={(v) => update("name", v === "all" ? "" : v)}
+      <Combobox
+        value={filters.name || null}
+        onValueChange={(v) => update("name", v ?? "")}
+        items={workflowNames}
       >
-        <SelectTrigger className="w-52">
-          <SelectValue placeholder="All workflows" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All workflows</SelectItem>
-          {workflowNames.map((name) => (
-            <SelectItem key={name} value={name}>
-              {name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        <ComboboxInput
+          placeholder="All workflows"
+          className="w-52"
+          showClear={!!filters.name}
+        />
+        <ComboboxContent>
+          <ComboboxEmpty>No workflows found.</ComboboxEmpty>
+          <ComboboxList>
+            {(item) => (
+              <ComboboxItem key={item} value={item}>
+                {item}
+              </ComboboxItem>
+            )}
+          </ComboboxList>
+        </ComboboxContent>
+      </Combobox>
 
       <Select
         value={filters.status}
@@ -115,22 +127,27 @@ export function WorkflowFilterBar({ filters, onChange }: Props) {
         </SelectContent>
       </Select>
 
-      <Select
-        value={filters.tag || "all"}
-        onValueChange={(v) => update("tag", v === "all" ? "" : v)}
+      <Combobox
+        value={filters.tag || null}
+        onValueChange={(v) => update("tag", v ?? "")}
+        items={tags}
       >
-        <SelectTrigger className="w-36">
-          <SelectValue placeholder="All tags" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All tags</SelectItem>
-          {tags.map((t) => (
-            <SelectItem key={t} value={t}>
-              {t}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        <ComboboxInput
+          placeholder="All tags"
+          className="w-36"
+          showClear={!!filters.tag}
+        />
+        <ComboboxContent>
+          <ComboboxEmpty>No tags found.</ComboboxEmpty>
+          <ComboboxList>
+            {(item) => (
+              <ComboboxItem key={item} value={item}>
+                {item}
+              </ComboboxItem>
+            )}
+          </ComboboxList>
+        </ComboboxContent>
+      </Combobox>
     </div>
   );
 }

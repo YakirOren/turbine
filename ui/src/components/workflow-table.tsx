@@ -1,5 +1,5 @@
-import { type ColumnDef, flexRender, getCoreRowModel } from "@tanstack/react-table";
-import { useTable } from "@refinedev/react-table";
+import { useState } from "react";
+import { useList } from "@refinedev/core";
 import type { CrudFilters, CrudSort } from "@refinedev/core";
 import {
   Table,
@@ -10,7 +10,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { StatusBadge, AppStatusBadge } from "@/components/status-badge";
+import { TableSkeleton } from "@/components/table-skeleton";
+import { formatTimestamp, formatDuration } from "@/lib/format";
 
 export interface WorkflowRecord {
   id: string;
@@ -32,89 +41,80 @@ interface Props {
   onRowClick: (record: WorkflowRecord) => void;
 }
 
-export function WorkflowTable({ filters, sorters, onRowClick }: Props) {
-  const columns: ColumnDef<WorkflowRecord>[] = [
-    {
-      accessorKey: "created_at_epoch_ms",
-      header: "Created At",
-      cell: ({ getValue }) => {
-        const ms = getValue<number>();
-        return ms ? new Date(ms).toLocaleString() : "\u2014";
-      },
-    },
-    {
-      accessorKey: "name",
-      header: "Workflow Name",
-    },
-    {
-      accessorKey: "status",
-      header: "Status",
-      cell: ({ getValue }) => <StatusBadge status={getValue<string>()} />,
-    },
-    {
-      id: "app_status",
-      header: "App Status",
-      cell: ({ row }) => (
-        <AppStatusBadge
-          label={row.original.app_status}
-          color={row.original.app_status_color}
-        />
-      ),
-    },
-  ];
+const tableColumns = [
+  { key: "created_at_epoch_ms", header: "Created At" },
+  { key: "name", header: "Workflow Name" },
+  { key: "status", header: "Status" },
+  { key: "duration", header: "Duration" },
+  { key: "app_status", header: "App Status" },
+];
 
-  const { reactTable: table } = useTable<WorkflowRecord>({
-    columns,
-    refineCoreProps: {
-      resource: "pt_workflow_status",
-      filters: { permanent: filters },
-      sorters: { permanent: sorters },
-      pagination: { pageSize: 25 },
-      liveMode: "auto",
-      queryOptions: { refetchInterval: 5000 },
-    },
-    getCoreRowModel: getCoreRowModel(),
+export function WorkflowTable({ filters, sorters, onRowClick }: Props) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const { result, query: listQuery } = useList<WorkflowRecord>({
+    resource: "pt_workflow_status",
+    filters,
+    sorters,
+    pagination: { currentPage, pageSize },
+    liveMode: "auto",
+    queryOptions: { refetchInterval: 5000 },
   });
+
+  const rows = result.data ?? [];
+  const total = result.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+
+  if (listQuery.isLoading) {
+    return <TableSkeleton columns={tableColumns.length} headers={tableColumns.map((c) => c.header)} />;
+  }
 
   return (
     <div>
       <div className="rounded-md border">
         <Table>
           <TableHeader>
-            {table.getHeaderGroups().map((hg) => (
-              <TableRow key={hg.id}>
-                {hg.headers.map((h) => (
-                  <TableHead key={h.id}>
-                    {h.isPlaceholder
-                      ? null
-                      : flexRender(h.column.columnDef.header, h.getContext())}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
+            <TableRow>
+              {tableColumns.map((col) => (
+                <TableHead key={col.key}>{col.header}</TableHead>
+              ))}
+            </TableRow>
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows.length ? (
-              table.getRowModel().rows.map((row) => (
+            {rows.length ? (
+              rows.map((row) => (
                 <TableRow
                   key={row.id}
                   className="cursor-pointer"
-                  onClick={() => onRowClick(row.original)}
+                  onClick={() => onRowClick(row)}
                 >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
-                    </TableCell>
-                  ))}
+                  <TableCell>
+                    {row.created_at_epoch_ms
+                      ? formatTimestamp(row.created_at_epoch_ms)
+                      : "\u2014"}
+                  </TableCell>
+                  <TableCell>{row.name}</TableCell>
+                  <TableCell>
+                    <StatusBadge status={row.status} />
+                  </TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {row.created_at_epoch_ms && row.updated_at_epoch_ms && row.updated_at_epoch_ms > row.created_at_epoch_ms
+                      ? formatDuration(row.updated_at_epoch_ms - row.created_at_epoch_ms)
+                      : "\u2014"}
+                  </TableCell>
+                  <TableCell>
+                    <AppStatusBadge
+                      label={row.app_status}
+                      color={row.app_status_color}
+                    />
+                  </TableCell>
                 </TableRow>
               ))
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={columns.length}
+                  colSpan={tableColumns.length}
                   className="h-24 text-center"
                 >
                   No workflows found.
@@ -124,23 +124,51 @@ export function WorkflowTable({ filters, sorters, onRowClick }: Props) {
           </TableBody>
         </Table>
       </div>
-      <div className="flex items-center justify-end gap-2 py-4">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => table.previousPage()}
-          disabled={!table.getCanPreviousPage()}
-        >
-          Previous
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => table.nextPage()}
-          disabled={!table.getCanNextPage()}
-        >
-          Next
-        </Button>
+      <div className="flex items-center justify-between py-4">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span>Rows per page</span>
+          <Select
+            value={String(pageSize)}
+            onValueChange={(value) => {
+              setPageSize(Number(value));
+              setCurrentPage(1);
+            }}
+          >
+            <SelectTrigger className="h-8 w-[70px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[10, 25, 50, 100].map((size) => (
+                <SelectItem key={size} value={String(size)}>
+                  {size}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-muted-foreground">
+            Page {currentPage} of {pageCount}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(currentPage - 1)}
+              disabled={currentPage <= 1}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(currentPage + 1)}
+              disabled={currentPage >= pageCount}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );

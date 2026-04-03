@@ -49,9 +49,7 @@ func WaitForApproval(ctx Context, opts ...ApprovalOption) (ApprovalResult, error
 		timeout = _maxApprovalWait
 	}
 
-	if err := ctx.SetAppStatus("waiting for approval", "yellow"); err != nil {
-		return ApprovalResult{}, err
-	}
+	ctx.SetAppStatus("waiting for approval", "yellow")
 
 	result, err := Recv[*ApprovalResult](ctx, approvalTopic, timeout)
 	if err != nil {

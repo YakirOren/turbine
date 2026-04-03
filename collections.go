@@ -14,6 +14,7 @@ const (
 	collectionProducts           = "pt_products"
 	collectionKV                 = "pt_kv"
 	collectionWebhooks           = "pt_webhooks"
+	collectionWorkflows          = "pt_workflows"
 )
 
 func init() {
@@ -115,6 +116,73 @@ func upCreateWebhooks(app core.App) error {
 
 func downCreateWebhooks(app core.App) error {
 	col, err := app.FindCollectionByNameOrId(collectionWebhooks)
+	if err != nil {
+		return nil
+	}
+	return app.Delete(col)
+}
+
+func init() {
+	core.AppMigrations.Register(func(app core.App) error {
+		col, err := app.FindCollectionByNameOrId(collectionKV)
+		if err != nil {
+			return err
+		}
+		col.Fields.Add(&core.JSONField{Name: "schema"})
+		return app.Save(col)
+	}, func(app core.App) error {
+		col, err := app.FindCollectionByNameOrId(collectionKV)
+		if err != nil {
+			return nil
+		}
+		col.Fields.RemoveByName("schema")
+		return app.Save(col)
+	}, "pt_6_add_kv_schema")
+
+	core.AppMigrations.Register(func(app core.App) error {
+		col, err := app.FindCollectionByNameOrId(collectionSchedules)
+		if err != nil {
+			return err
+		}
+		col.Fields.Add(&core.BoolField{Name: "enabled"})
+		if err := app.Save(col); err != nil {
+			return err
+		}
+		// Enable all existing schedules by default.
+		if _, err := app.DB().NewQuery("UPDATE " + collectionSchedules + " SET enabled = TRUE").Execute(); err != nil {
+			return err
+		}
+		return nil
+	}, func(app core.App) error {
+		col, err := app.FindCollectionByNameOrId(collectionSchedules)
+		if err == nil {
+			col.Fields.RemoveByName("enabled")
+			_ = app.Save(col)
+		}
+		return nil
+	}, "pt_7_add_schedule_enabled")
+}
+
+func init() {
+	core.AppMigrations.Register(upCreateWorkflows, downCreateWorkflows, "pt_8_create_workflows")
+}
+
+func upCreateWorkflows(app core.App) error {
+	workflows := core.NewBaseCollection(collectionWorkflows)
+	workflows.Fields.Add(
+		&core.TextField{Name: "name", Required: true},
+		&core.TextField{Name: "fqn", Required: true},
+		&core.BoolField{Name: "triggerable"},
+		&core.TextField{Name: "cron_schedule"},
+		&core.JSONField{Name: "input_schema"},
+		&core.JSONField{Name: "tags"},
+	)
+	workflows.AddIndex("idx_workflows_fqn", true, "fqn", "")
+	return app.Save(workflows)
+}
+
+func downCreateWorkflows(app core.App) error {
+	col, err := app.FindCollectionByNameOrId(collectionWorkflows)
 	if err != nil {
 		return nil
 	}
@@ -227,6 +295,7 @@ func upCreateCollections(app core.App) error {
 		&core.TextField{Name: "cron_expression"},
 		&core.TextField{Name: "jitter"},
 		&core.DateField{Name: "scheduled_at"},
+		&core.BoolField{Name: "enabled"},
 	)
 	schedules.AddIndex("idx_schedules_type", false, "type", "")
 	if err := app.Save(schedules); err != nil {

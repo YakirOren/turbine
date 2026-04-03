@@ -191,6 +191,7 @@ func TestBuildStepsTree_ApprovalNode(t *testing.T) {
 	}
 	if approvalNode == nil {
 		t.Fatal("expected an approval node")
+		return
 	}
 	if approvalNode.Status != "running" {
 		t.Fatalf("expected approval node status 'running', got %q", approvalNode.Status)

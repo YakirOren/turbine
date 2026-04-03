@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import type { CrudFilters, CrudSort } from "@refinedev/core";
+import { useQuery } from "@tanstack/react-query";
 import { LayoutList } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -31,34 +32,36 @@ interface QueueStats {
 }
 
 export function QueueList() {
-  const [queues, setQueues] = useState<QueueInfo[]>([]);
   const [selectedQueue, setSelectedQueue] = useState<string>("");
-  const [stats, setStats] = useState<QueueStats | null>(null);
   const [nameFilter, setNameFilter] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    pbClient
-      .send<QueueInfo[]>("/api/pt/queues", { method: "GET" })
-      .then((data) => {
-        setQueues(data);
-        if (data.length > 0) {
-          setSelectedQueue((prev) => prev || data[0].name);
-        }
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  const { data: queues = [], isLoading: queuesLoading } = useQuery<QueueInfo[]>({
+    queryKey: ["queues"],
+    queryFn: () =>
+      pbClient
+        .send<QueueInfo[]>("/api/pt/queues", { method: "GET" })
+        .then((data) => {
+          if (data.length > 0 && !selectedQueue) {
+            setSelectedQueue(data[0].name);
+          }
+          return data;
+        }),
+  });
 
-  useEffect(() => {
-    if (!selectedQueue) return;
-    pbClient
-      .send<QueueStats>(`/api/pt/queues/${encodeURIComponent(selectedQueue)}/stats`, {
-        method: "GET",
-      })
-      .then(setStats);
-  }, [selectedQueue]);
+  const loading = queuesLoading && queues.length === 0;
 
+  const { data: stats = null } = useQuery<QueueStats>({
+    queryKey: ["queue-stats", selectedQueue],
+    queryFn: () =>
+      pbClient
+        .send<QueueStats>(
+          `/api/pt/queues/${encodeURIComponent(selectedQueue)}/stats`,
+          { method: "GET" }
+        ),
+    enabled: !!selectedQueue,
+    refetchInterval: 5000,
+  });
   const selectedQueueInfo = queues.find((q) => q.name === selectedQueue);
 
   const crudFilters = useMemo<CrudFilters>(() => {
@@ -125,58 +128,26 @@ export function QueueList() {
           onChange={(e) => setNameFilter(e.target.value)}
           className="w-44"
         />
-      </div>
 
-      {stats && (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">
-                Enqueued
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <span className="text-2xl font-bold">{stats.enqueued}</span>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">
-                Running
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <span className="text-2xl font-bold text-blue-400">
-                {stats.running}
-              </span>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">
-                Completed
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <span className="text-2xl font-bold text-green-400">
-                {stats.completed}
-              </span>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">
-                Failed
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <span className="text-2xl font-bold text-red-400">
-                {stats.failed}
-              </span>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+        {stats && (
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="font-mono text-xs">
+              {stats.enqueued} enqueued
+            </Badge>
+            <Badge variant="secondary" className="font-mono text-xs text-blue-400">
+              {stats.running} running
+            </Badge>
+            <Badge variant="secondary" className="font-mono text-xs text-green-400">
+              {stats.completed} completed
+            </Badge>
+            {stats.failed > 0 && (
+              <Badge variant="secondary" className="font-mono text-xs text-red-400">
+                {stats.failed} failed
+              </Badge>
+            )}
+          </div>
+        )}
+      </div>
 
       {selectedQueueInfo && (
         <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">

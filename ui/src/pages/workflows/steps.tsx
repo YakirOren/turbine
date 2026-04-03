@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useMemo, useState} from "react";
 import {useNavigate, useParams} from "react-router";
-import {useCustom, useList, useShow} from "@refinedev/core";
+import {useList, useShow} from "@refinedev/core";
+import {useQuery} from "@tanstack/react-query";
 import {
     Background,
     Controls,
@@ -23,23 +24,8 @@ import {Tabs, TabsContent, TabsList, TabsTrigger} from "@/components/ui/tabs";
 import {AppStatusBadge, ProductStatusBadge, StatusBadge} from "@/components/status-badge";
 import {nodeTypes} from "@/components/step-node";
 import {pbClient} from "@/providers/pocketbase";
-import {ArrowLeft, ChevronRight, Cog, FileText, Package, RefreshCw, X as XIcon} from "lucide-react";
-
-function timeAgo(epochMs: number): string {
-    const diff = Date.now() - epochMs;
-    if (diff < 60000) return `${Math.round(diff / 1000)}s ago`;
-    if (diff < 3600000) return `${Math.round(diff / 60000)}m ago`;
-    if (diff < 86400000) return `${Math.round(diff / 3600000)}h ago`;
-    return `${Math.round(diff / 86400000)}d ago`;
-}
-
-function formatDuration(ms: number): string {
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-    const mins = Math.floor(ms / 60000);
-    const secs = Math.round((ms % 60000) / 1000);
-    return `${mins}min ${secs}s`;
-}
+import {ArrowLeft, ChevronRight, Code, Cog, FileText, Package, RefreshCw} from "lucide-react";
+import {timeAgo, formatDuration, formatTimestampPrecise} from "@/lib/format";
 
 function formatBytes(bytes: number): string {
     if (!bytes) return "—";
@@ -166,6 +152,7 @@ function StepFlowContent({workflowId}: { workflowId: string }) {
         Array<{ id: string; label: string }>
     >([{id: workflowId, label: "Root"}]);
     const [selectedStepId, setSelectedStepId] = useState<number | null>(null);
+    const [activeTab, setActiveTab] = useState("logs");
 
     const currentWorkflowId = breadcrumbs[breadcrumbs.length - 1].id;
 
@@ -180,23 +167,18 @@ function StepFlowContent({workflowId}: { workflowId: string }) {
         setBreadcrumbs((prev) => prev.slice(0, index + 1));
     }, []);
 
-    const {query: stepsQuery} = useCustom<StepsTreeResponse>({
-        url: "",
-        method: "get",
-        queryOptions: {
-            queryKey: ["steps-tree", currentWorkflowId],
-            queryFn: () =>
-                pbClient
-                    .send<StepsTreeResponse>(
-                        `/api/pt/workflows/${currentWorkflowId}/steps-tree`,
-                        {method: "GET"}
-                    )
-                    .then((data) => ({data})),
-            refetchInterval: isTerminal ? false : 2000,
-        },
+    const stepsQuery = useQuery<StepsTreeResponse>({
+        queryKey: ["steps-tree", currentWorkflowId],
+        queryFn: () =>
+            pbClient
+                .send<StepsTreeResponse>(
+                    `/api/pt/workflows/${currentWorkflowId}/steps-tree`,
+                    {method: "GET"}
+                ),
+        refetchInterval: isTerminal ? false : 2000,
     });
 
-    const stepsData = stepsQuery.data?.data as StepsTreeResponse | undefined;
+    const stepsData = stepsQuery.data;
     const stepsDataUpdatedAt = stepsQuery.dataUpdatedAt;
 
     const selectedStep = useMemo(() => {
@@ -294,6 +276,10 @@ function StepFlowContent({workflowId}: { workflowId: string }) {
                 },
             }))
         );
+        // If deselecting and currently on result tab, fall back to logs
+        if (selectedStepId == null) {
+            setActiveTab((prev) => prev === "result" ? "logs" : prev);
+        }
     }, [selectedStepId, setNodes]);
 
     return (
@@ -353,7 +339,7 @@ function StepFlowContent({workflowId}: { workflowId: string }) {
             })()}
 
             {/* React Flow canvas */}
-            <div className="mx-4 mt-4 h-[250px] rounded-lg border">
+            <div className="mx-4 mt-4 h-[40vh] min-h-[200px] rounded-lg border">
                 {stepsQuery.isLoading ? (
                     <div className="flex h-full items-center justify-center text-muted-foreground">
                         Loading steps...
@@ -383,48 +369,15 @@ function StepFlowContent({workflowId}: { workflowId: string }) {
                 )}
             </div>
 
-            {/* Step detail */}
-            {selectedStep && (
-                <div className="mx-4 mt-2 rounded-md border p-3">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 text-sm font-medium">
-                            <span>{selectedStep.name}</span>
-                            <StatusBadge status={selectedStep.status === "success" ? "SUCCESS" : selectedStep.status === "error" ? "ERROR" : "PENDING"} />
-                            {selectedStep.startedAtMs > 0 && selectedStep.endedAtMs > 0 && (
-                                <span className="font-mono text-xs text-muted-foreground">
-                                    {formatDuration(selectedStep.endedAtMs - selectedStep.startedAtMs)}
-                                </span>
-                            )}
-                        </div>
-                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setSelectedStepId(null)}>
-                            <XIcon className="h-3.5 w-3.5" />
-                        </Button>
-                    </div>
-                    {selectedStep.error && (
-                        <pre className="mt-2 max-h-32 overflow-auto rounded bg-red-500/10 p-2 text-xs text-red-400">
-                            {selectedStep.error}
-                        </pre>
-                    )}
-                    {selectedStep.output && (
-                        <pre className="mt-2 max-h-48 overflow-auto rounded bg-muted p-2 font-mono text-xs">
-                            {(() => {
-                                try { return JSON.stringify(JSON.parse(selectedStep.output), null, 2); }
-                                catch { return selectedStep.output; }
-                            })()}
-                        </pre>
-                    )}
-                    {!selectedStep.output && !selectedStep.error && selectedStep.status === "running" && (
-                        <p className="mt-2 text-xs text-muted-foreground">Step is still running...</p>
-                    )}
-                </div>
-            )}
-
-            {/* Logs & Products */}
-            <Tabs defaultValue="logs" className="flex-1 flex flex-col overflow-hidden">
+            {/* Logs, Products & Result */}
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
                 <div className="px-4 pt-2">
                     <TabsList>
                         <TabsTrigger value="logs"><FileText className="h-3.5 w-3.5 mr-1.5"/>Logs</TabsTrigger>
                         <TabsTrigger value="products"><Package className="h-3.5 w-3.5 mr-1.5"/>Products</TabsTrigger>
+                        {selectedStep && (
+                            <TabsTrigger value="result"><Code className="h-3.5 w-3.5 mr-1.5"/>Result</TabsTrigger>
+                        )}
                     </TabsList>
                 </div>
                 <TabsContent value="logs" className="flex-1 overflow-y-auto mt-0">
@@ -441,6 +394,31 @@ function StepFlowContent({workflowId}: { workflowId: string }) {
                         status={(workflow?.status as string) ?? ""}
                     />
                 </TabsContent>
+                {selectedStep && (
+                    <TabsContent value="result" className="flex-1 overflow-y-auto mt-0">
+                        <div className="p-4">
+                            {selectedStep.error && (
+                                <pre className="max-h-64 overflow-auto rounded bg-red-500/10 p-3 text-xs text-red-400">
+                                    {selectedStep.error}
+                                </pre>
+                            )}
+                            {selectedStep.output && (
+                                <pre className="max-h-[60vh] overflow-auto rounded bg-muted p-3 font-mono text-xs">
+                                    {(() => {
+                                        try { return JSON.stringify(JSON.parse(selectedStep.output), null, 2); }
+                                        catch { return selectedStep.output; }
+                                    })()}
+                                </pre>
+                            )}
+                            {!selectedStep.output && !selectedStep.error && selectedStep.status === "running" && (
+                                <p className="text-sm text-muted-foreground">Step is still running...</p>
+                            )}
+                            {!selectedStep.output && !selectedStep.error && selectedStep.status !== "running" && (
+                                <p className="text-sm text-muted-foreground">No output.</p>
+                            )}
+                        </div>
+                    </TabsContent>
+                )}
             </Tabs>
         </div>
     );
@@ -467,28 +445,24 @@ function WorkflowLogs({workflowId, stepId, stepsDataUpdatedAt, status}: {
         return f;
     }, [workflowId, stepId, showSystem]);
 
-    const {query: logsQuery} = useCustom<LogRecord[]>({
-        url: "",
-        method: "get",
-        queryOptions: {
-            queryKey: ["workflow-logs", workflowId, stepId, showSystem, stepsDataUpdatedAt],
-            queryFn: () =>
-                pbClient.logs
-                    .getList(1, 100, {filter, sort: "created"})
-                    .then((result) => ({
-                        data: result.items.map((item) => ({
-                            id: item.id,
-                            level: Number(item.level),
-                            message: item.message,
-                            created: item.created,
-                            data: (item.data ?? {}) as Record<string, unknown>,
-                        })),
-                    })),
-            refetchInterval: TERMINAL_STATUSES.has(status) ? 5000 : 2000,
-        },
+    const logsQuery = useQuery<LogRecord[]>({
+        queryKey: ["workflow-logs", workflowId, stepId, showSystem, stepsDataUpdatedAt],
+        queryFn: () =>
+            pbClient.logs
+                .getList(1, 100, {filter, sort: "created"})
+                .then((result) =>
+                    result.items.map((item) => ({
+                        id: item.id,
+                        level: Number(item.level),
+                        message: item.message,
+                        created: item.created,
+                        data: (item.data ?? {}) as Record<string, unknown>,
+                    }))
+                ),
+        refetchInterval: TERMINAL_STATUSES.has(status) ? false : 2000,
     });
 
-    const logs = (logsQuery.data?.data ?? []) as LogRecord[];
+    const logs = logsQuery.data ?? [];
     const logsLoading = logsQuery.isLoading;
     const [spinning, setSpinning] = useState(false);
 
@@ -544,15 +518,7 @@ function WorkflowLogs({workflowId, stepId, stepsDataUpdatedAt, status}: {
                                 return (
                                     <TableRow key={log.id} className={isSystem && !isAppStatus ? "opacity-60" : ""}>
                                         <TableCell className="font-mono text-xs text-muted-foreground">
-                                            {new Date(log.created).toLocaleString(undefined, {
-                                                year: "numeric",
-                                                month: "2-digit",
-                                                day: "2-digit",
-                                                hour: "2-digit",
-                                                minute: "2-digit",
-                                                second: "2-digit",
-                                                fractionalSecondDigits: 3,
-                                            })}
+                                            {formatTimestampPrecise(log.created)}
                                         </TableCell>
                                         <TableCell>
                       <span className={`font-mono text-xs font-medium ${lvl.className}`}>
@@ -611,7 +577,7 @@ function WorkflowProducts({workflowId, status}: { workflowId: string; status: st
         sorters: [{field: "function_id", order: "asc"}],
         pagination: {pageSize: 100},
         queryOptions: {
-            refetchInterval: TERMINAL_STATUSES.has(status) ? 5000 : 2000,
+            refetchInterval: TERMINAL_STATUSES.has(status) ? false : 2000,
         },
     });
 
@@ -663,14 +629,7 @@ function WorkflowProducts({workflowId, status}: { workflowId: string; status: st
                             {products.map((p) => (
                                 <TableRow key={p.id}>
                                     <TableCell className="font-mono text-xs text-muted-foreground">
-                                        {new Date(p.created).toLocaleString(undefined, {
-                                            year: "numeric",
-                                            month: "2-digit",
-                                            day: "2-digit",
-                                            hour: "2-digit",
-                                            minute: "2-digit",
-                                            second: "2-digit",
-                                        })}
+                                        {formatTimestampPrecise(p.created)}
                                     </TableCell>
                                     <TableCell className="font-mono text-xs">{p.file_name}</TableCell>
                                     <TableCell className="font-mono text-xs text-muted-foreground">

@@ -10,9 +10,17 @@ import (
 	"github.com/YakirOren/turbine"
 	"github.com/YakirOren/turbine/dashboard"
 	"github.com/pocketbase/pocketbase"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 // --- Step functions ---
+
+func SendEmail(ctx context.Context) (string, error) {
+	logger := turbine.LoggerFrom(ctx)
+	logger.Info("sending email")
+	time.Sleep(time.Duration(1+rand.IntN(3)) * time.Second)
+	return fmt.Sprintf("msg_%d", rand.IntN(10000)), nil
+}
 
 func ValidateOrder(ctx context.Context) (string, error) {
 	logger := turbine.LoggerFrom(ctx)
@@ -69,6 +77,19 @@ type NotifyInput struct {
 }
 
 // --- Workflows ---
+
+// EmailWorkflow sends an email to a recipient. Enqueued via the "emails" queue.
+func EmailWorkflow(ctx turbine.Context, to string) (string, error) {
+	ctx.SetAppStatus("sending", "blue")
+
+	msgID, err := turbine.Do(ctx, SendEmail, turbine.WithStepName("send"))
+	if err != nil {
+		return "", err
+	}
+
+	ctx.SetAppStatus("sent", "green")
+	return fmt.Sprintf("to=%s msg_id=%s", to, msgID), nil
+}
 
 // OrderWorkflow processes an order end-to-end. Triggerable from the dashboard.
 func OrderWorkflow(ctx turbine.Context, orderID string) (string, error) {
@@ -313,11 +334,38 @@ func main() {
 		}),
 	)
 
+	// Queue-based
+	turbine.Register(rt, EmailWorkflow, turbine.WithTags("email", "queue"))
+
+	rt.Queue("emails",
+		turbine.WithWorkerConcurrency(3),
+		turbine.WithRateLimiter(turbine.RateLimiter{Limit: 10, Period: time.Minute}),
+	)
+
 	// Scheduled
 	turbine.Register(rt, MetricsSync, turbine.WithSchedule("*/5 * * * *"), turbine.WithTags("metrics", "scheduled"))
 	turbine.Register(rt, DailyCleanup, turbine.WithSchedule("0 3 * * *"), turbine.WithTags("maintenance", "scheduled"))
 
 	dashboard.Mount(app, rt)
+
+	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		e.Router.POST("/send-email/{to}", func(re *core.RequestEvent) error {
+			to := re.Request.PathValue("to")
+
+			handle, err := turbine.Run(rt, EmailWorkflow, to,
+				turbine.WithQueue("emails"),
+			)
+			if err != nil {
+				return re.JSON(500, map[string]string{"error": err.Error()})
+			}
+
+			return re.JSON(202, map[string]string{
+				"workflow_id": handle.GetWorkflowID(),
+				"status":      "enqueued",
+			})
+		})
+		return e.Next()
+	})
 
 	if err := app.Start(); err != nil {
 		log.Fatal(err)

@@ -1,259 +1,216 @@
 import { useMemo } from "react";
-import { useNavigate } from "react-router";
-import { useCustom } from "@refinedev/core";
+import { useQuery } from "@tanstack/react-query";
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { pbClient } from "@/providers/pocketbase";
-import { cn } from "@/lib/utils";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  type ChartConfig,
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  ChartLegend,
+  ChartLegendContent,
+} from "@/components/ui/chart";
+import { Skeleton } from "@/components/ui/skeleton";
 
-interface DayStat {
-  date: string;
-  total: number;
+interface BucketStat {
+  time: number;
   success: number;
   error: number;
   cancelled: number;
 }
 
-function formatLocalDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+interface CalendarViewProps {
+  timeRange?: string;
+  name?: string;
+  status?: string;
+  tag?: string;
+  onDayClick?: (day: string) => void;
 }
 
-function getMonthRange(): { from: string; to: string } {
-  const now = new Date();
-  const to = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const from = new Date(to);
-  from.setMonth(from.getMonth() - 5);
-  from.setDate(1);
-  return {
-    from: formatLocalDate(from),
-    to: formatLocalDate(to),
-  };
-}
-
-function generateDayGrid(from: string, to: string): string[] {
-  const days: string[] = [];
-  const [fy, fm, fd] = from.split("-").map(Number);
-  const [ty, tm, td] = to.split("-").map(Number);
-  const start = new Date(fy, fm - 1, fd);
-  const end = new Date(ty, tm - 1, td);
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    days.push(formatLocalDate(d));
+function getRangeParams(timeRange: string): { fromMs: number; toMs: number; bucketMins: number } {
+  const now = Date.now();
+  switch (timeRange) {
+    case "1h":
+      return { fromMs: now - 3600_000, toMs: now, bucketMins: 5 };
+    case "6h":
+      return { fromMs: now - 21600_000, toMs: now, bucketMins: 15 };
+    case "24h":
+      return { fromMs: now - 86400_000, toMs: now, bucketMins: 60 };
+    case "7d":
+      return { fromMs: now - 604800_000, toMs: now, bucketMins: 1440 };
+    default: {
+      // "all" — last 6 months
+      const to = new Date();
+      const from = new Date(to);
+      from.setMonth(from.getMonth() - 5);
+      from.setDate(1);
+      return { fromMs: from.getTime(), toMs: to.getTime(), bucketMins: 1440 };
+    }
   }
-  return days;
 }
 
-function intensityClass(count: number, max: number): string {
-  if (count === 0) return "bg-muted";
-  const ratio = count / max;
-  if (ratio <= 0.25) return "bg-green-200 dark:bg-green-900";
-  if (ratio <= 0.5) return "bg-green-400 dark:bg-green-700";
-  if (ratio <= 0.75) return "bg-green-500 dark:bg-green-500";
-  return "bg-green-600 dark:bg-green-400";
+function formatTick(timeRange: string): (v: number) => string {
+  switch (timeRange) {
+    case "1h":
+    case "6h":
+      return (v: number) => new Date(v).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    case "24h":
+      return (v: number) => new Date(v).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    case "7d":
+      return (v: number) => new Date(v).toLocaleDateString(undefined, { weekday: "short" });
+    default:
+      return (v: number) => new Date(v).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
 }
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function formatTooltipLabel(timeRange: string): (v: number) => string {
+  switch (timeRange) {
+    case "1h":
+    case "6h":
+    case "24h":
+      return (v: number) => new Date(v).toLocaleString(undefined, {
+        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+      });
+    default:
+      return (v: number) => new Date(v).toLocaleDateString(undefined, {
+        weekday: "short", month: "short", day: "numeric",
+      });
+  }
+}
 
-const WORKFLOW_FILTER_STORAGE_KEY = "pt_workflow_filters";
+const chartConfig = {
+  success: { label: "Success", color: "var(--color-green-500)" },
+  error: { label: "Error", color: "var(--color-red-500)" },
+  cancelled: { label: "Cancelled", color: "var(--color-gray-500)" },
+} satisfies ChartConfig;
 
-export function CalendarView() {
-  const navigate = useNavigate();
-  const { from, to } = useMemo(getMonthRange, []);
+export function CalendarView({ timeRange = "all", name, status, tag, onDayClick }: CalendarViewProps) {
+  const { fromMs, toMs, bucketMins } = useMemo(() => getRangeParams(timeRange), [timeRange]);
 
-  const { query: calendarQuery } = useCustom<DayStat[]>({
-    url: "",
-    method: "get",
-    queryOptions: {
-      queryKey: ["calendar", from, to],
-      queryFn: () =>
-        pbClient
-          .send<DayStat[]>(`/api/pt/calendar?from=${from}&to=${to}`, { method: "GET" })
-          .then((data) => ({ data })),
-    },
+  const queryParams = useMemo(() => {
+    const p = new URLSearchParams({
+      from_ms: String(fromMs),
+      to_ms: String(toMs),
+      bucket_mins: String(bucketMins),
+    });
+    if (name) p.set("name", name);
+    if (status && status !== "all") p.set("status", status);
+    if (tag) p.set("tag", tag);
+    return p.toString();
+  }, [fromMs, toMs, bucketMins, name, status, tag]);
+
+  const calendarQuery = useQuery<BucketStat[]>({
+    queryKey: ["activity", queryParams],
+    queryFn: () =>
+      pbClient
+        .send<BucketStat[]>(`/api/pt/calendar?${queryParams}`, { method: "GET" }),
   });
 
-  const stats: DayStat[] = (calendarQuery.data?.data as DayStat[] | undefined) ?? [];
+  const stats: BucketStat[] = calendarQuery.data ?? [];
 
-  const statMap = useMemo(() => {
-    const map = new Map<string, DayStat>();
-    for (const s of stats) map.set(s.date, s);
-    return map;
-  }, [stats]);
+  const hasSuccess = stats.some((s) => s.success > 0);
+  const hasError = stats.some((s) => s.error > 0);
+  const hasCancelled = stats.some((s) => s.cancelled > 0);
 
-  const days = useMemo(() => generateDayGrid(from, to), [from, to]);
-  const maxTotal = useMemo(
-    () => Math.max(1, ...stats.map((s) => s.total)),
-    [stats]
-  );
+  const tickFormatter = useMemo(() => formatTick(timeRange), [timeRange]);
+  const tooltipFormatter = useMemo(() => formatTooltipLabel(timeRange), [timeRange]);
 
-  const weeks = useMemo(() => {
-    const result: string[][] = [];
-    let currentWeek: string[] = [];
-    const firstDayOfWeek = new Date(days[0]).getDay();
-    for (let i = 0; i < firstDayOfWeek; i++) currentWeek.push("");
-    for (const day of days) {
-      const dow = new Date(day).getDay();
-      if (dow === 0 && currentWeek.length > 0) {
-        result.push(currentWeek);
-        currentWeek = [];
-      }
-      currentWeek.push(day);
-    }
-    if (currentWeek.length > 0) result.push(currentWeek);
-    return result;
-  }, [days]);
+  if (calendarQuery.isLoading && stats.length === 0) {
+    return <Skeleton className="h-[120px] w-full" />;
+  }
 
-  const monthLabels = useMemo(() => {
-    const labels: { label: string; weekIndex: number }[] = [];
-    let lastMonth = "";
-    for (let wi = 0; wi < weeks.length; wi++) {
-      const firstDay = weeks[wi].find((d) => d !== "");
-      if (!firstDay) continue;
-      const month = firstDay.slice(0, 7);
-      if (month !== lastMonth) {
-        labels.push({
-          label: new Date(firstDay).toLocaleString(undefined, { month: "short" }),
-          weekIndex: wi,
-        });
-        lastMonth = month;
-      }
-    }
-    return labels;
-  }, [weeks]);
-
-  const handleDayClick = (day: string) => {
-    // Store the exact day boundaries so WorkflowList can filter precisely
-    const dayStart = new Date(day + "T00:00:00").getTime();
-    const dayEnd = dayStart + 86400_000;
-    localStorage.setItem(
-      WORKFLOW_FILTER_STORAGE_KEY,
-      JSON.stringify({
-        timeRange: "custom",
-        customFrom: dayStart,
-        customTo: dayEnd,
-        name: "",
-        status: "all",
-      })
+  if (calendarQuery.isError) {
+    return (
+      <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        {(calendarQuery.error as unknown as Error)?.message ?? "Failed to load activity data"}
+      </div>
     );
-    navigate("/workflows");
-  };
+  }
+
+  if (stats.length === 0) {
+    return (
+      <div className="flex h-[120px] items-center justify-center text-sm text-muted-foreground">
+        No activity in this period.
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Calendar</h1>
-      <p className="text-sm text-muted-foreground">
-        Workflow execution activity over the last 6 months. Click a day to view its workflows.
-      </p>
-
-      {calendarQuery.isError && (
-        <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {(calendarQuery.error as unknown as Error)?.message ?? "Failed to load calendar data"}
-        </div>
-      )}
-
-      {calendarQuery.isLoading && stats.length === 0 && (
-        <div className="text-sm text-muted-foreground">Loading...</div>
-      )}
-
-      <TooltipProvider delayDuration={100}>
-        <div className="overflow-x-auto">
-          <div className="flex mb-1 ml-10">
-            {monthLabels.map((m, i) => (
-              <span
-                key={i}
-                className="text-xs text-muted-foreground"
-                style={{
-                  marginLeft: i === 0 ? m.weekIndex * 14 : undefined,
-                  width:
-                    i < monthLabels.length - 1
-                      ? (monthLabels[i + 1].weekIndex - m.weekIndex) * 14
-                      : undefined,
-                }}
-              >
-                {m.label}
-              </span>
-            ))}
-          </div>
-
-          <div className="flex gap-0.5">
-            <div className="flex flex-col gap-0.5 mr-1">
-              {WEEKDAYS.map((d, i) => (
-                <span
-                  key={i}
-                  className="flex h-[12px] items-center text-[10px] text-muted-foreground"
-                >
-                  {i % 2 === 1 ? d : ""}
-                </span>
-              ))}
-            </div>
-
-            {weeks.map((week, wi) => (
-              <div key={wi} className="flex flex-col gap-0.5">
-                {Array.from({ length: 7 }, (_, di) => {
-                  const day = week[di] ?? "";
-                  if (!day) {
-                    return <div key={di} className="h-[12px] w-[12px]" />;
-                  }
-                  const stat = statMap.get(day);
-                  const count = stat?.total ?? 0;
-
-                  return (
-                    <Tooltip key={di}>
-                      <TooltipTrigger asChild>
-                        <button
-                          className={cn(
-                            "h-[12px] w-[12px] rounded-[2px] transition-colors",
-                            intensityClass(count, maxTotal),
-                            count > 0
-                              ? "cursor-pointer hover:ring-1 hover:ring-foreground"
-                              : "cursor-default"
-                          )}
-                          onClick={() => {
-                            if (count > 0) handleDayClick(day);
-                          }}
-                        />
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="text-xs">
-                        <div className="font-medium">{day}</div>
-                        {count > 0 ? (
-                          <div className="text-muted-foreground">
-                            {count} workflow{count !== 1 ? "s" : ""}
-                            {stat!.error > 0 && (
-                              <span className="text-red-400">
-                                {" "}({stat!.error} failed)
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="text-muted-foreground">No workflows</div>
-                        )}
-                      </TooltipContent>
-                    </Tooltip>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        </div>
-      </TooltipProvider>
-
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span>Less</span>
-        <div className="flex gap-0.5">
-          <div className="h-[12px] w-[12px] rounded-[2px] bg-muted" />
-          <div className="h-[12px] w-[12px] rounded-[2px] bg-green-200 dark:bg-green-900" />
-          <div className="h-[12px] w-[12px] rounded-[2px] bg-green-400 dark:bg-green-700" />
-          <div className="h-[12px] w-[12px] rounded-[2px] bg-green-500 dark:bg-green-500" />
-          <div className="h-[12px] w-[12px] rounded-[2px] bg-green-600 dark:bg-green-400" />
-        </div>
-        <span>More</span>
-      </div>
-    </div>
+    <ChartContainer config={chartConfig} className="h-[120px] w-full">
+      <AreaChart
+        data={stats}
+        margin={{ top: 4, right: 4, bottom: 0, left: 0 }}
+        onClick={(state) => {
+          if (state?.activePayload?.[0]?.payload && onDayClick) {
+            const t = state.activePayload[0].payload.time as number;
+            const d = new Date(t);
+            const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+            onDayClick(day);
+          }
+        }}
+        className="cursor-pointer"
+      >
+        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+        <XAxis
+          dataKey="time"
+          type="number"
+          domain={[fromMs, toMs]}
+          tickLine={false}
+          axisLine={false}
+          tickMargin={4}
+          tick={{ fontSize: 10 }}
+          tickFormatter={tickFormatter}
+          minTickGap={40}
+        />
+        <YAxis
+          tickLine={false}
+          axisLine={false}
+          tick={{ fontSize: 10 }}
+          width={28}
+          allowDecimals={false}
+        />
+        <ChartTooltip
+          content={
+            <ChartTooltipContent
+              labelFormatter={(_, payload) => {
+                const t = payload?.[0]?.payload?.time as number | undefined;
+                return t ? tooltipFormatter(t) : "";
+              }}
+            />
+          }
+        />
+        <ChartLegend content={<ChartLegendContent />} />
+        {hasSuccess && (
+          <Area
+            dataKey="success"
+            type="monotone"
+            fill="var(--color-success)"
+            stroke="var(--color-success)"
+            fillOpacity={0.3}
+            stackId="a"
+          />
+        )}
+        {hasError && (
+          <Area
+            dataKey="error"
+            type="monotone"
+            fill="var(--color-error)"
+            stroke="var(--color-error)"
+            fillOpacity={0.3}
+            stackId="a"
+          />
+        )}
+        {hasCancelled && (
+          <Area
+            dataKey="cancelled"
+            type="monotone"
+            fill="var(--color-cancelled)"
+            stroke="var(--color-cancelled)"
+            fillOpacity={0.3}
+            stackId="a"
+          />
+        )}
+      </AreaChart>
+    </ChartContainer>
   );
 }

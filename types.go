@@ -33,30 +33,30 @@ const (
 
 // Status contains information about a workflow's current state.
 type Status struct {
-	ID                 string             `json:"workflow_id"`
-	Status             StatusType `json:"status"`
-	Name               string             `json:"name"`
-	Output             any                `json:"output,omitempty"`
-	Error              error              `json:"error,omitempty"`
-	ExecutorID         string             `json:"executor_id"`
-	CreatedAt          time.Time          `json:"created_at"`
-	UpdatedAt          time.Time          `json:"updated_at"`
-	ApplicationVersion string             `json:"application_version"`
-	ApplicationID      string             `json:"application_id,omitempty"`
-	Attempts           int                `json:"attempts"`
-	QueueName          string             `json:"queue_name,omitempty"`
-	Timeout            time.Duration      `json:"timeout,omitempty"`
-	Deadline           time.Time          `json:"deadline"`
-	StartedAt          time.Time          `json:"started_at"`
-	DeduplicationID    string             `json:"deduplication_id,omitempty"`
-	Input              any                `json:"input,omitempty"`
-	Priority           int                `json:"priority,omitempty"`
-	QueuePartitionKey  string             `json:"queue_partition_key,omitempty"`
-	ForkedFrom         string             `json:"forked_from,omitempty"`
-	ParentWorkflowID   string             `json:"parent_workflow_id,omitempty"`
-	AppStatus          string             `json:"app_status,omitempty"`
-	AppStatusColor     string             `json:"app_status_color,omitempty"`
-	Tags               []string           `json:"tags,omitempty"`
+	ID                 string        `json:"workflow_id"`
+	Status             StatusType    `json:"status"`
+	Name               string        `json:"name"`
+	Output             any           `json:"output,omitempty"`
+	Error              error         `json:"error,omitempty"`
+	ExecutorID         string        `json:"executor_id"`
+	CreatedAt          time.Time     `json:"created_at"`
+	UpdatedAt          time.Time     `json:"updated_at"`
+	ApplicationVersion string        `json:"application_version"`
+	ApplicationID      string        `json:"application_id,omitempty"`
+	Attempts           int           `json:"attempts"`
+	QueueName          string        `json:"queue_name,omitempty"`
+	Timeout            time.Duration `json:"timeout,omitempty"`
+	Deadline           time.Time     `json:"deadline"`
+	StartedAt          time.Time     `json:"started_at"`
+	DeduplicationID    string        `json:"deduplication_id,omitempty"`
+	Input              any           `json:"input,omitempty"`
+	Priority           int           `json:"priority,omitempty"`
+	QueuePartitionKey  string        `json:"queue_partition_key,omitempty"`
+	ForkedFrom         string        `json:"forked_from,omitempty"`
+	ParentWorkflowID   string        `json:"parent_workflow_id,omitempty"`
+	AppStatus          string        `json:"app_status,omitempty"`
+	AppStatusColor     string        `json:"app_status_color,omitempty"`
+	Tags               []string      `json:"tags,omitempty"`
 }
 
 // Handle provides methods to interact with a running or completed workflow.
@@ -75,7 +75,7 @@ type getResultOptions struct {
 
 // StepInfo contains information about a workflow step execution.
 type StepInfo struct {
-	WorkflowID string `json:"workflow_id"`
+	WorkflowID   string `json:"workflow_id"`
 	FunctionID   int    `json:"function_id"`
 	FunctionName string `json:"function_name"`
 	Output       string `json:"output,omitempty"`
@@ -145,9 +145,9 @@ type cancelWorkflowDBInput struct {
 }
 
 type resumeWorkflowDBInput struct {
-	workflowID  string
-	executorID  string
-	appVersion  string
+	workflowID string
+	executorID string
+	appVersion string
 }
 
 type forkWorkflowDBInput struct {
@@ -158,8 +158,8 @@ type forkWorkflowDBInput struct {
 }
 
 type recordChildWorkflowDBInput struct {
-	workflowUUID   string
-	functionID     int
+	workflowUUID    string
+	functionID      int
 	childWorkflowID string
 }
 

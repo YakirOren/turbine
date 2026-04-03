@@ -98,92 +98,78 @@ func (sm *scheduleManager) cancelOnce(recordID string) {
 	}
 }
 
+func (sm *scheduleManager) activate(rt *Runtime, s *Schedule) error {
+	switch s.Type() {
+	case scheduleTypeCron:
+		return sm.registerCron(rt, s.Id, s.WorkflowFQN(), s.Input(), s.CronExpression(), s.Jitter())
+	case scheduleTypeOnce:
+		sm.registerOnce(rt, s.Id, s.WorkflowFQN(), s.Input(), s.ScheduledAt())
+	}
+	return nil
+}
+
+func (sm *scheduleManager) deactivate(rt *Runtime, s *Schedule) {
+	switch s.Type() {
+	case scheduleTypeCron:
+		sm.removeCron(rt, s.Id)
+	case scheduleTypeOnce:
+		sm.cancelOnce(s.Id)
+	}
+}
+
 func (sm *scheduleManager) registerHooks(rt *Runtime) {
 	rt.app.OnRecordAfterCreateSuccess(collectionSchedules).BindFunc(func(e *core.RecordEvent) error {
-		record := e.Record
-		fqn := record.GetString("workflow_fqn")
-		rawInput := json.RawMessage(record.GetString("input"))
-		schedType := record.GetString("type")
+		s := newSchedule(e.Record)
+		if !s.Enabled() {
+			return e.Next()
+		}
+		if err := sm.activate(rt, s); err != nil {
+			rt.app.Logger().Error("failed to register schedule from hook", "error", err)
+		}
+		return e.Next()
+	})
 
-		switch schedType {
-		case "cron":
-			cronExpr := record.GetString("cron_expression")
-			jitter := parseDuration(record.GetString("jitter"))
-			if err := sm.registerCron(rt, record.Id, fqn, rawInput, cronExpr, jitter); err != nil {
-				rt.app.Logger().Error("failed to register cron from hook", "error", err)
+	rt.app.OnRecordAfterUpdateSuccess(collectionSchedules).BindFunc(func(e *core.RecordEvent) error {
+		s := newSchedule(e.Record)
+
+		// Compile-time schedules: just update the in-memory disabled state.
+		if s.Type() == scheduleTypeCompile {
+			if s.Enabled() {
+				rt.disabledSchedules.Delete(s.WorkflowFQN())
+			} else {
+				rt.disabledSchedules.Store(s.WorkflowFQN(), struct{}{})
 			}
-		case "once":
-			scheduledAt := record.GetDateTime("scheduled_at").Time()
-			sm.registerOnce(rt, record.Id, fqn, rawInput, scheduledAt)
+			return e.Next()
+		}
+
+		sm.deactivate(rt, s)
+		if s.Enabled() {
+			if err := sm.activate(rt, s); err != nil {
+				rt.app.Logger().Error("failed to re-register schedule from hook", "error", err)
+			}
 		}
 		return e.Next()
 	})
 
 	rt.app.OnRecordAfterDeleteSuccess(collectionSchedules).BindFunc(func(e *core.RecordEvent) error {
-		record := e.Record
-		schedType := record.GetString("type")
-
-		switch schedType {
-		case "cron":
-			sm.removeCron(rt, record.Id)
-		case "once":
-			sm.cancelOnce(record.Id)
-		}
+		sm.deactivate(rt, newSchedule(e.Record))
 		return e.Next()
 	})
 }
 
 func (sm *scheduleManager) loadExisting(rt *Runtime) error {
-	records, err := rt.app.FindAllRecords(collectionSchedules)
+	schedules, err := findAllSchedules(rt.app)
 	if err != nil {
 		return fmt.Errorf("failed to load schedules: %w", err)
 	}
 
-	for _, record := range records {
-		fqn := record.GetString("workflow_fqn")
-		rawInput := json.RawMessage(record.GetString("input"))
-		schedType := record.GetString("type")
-
-		switch schedType {
-		case "cron":
-			cronExpr := record.GetString("cron_expression")
-			jitter := parseDuration(record.GetString("jitter"))
-			if err := sm.registerCron(rt, record.Id, fqn, rawInput, cronExpr, jitter); err != nil {
-				rt.app.Logger().Error("failed to load cron schedule", "record_id", record.Id, "error", err)
-			}
-		case "once":
-			scheduledAt := record.GetDateTime("scheduled_at").Time()
-			sm.registerOnce(rt, record.Id, fqn, rawInput, scheduledAt)
+	for _, s := range schedules {
+		if s.Type() == scheduleTypeCompile || !s.Enabled() {
+			continue
+		}
+		if err := sm.activate(rt, s); err != nil {
+			rt.app.Logger().Error("failed to load schedule", "record_id", s.Id, "error", err)
 		}
 	}
 	return nil
-}
-
-func parseDuration(s string) time.Duration {
-	if s == "" {
-		return 0
-	}
-	d, _ := time.ParseDuration(s)
-	return d
-}
-
-func createScheduleRecord(app core.App, fqn string, input json.RawMessage, schedType string, cronExpr string, scheduledAt time.Time) (*core.Record, error) {
-	col, err := app.FindCollectionByNameOrId(collectionSchedules)
-	if err != nil {
-		return nil, err
-	}
-	record := core.NewRecord(col)
-	record.Set("workflow_fqn", fqn)
-	record.Set("input", string(input))
-	record.Set("type", schedType)
-	if cronExpr != "" {
-		record.Set("cron_expression", cronExpr)
-	}
-	if !scheduledAt.IsZero() {
-		record.Set("scheduled_at", scheduledAt)
-	}
-	if err := app.Save(record); err != nil {
-		return nil, err
-	}
-	return record, nil
 }

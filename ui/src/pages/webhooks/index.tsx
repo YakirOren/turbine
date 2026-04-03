@@ -1,8 +1,11 @@
 import { useState } from "react";
-import { useCustom } from "@refinedev/core";
-import { useQueryClient } from "@tanstack/react-query";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { useList, useInvalidate } from "@refinedev/core";
+import { useMutation } from "@tanstack/react-query";
 import { pbClient } from "@/providers/pocketbase";
-import { Webhook, Plus, Trash2 } from "lucide-react";
+import { Webhook, Plus, Trash2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,15 +25,37 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Field, FieldLabel, FieldDescription } from "@/components/ui/field";
+import { TableSkeleton } from "@/components/table-skeleton";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 interface WebhookRecord {
   id: string;
   url: string;
   events: string[];
   enabled: boolean;
-  secret: boolean;
+  secret: string;
   created: string;
 }
+
+const webhookFormSchema = z.object({
+  url: z.string().url("Invalid URL"),
+  events: z.array(z.string()).min(1, "Select at least one event"),
+  secret: z.string(),
+  enabled: z.boolean(),
+});
+type WebhookFormValues = z.infer<typeof webhookFormSchema>;
 
 const EVENT_OPTIONS = [
   "workflow.SUCCESS",
@@ -54,96 +79,101 @@ function truncateUrl(url: string, maxLen = 40): string {
 }
 
 export function WebhookList() {
-  const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [formUrl, setFormUrl] = useState("");
-  const [formEvents, setFormEvents] = useState<string[]>([]);
-  const [formSecret, setFormSecret] = useState("");
-  const [formEnabled, setFormEnabled] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
-  const { query: webhooksQuery } = useCustom<WebhookRecord[]>({
-    url: "",
-    method: "get",
-    queryOptions: {
-      queryKey: ["webhooks"],
-      queryFn: () =>
-        pbClient
-          .send<WebhookRecord[]>("/api/pt/webhooks", { method: "GET" })
-          .then((data) => ({ data })),
+  const { control, handleSubmit: rhfSubmit, reset, watch } = useForm<WebhookFormValues>({
+    resolver: zodResolver(webhookFormSchema),
+    defaultValues: {
+      url: "",
+      events: [],
+      secret: "",
+      enabled: true,
     },
   });
 
-  const records =
-    (webhooksQuery.data?.data as WebhookRecord[] | undefined) ?? [];
+  const events = watch("events");
+
+  const { result, query: webhooksQuery } = useList<WebhookRecord>({
+    resource: "pt_webhooks",
+    pagination: { mode: "off" },
+  });
+
+  const records = result.data ?? [];
   const isLoading = webhooksQuery.isLoading && records.length === 0;
 
+  const invalidateWebhooks = () =>
+    invalidate({ resource: "pt_webhooks", invalidates: ["list"] });
+
+  const saveMutation = useMutation({
+    mutationFn: async (data: WebhookFormValues) => {
+      const body: Record<string, unknown> = {
+        url: data.url,
+        events: data.events,
+        enabled: data.enabled,
+      };
+      if (data.secret) {
+        body.secret = data.secret;
+      }
+      if (editingId) {
+        await pbClient.collection("pt_webhooks").update(editingId, body);
+      } else {
+        await pbClient.collection("pt_webhooks").create(body);
+      }
+    },
+    onSuccess: () => {
+      invalidateWebhooks();
+      toast.success(editingId ? "Webhook updated" : "Webhook created");
+      setDialogOpen(false);
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || `Failed to ${editingId ? "update" : "create"} webhook`);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) =>
+      pbClient.collection("pt_webhooks").delete(id),
+    onSuccess: () => {
+      invalidateWebhooks();
+      toast.success("Webhook deleted");
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || "Failed to delete webhook");
+    },
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: (record: WebhookRecord) =>
+      pbClient.collection("pt_webhooks").update(record.id, { enabled: !record.enabled }),
+    onSuccess: () => {
+      invalidateWebhooks();
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || "Failed to toggle webhook");
+    },
+  });
+
   const openAdd = () => {
-    setFormUrl("");
-    setFormEvents([]);
-    setFormSecret("");
-    setFormEnabled(true);
+    reset();
+    setEditingId(null);
     setDialogOpen(true);
   };
 
-  const handleCreate = async () => {
-    if (!formUrl.trim()) return;
-
-    setSubmitting(true);
-    try {
-      await pbClient.send("/api/pt/webhooks", {
-        method: "POST",
-        body: {
-          url: formUrl,
-          events: formEvents,
-          secret: formSecret || undefined,
-          enabled: formEnabled,
-        },
-      });
-      queryClient.invalidateQueries({ queryKey: ["webhooks"] });
-      toast.success("Webhook created");
-      setDialogOpen(false);
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to create webhook");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleToggle = async (record: WebhookRecord) => {
-    try {
-      await pbClient.send(`/api/pt/webhooks/${record.id}/toggle`, {
-        method: "POST",
-      });
-      queryClient.invalidateQueries({ queryKey: ["webhooks"] });
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to toggle webhook");
-    }
-  };
-
-  const handleDelete = async (record: WebhookRecord) => {
-    if (
-      !window.confirm(
-        `Delete webhook for "${record.url}"? This cannot be undone.`
-      )
-    )
-      return;
-
-    try {
-      await pbClient.send(`/api/pt/webhooks/${record.id}`, {
-        method: "DELETE",
-      });
-      queryClient.invalidateQueries({ queryKey: ["webhooks"] });
-      toast.success("Webhook deleted");
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to delete webhook");
-    }
+  const openEdit = (record: WebhookRecord) => {
+    reset({ url: record.url, events: [...record.events], secret: "", enabled: record.enabled });
+    setEditingId(record.id);
+    setDialogOpen(true);
   };
 
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        Loading...
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Webhooks</h1>
+        </div>
+        <TableSkeleton columns={6} headers={["URL", "Events", "Enabled", "Secret", "Created", ""]} />
       </div>
     );
   }
@@ -185,7 +215,7 @@ export function WebhookList() {
                 <TableHead>Enabled</TableHead>
                 <TableHead>Secret</TableHead>
                 <TableHead>Created</TableHead>
-                <TableHead className="w-10" />
+                <TableHead className="w-20" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -210,7 +240,8 @@ export function WebhookList() {
                   <TableCell>
                     <Switch
                       checked={record.enabled}
-                      onCheckedChange={() => handleToggle(record)}
+                      onCheckedChange={() => toggleMutation.mutate(record)}
+                      aria-label={`${record.enabled ? "Disable" : "Enable"} webhook`}
                     />
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
@@ -220,15 +251,48 @@ export function WebhookList() {
                     {timeAgo(record.created)}
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() => handleDelete(record)}
-                      aria-label={`Delete webhook ${record.url}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                        onClick={() => openEdit(record)}
+                        aria-label={`Edit webhook ${record.url}`}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                            aria-label={`Delete webhook ${record.url}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete webhook?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete the webhook for{" "}
+                              <span className="font-mono">{truncateUrl(record.url)}</span>.
+                              This cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              variant="destructive"
+                              onClick={() => deleteMutation.mutate(record.id)}
+                            >
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -240,72 +304,82 @@ export function WebhookList() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Add Webhook</DialogTitle>
+            <DialogTitle>{editingId ? "Edit Webhook" : "Add Webhook"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">URL</label>
-              <Input
-                value={formUrl}
-                onChange={(e) => setFormUrl(e.target.value)}
-                placeholder="https://example.com/webhook"
-                className="font-mono"
+            <Field>
+              <FieldLabel htmlFor="webhook-url">URL</FieldLabel>
+              <Controller
+                control={control}
+                name="url"
+                render={({ field }) => (
+                  <Input
+                    {...field}
+                    id="webhook-url"
+                    placeholder="https://example.com/webhook"
+                    className="font-mono"
+                  />
+                )}
               />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Events</label>
-              <div className="flex flex-wrap gap-1.5">
-                {EVENT_OPTIONS.map((opt) => {
-                  const active = formEvents.includes(opt);
-                  return (
-                    <button
-                      key={opt}
-                      type="button"
-                      className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
-                        active
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-input bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                      }`}
-                      onClick={() =>
-                        setFormEvents(
-                          active
-                            ? formEvents.filter((e) => e !== opt)
-                            : [...formEvents, opt]
-                        )
-                      }
-                    >
-                      {opt}
-                    </button>
-                  );
-                })}
-              </div>
-              {formEvents.length === 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Select one or more
-                </p>
+            </Field>
+            <Field>
+              <FieldLabel>Events</FieldLabel>
+              <Controller
+                control={control}
+                name="events"
+                render={({ field }) => (
+                  <ToggleGroup
+                    type="multiple"
+                    value={field.value}
+                    onValueChange={field.onChange}
+                    className="flex flex-wrap justify-start gap-1.5"
+                  >
+                    {EVENT_OPTIONS.map((opt) => (
+                      <ToggleGroupItem key={opt} value={opt} size="sm" className="text-xs">
+                        {opt}
+                      </ToggleGroupItem>
+                    ))}
+                  </ToggleGroup>
+                )}
+              />
+              {events.length === 0 && (
+                <FieldDescription>Select one or more</FieldDescription>
               )}
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Secret</label>
-              <Input
-                value={formSecret}
-                onChange={(e) => setFormSecret(e.target.value)}
-                placeholder="Optional signing secret"
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="webhook-secret">Secret</FieldLabel>
+              <Controller
+                control={control}
+                name="secret"
+                render={({ field }) => (
+                  <Input
+                    {...field}
+                    id="webhook-secret"
+                    placeholder={editingId ? "Leave blank to keep current" : "Optional signing secret"}
+                  />
+                )}
               />
-            </div>
-            <div className="flex items-center justify-between py-1">
-              <label className="text-sm font-medium">Enabled</label>
-              <Switch
-                checked={formEnabled}
-                onCheckedChange={setFormEnabled}
+            </Field>
+            <Field orientation="horizontal">
+              <FieldLabel htmlFor="webhook-enabled">Enabled</FieldLabel>
+              <Controller
+                control={control}
+                name="enabled"
+                render={({ field }) => (
+                  <Switch
+                    id="webhook-enabled"
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                )}
               />
-            </div>
+            </Field>
             <div className="flex justify-end">
               <Button
-                onClick={handleCreate}
-                disabled={!formUrl.trim() || submitting}
+                onClick={rhfSubmit((data) => saveMutation.mutate(data))}
+                disabled={saveMutation.isPending}
               >
-                {submitting ? "Creating..." : "Create"}
+                {saveMutation.isPending ? (editingId ? "Saving..." : "Creating...") : (editingId ? "Save" : "Create")}
               </Button>
             </div>
           </div>

@@ -3,7 +3,7 @@ import routerProvider, {
   NavigateToResource,
   CatchAllNavigate,
 } from "@refinedev/react-router";
-import { BrowserRouter, Routes, Route, Outlet } from "react-router";
+import { BrowserRouter, Routes, Route, Outlet, Navigate } from "react-router";
 
 import {
   pbDataProvider,
@@ -16,8 +16,8 @@ import { WorkflowSteps } from "@/pages/workflows/steps";
 import { QueueList } from "@/pages/queues/list";
 import { ScheduledList } from "@/pages/scheduled/list";
 import { LoginPage } from "@/pages/login";
-import { CalendarView } from "@/pages/calendar/index";
 import { KVList } from "@/pages/kv/index";
+import { SettingsLayout } from "@/pages/settings/index";
 import { WebhookList } from "@/pages/webhooks/index";
 
 function App() {
@@ -62,9 +62,11 @@ function App() {
             <Route path="/workflows/:id/steps" element={<WorkflowSteps />} />
             <Route path="/queues" element={<QueueList />} />
             <Route path="/scheduled" element={<ScheduledList />} />
-            <Route path="/calendar" element={<CalendarView />} />
             <Route path="/kv" element={<KVList />} />
-            <Route path="/webhooks" element={<WebhookList />} />
+            <Route path="/settings" element={<SettingsLayout />}>
+              <Route index element={<Navigate to="webhooks" replace />} />
+              <Route path="webhooks" element={<WebhookList />} />
+            </Route>
           </Route>
 
           {/* Public routes — logged-in users redirected to dashboard */}

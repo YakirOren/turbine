@@ -83,7 +83,7 @@ func main() {
 		e.Router.POST("/job/{id}/cancel", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			if err := rt.Cancel("job-"+id); err != nil {
+			if err := rt.Cancel("job-" + id); err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
 
@@ -94,7 +94,7 @@ func main() {
 		e.Router.POST("/job/{id}/resume", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			if err := rt.Resume("job-"+id); err != nil {
+			if err := rt.Resume("job-" + id); err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
 

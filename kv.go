@@ -11,8 +11,7 @@ func (rt *Runtime) KVSet(ctx context.Context, key string, value any) error {
 		return fmt.Errorf("turbine: KV key must not be empty")
 	}
 
-	ser := newJSONSerializer[any]()
-	encoded, err := ser.Encode(value)
+	encoded, err := encodeJSON[any](value)
 	if err != nil {
 		return fmt.Errorf("turbine: failed to serialize KV value: %w", err)
 	}
@@ -42,8 +41,7 @@ func KVGet[R any](rt *Runtime, ctx context.Context, key string) (R, bool, error)
 		return *new(R), false, nil
 	}
 
-	ser := newJSONSerializer[R]()
-	result, err := ser.Decode(encoded)
+	result, err := decodeJSON[R](encoded)
 	if err != nil {
 		return *new(R), false, fmt.Errorf("turbine: failed to deserialize KV value: %w", err)
 	}

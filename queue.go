@@ -48,17 +48,16 @@ func WithPartitionQueue() QueueOption {
 	return func(q *WorkflowQueue) { q.PartitionQueue = true }
 }
 
-
 type queueRunner struct {
 	workflowQueueRegistry map[string]WorkflowQueue
-	queueGoroutinesWg   sync.WaitGroup
-	completionChan      chan struct{}
+	queueGoroutinesWg     sync.WaitGroup
+	completionChan        chan struct{}
 }
 
 func newQueueRunner() *queueRunner {
 	return &queueRunner{
 		workflowQueueRegistry: make(map[string]WorkflowQueue),
-		completionChan:      make(chan struct{}, 1),
+		completionChan:        make(chan struct{}, 1),
 	}
 }
 

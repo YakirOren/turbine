@@ -61,7 +61,7 @@ func (rt *Runtime) dispatchWebhooks(workflowID, name string, status StatusType, 
 		var events []string
 		eventsRaw := record.Get("events")
 		if b, err := json.Marshal(eventsRaw); err == nil {
-			json.Unmarshal(b, &events)
+			_ = json.Unmarshal(b, &events)
 		}
 
 		matched := false

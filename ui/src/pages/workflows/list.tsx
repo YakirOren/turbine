@@ -7,6 +7,7 @@ import {
 import { WorkflowTable } from "@/components/workflow-table";
 import { WorkflowSidebar } from "@/components/workflow-sidebar";
 import { TriggerRunButton } from "@/pages/workflows/trigger-panel";
+import { CalendarView } from "@/pages/calendar/index";
 
 const STORAGE_KEY = "pt_workflow_filters";
 
@@ -118,12 +119,33 @@ export function WorkflowList() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Workflows</h1>
-        <TriggerRunButton />
+      <h1 className="text-2xl font-bold">Workflows</h1>
+      <CalendarView
+        timeRange={filters.timeRange}
+        name={filters.name}
+        status={filters.status}
+        tag={filters.tag}
+        onDayClick={(day) => {
+          const dayStart = new Date(day + "T00:00:00").getTime();
+          const dayEnd = dayStart + 86400_000;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            timeRange: "custom",
+            customFrom: dayStart,
+            customTo: dayEnd,
+            name: "",
+            status: "all",
+          }));
+          setFilters(loadFilters());
+        }}
+      />
+      <div className="flex items-center gap-3">
+        <WorkflowFilterBar filters={filters} onChange={setFilters} />
+        <div className="ml-auto">
+          <TriggerRunButton />
+        </div>
       </div>
-      <WorkflowFilterBar filters={filters} onChange={setFilters} />
       <WorkflowTable
+        key={JSON.stringify(crudFilters)}
         filters={crudFilters}
         sorters={sorters}
         onRowClick={(record) => setSelectedId(record.id)}

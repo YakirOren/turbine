@@ -200,8 +200,7 @@ func (h *workflowPollingHandle[R]) GetResult(opts ...GetResultOption) (R, error)
 	if encodedResult == nil {
 		return *new(R), nil
 	}
-	serializer := newJSONSerializer[R]()
-	return serializer.Decode(encodedResult)
+	return decodeJSON[R](encodedResult)
 }
 
 // WithHandlePollingInterval sets the polling interval for GetResult.
@@ -307,8 +306,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 				return nil, fmt.Errorf("expected *string input, got %T", input)
 			}
 		}
-		serializer := newJSONSerializer[P]()
-		typedInput, err := serializer.Decode(encodedInput)
+		typedInput, err := decodeJSON[P](encodedInput)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode input: %w", err)
 		}
@@ -355,6 +353,9 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 		cronJobID := fmt.Sprintf("pt_sched_%s", customName)
 		if err := rt.app.Cron().Add(cronJobID, regOpts.cronSchedule, func() {
 			if !rt.launched.Load() {
+				return
+			}
+			if _, disabled := rt.disabledSchedules.Load(fqn); disabled {
 				return
 			}
 			scheduledTime := time.Now()
@@ -409,8 +410,8 @@ func Run[P any, R any](rt *Runtime, fn Workflow[P, R], input P, opts ...Workflow
 			typedChan <- workflowOutcome[R]{result: typedResult, err: outcome.err}
 		}()
 		return &workflowHandle[R]{
-			baseHandle: wh.baseHandle,
-			outcomeChan:        typedChan,
+			baseHandle:  wh.baseHandle,
+			outcomeChan: typedChan,
 		}, nil
 	}
 
@@ -477,9 +478,8 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	if params.alreadyEncodedInput {
 		encodedInput = input
 	} else {
-		ser := newJSONSerializer[any]()
 		var err error
-		encodedInput, err = ser.Encode(input)
+		encodedInput, err = encodeJSON[any](input)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize input: %w", err)
 		}
@@ -563,7 +563,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 
 		// Handle workflow ID conflict — another goroutine owns this workflow ID.
 		// Wait for the existing workflow to complete and return its result.
-		if errors.Is(fnErr, &PTError{Code: ErrConflictingID}) {
+		if errors.Is(fnErr, &Error{Code: ErrConflictingID}) {
 			rt.app.Logger().Warn("workflow ID conflict, waiting for existing workflow", "workflow_id", workflowID)
 			encoded, awaitErr := retryWithResult(rt.ctx, func() (*string, error) {
 				return rt.systemDB.awaitWorkflowResult(rt.ctx, workflowID, _DB_RETRY_INTERVAL)
@@ -582,8 +582,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		}
 
 		// Serialize output
-		ser := newJSONSerializer[any]()
-		encodedOutput, serErr := ser.Encode(result)
+		encodedOutput, serErr := encodeJSON[any](result)
 		if serErr != nil {
 			outcomeChan <- workflowOutcome[any]{err: fmt.Errorf("failed to serialize output: %w", serErr)}
 			close(outcomeChan)
@@ -618,8 +617,8 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	}()
 
 	return &workflowHandle[any]{
-		baseHandle: baseHandle{workflowID: workflowID, runtime: rt},
-		outcomeChan:        outcomeChan,
+		baseHandle:  baseHandle{workflowID: workflowID, runtime: rt},
+		outcomeChan: outcomeChan,
 	}, nil
 }
 
@@ -712,8 +711,7 @@ func Do[R any](ctx Context, fn Step[R], opts ...StepOption) (R, error) {
 		if !ok {
 			return *new(R), fmt.Errorf("checkpointed value is not *string")
 		}
-		ser := newJSONSerializer[R]()
-		return ser.Decode(encoded)
+		return decodeJSON[R](encoded)
 	}
 
 	if typed, ok := result.(R); ok {
@@ -792,8 +790,7 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn StepFunc, opts ...St
 
 	if !stepOpts.skipCheckpoint {
 		// Serialize and record
-		ser := newJSONSerializer[any]()
-		encodedOutput, serErr := ser.Encode(stepOutput)
+		encodedOutput, serErr := encodeJSON[any](stepOutput)
 		if serErr != nil {
 			return nil, fmt.Errorf("failed to serialize step output: %w", serErr)
 		}
@@ -849,7 +846,7 @@ func executeStepWithRetry(ctx context.Context, rt *Runtime, opts *stepOptions, r
 		}
 		joinedErrors = errors.Join(joinedErrors, err)
 	}
-	return output, newErrMaxRetriesError("", opts.stepName, opts.maxRetries, joinedErrors)
+	return output, newErrMaxRetries("", opts.stepName, opts.maxRetries, joinedErrors)
 }
 
 // Go runs a step in a goroutine. Must be within a workflow.
@@ -876,8 +873,7 @@ func DoAsync[R any](ctx Context, fn Step[R], opts ...StepOption) (chan AsyncResu
 // Send sends a message to another workflow.
 func Send(ctx Context, destinationID string, message any, topic string) error {
 	rt := runtimeFromContext(ctx)
-	ser := newJSONSerializer[any]()
-	encoded, err := ser.Encode(message)
+	encoded, err := encodeJSON[any](message)
 	if err != nil {
 		return fmt.Errorf("failed to serialize message: %w", err)
 	}
@@ -931,15 +927,13 @@ func Recv[R any](ctx Context, topic string, timeout time.Duration) (R, error) {
 	if encoded == nil {
 		return *new(R), nil
 	}
-	ser := newJSONSerializer[R]()
-	return ser.Decode(encoded)
+	return decodeJSON[R](encoded)
 }
 
 // SetValue sets a key-value event for the current workflow.
 func SetValue(ctx Context, key string, value any) error {
 	rt := runtimeFromContext(ctx)
-	ser := newJSONSerializer[any]()
-	encoded, err := ser.Encode(value)
+	encoded, err := encodeJSON[any](value)
 	if err != nil {
 		return fmt.Errorf("failed to serialize event value: %w", err)
 	}
@@ -975,8 +969,7 @@ func GetValue[R any](ctx Context, targetWorkflowID string, key string, timeout t
 	if encoded == nil {
 		return *new(R), nil
 	}
-	ser := newJSONSerializer[R]()
-	return ser.Decode(encoded)
+	return decodeJSON[R](encoded)
 }
 
 // Sleep performs a durable sleep within a workflow.
@@ -1029,7 +1022,6 @@ func Pause(ctx Context, duration time.Duration) error {
 /******* WORKFLOW MANAGEMENT ***********/
 /****************************************/
 
-
 // Retrieve returns a handle to an existing workflow.
 func Retrieve[R any](rt *Runtime, workflowID string) Handle[R] {
 	return &workflowPollingHandle[R]{baseHandle: baseHandle{workflowID: workflowID, runtime: rt}}
@@ -1081,7 +1073,7 @@ func (rt *Runtime) Steps(workflowID string) ([]StepInfo, error) {
 	result := make([]StepInfo, len(steps))
 	for i, s := range steps {
 		result[i] = StepInfo{
-			WorkflowID: s.workflowUUID,
+			WorkflowID:   s.workflowUUID,
 			FunctionID:   s.functionID,
 			FunctionName: s.functionName,
 		}

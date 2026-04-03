@@ -139,6 +139,7 @@ func TestRecordAndCheckOperationResult(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("expected recorded result, got nil")
+		return
 	}
 	if result.output == nil || *result.output != outputStr {
 		t.Fatalf("expected output %q, got %v", outputStr, result.output)

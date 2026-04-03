@@ -1,7 +1,7 @@
 import { Link, useLocation, Outlet } from "react-router";
 import { useGetIdentity, useLogout } from "@refinedev/core";
 import { useTheme } from "next-themes";
-import { LayoutList, Clock, LogOut, EllipsisVertical, Sun, Moon, Workflow, Calendar, Database, Webhook } from "lucide-react";
+import { LayoutList, Clock, LogOut, EllipsisVertical, Sun, Moon, Workflow, Database, Settings, Webhook } from "lucide-react";
 import { TurbineLogo } from "@/components/turbine-logo";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
@@ -13,13 +13,26 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const navItems = [
+interface NavItem {
+  label: string;
+  path: string;
+  icon: React.ComponentType<{ className?: string }>;
+  children?: NavItem[];
+}
+
+const navItems: NavItem[] = [
   { label: "Workflows", path: "/workflows", icon: Workflow },
   { label: "Queues", path: "/queues", icon: LayoutList },
   { label: "Scheduled", path: "/scheduled", icon: Clock },
-  { label: "Calendar", path: "/calendar", icon: Calendar },
   { label: "KV Store", path: "/kv", icon: Database },
-  { label: "Webhooks", path: "/webhooks", icon: Webhook },
+  {
+    label: "Settings",
+    path: "/settings",
+    icon: Settings,
+    children: [
+      { label: "Webhooks", path: "/settings/webhooks", icon: Webhook },
+    ],
+  },
 ];
 
 export function Layout() {
@@ -39,20 +52,44 @@ export function Layout() {
           {navItems.map((item) => {
             const isActive = location.pathname.startsWith(item.path);
             return (
-              <Link
-                key={item.path}
-                to={item.path}
-                draggable={false}
-                className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+              <div key={item.path}>
+                <Link
+                  to={item.children ? item.children[0].path : item.path}
+                  draggable={false}
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    isActive
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  )}
+                >
+                  <item.icon className="h-4 w-4" />
+                  {item.label}
+                </Link>
+                {item.children && isActive && (
+                  <div className="ml-4 mt-1 space-y-1">
+                    {item.children.map((child) => {
+                      const childActive = location.pathname.startsWith(child.path);
+                      return (
+                        <Link
+                          key={child.path}
+                          to={child.path}
+                          draggable={false}
+                          className={cn(
+                            "flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors",
+                            childActive
+                              ? "text-accent-foreground font-medium"
+                              : "text-muted-foreground hover:text-accent-foreground"
+                          )}
+                        >
+                          <child.icon className="h-3.5 w-3.5" />
+                          {child.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
                 )}
-              >
-                <item.icon className="h-4 w-4" />
-                {item.label}
-              </Link>
+              </div>
             );
           })}
         </nav>

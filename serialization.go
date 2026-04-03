@@ -6,30 +6,19 @@ import (
 	"reflect"
 )
 
-type serializer[T any] interface {
-	Encode(data T) (*string, error)
-	Decode(data *string) (T, error)
-}
-
-type jsonSerializer[T any] struct{}
-
-func newJSONSerializer[T any]() serializer[T] {
-	return &jsonSerializer[T]{}
-}
-
-func (j *jsonSerializer[T]) Encode(data T) (*string, error) {
+func encodeJSON[T any](data T) (*string, error) {
 	if isNilValue(data) {
 		return nil, nil
 	}
-	jsonBytes, err := json.Marshal(data)
+	b, err := json.Marshal(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode data: %w", err)
 	}
-	s := string(jsonBytes)
+	s := string(b)
 	return &s, nil
 }
 
-func (j *jsonSerializer[T]) Decode(data *string) (T, error) {
+func decodeJSON[T any](data *string) (T, error) {
 	if data == nil || *data == "" {
 		return getNilOrZeroValue[T](), nil
 	}

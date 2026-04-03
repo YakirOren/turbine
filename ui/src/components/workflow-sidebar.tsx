@@ -7,6 +7,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { StatusBadge, AppStatusBadge } from "@/components/status-badge";
 import {
   Collapsible,
@@ -29,32 +30,7 @@ import { toast } from "sonner";
 import { Ban, Play, Copy, ChevronDown, GitBranch, Trash2, CheckCircle, XCircle } from "lucide-react";
 import { useNavigate } from "react-router";
 import { pbClient } from "@/providers/pocketbase";
-
-function formatRelativeTime(epochMs: number): string {
-  const diff = Date.now() - epochMs;
-  if (diff < 0) return "just now";
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-function formatDuration(startMs: number, endMs: number): string {
-  const diff = endMs - startMs;
-  if (diff < 1000) return `${diff}ms`;
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainSec = seconds % 60;
-  if (minutes < 60) return `${minutes}m ${remainSec}s`;
-  const hours = Math.floor(minutes / 60);
-  const remainMin = minutes % 60;
-  return `${hours}h ${remainMin}m`;
-}
+import { timeAgo, formatDurationRange, formatTimestamp } from "@/lib/format";
 
 function CopyField({ label, value }: { label: string; value: string }) {
   return (
@@ -333,9 +309,9 @@ export function WorkflowSidebar({
                     </span>
                     <span
                       className="text-sm"
-                      title={new Date(createdMs).toLocaleString()}
+                      title={formatTimestamp(createdMs)}
                     >
-                      {formatRelativeTime(createdMs)}
+                      {timeAgo(createdMs)}
                     </span>
                   </div>
                 )}
@@ -345,8 +321,20 @@ export function WorkflowSidebar({
                       Duration
                     </span>
                     <span className="font-mono text-sm">
-                      {formatDuration(createdMs, updatedMs)}
+                      {formatDurationRange(createdMs, updatedMs)}
                     </span>
+                  </div>
+                )}
+                {Array.isArray(record.tags) && (record.tags as string[]).length > 0 && (
+                  <div className="flex items-center justify-between py-1">
+                    <span className="text-sm text-muted-foreground">Tags</span>
+                    <div className="flex flex-wrap gap-1">
+                      {(record.tags as string[]).map((tag) => (
+                        <Badge key={tag} variant="secondary" className="text-xs">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

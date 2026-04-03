@@ -1,8 +1,15 @@
-import { useState, useEffect, useRef, useId } from "react";
+import { useState, useId } from "react";
 import { Play } from "lucide-react";
+import { toast } from "sonner";
+import { useInvalidate } from "@refinedev/core";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { pbClient } from "@/providers/pocketbase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -18,28 +25,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
-
-interface SchemaField {
-  name: string;
-  type: "string" | "number" | "boolean" | "select";
-  label?: string;
-  required?: boolean;
-  default?: unknown;
-  options?: string[];
-  placeholder?: string;
-}
-
-interface InputSchema {
-  fields: SchemaField[];
-}
+import { Field, FieldLabel, FieldDescription } from "@/components/ui/field";
+import { SchemaFormField, getFieldDefaults, type InputSchema } from "@/components/schema-form";
 
 interface RegisteredWorkflow {
+  id: string;
   name: string;
   fqn: string;
   triggerable: boolean;
-  cronSchedule: string;
-  inputSchema?: InputSchema;
+  cron_schedule: string;
+  input_schema?: InputSchema;
 }
 
 type TimingMode = "now" | "schedule" | "cron";
@@ -50,261 +45,164 @@ const TIMING_OPTIONS: { value: TimingMode; label: string }[] = [
   { value: "cron", label: "Cron" },
 ];
 
-function SchemaFormField({
-  field,
-  value,
-  onChange,
-  id,
-}: {
-  field: SchemaField;
-  value: unknown;
-  onChange: (value: unknown) => void;
-  id: string;
-}) {
-  const fieldId = `${id}-field-${field.name}`;
-
-  if (field.type === "boolean") {
-    return (
-      <div className="flex items-center justify-between py-1">
-        <label htmlFor={fieldId} className="text-sm font-medium">
-          {field.label ?? field.name}
-        </label>
-        <Switch
-          id={fieldId}
-          checked={!!value}
-          onCheckedChange={(checked) => onChange(checked)}
-        />
-      </div>
-    );
-  }
-
-  if (field.type === "select" && field.options) {
-    return (
-      <div className="space-y-1.5">
-        <label htmlFor={fieldId} className="text-sm font-medium">
-          {field.label ?? field.name}
-          {field.required && <span className="text-destructive ml-0.5">*</span>}
-        </label>
-        <Select value={String(value ?? "")} onValueChange={(v) => onChange(v)}>
-          <SelectTrigger id={fieldId}>
-            <SelectValue placeholder={`Select ${field.label ?? field.name}`} />
-          </SelectTrigger>
-          <SelectContent>
-            {field.options.map((opt) => (
-              <SelectItem key={opt} value={opt}>
-                {opt}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-1.5">
-      <label htmlFor={fieldId} className="text-sm font-medium">
-        {field.label ?? field.name}
-        {field.required && <span className="text-destructive ml-0.5">*</span>}
-      </label>
-      <Input
-        id={fieldId}
-        type={field.type === "number" ? "number" : "text"}
-        value={String(value ?? "")}
-        onChange={(e) =>
-          onChange(
-            field.type === "number"
-              ? e.target.value === "" ? 0 : Number(e.target.value)
-              : e.target.value
-          )
-        }
-        placeholder={field.placeholder ?? ""}
-        className={field.type === "number" ? "font-mono" : ""}
-      />
-    </div>
-  );
-}
+const triggerFormSchema = z.object({
+  selectedFqn: z.string().min(1),
+  input: z.string(),
+  timing: z.enum(["now", "schedule", "cron"]),
+  scheduledAt: z.string(),
+  cronExpression: z.string(),
+  jitter: z.string(),
+  formValues: z.record(z.unknown()),
+});
+type TriggerFormValues = z.infer<typeof triggerFormSchema>;
 
 export function TriggerRunButton() {
   const id = useId();
+  const invalidate = useInvalidate();
   const [open, setOpen] = useState(false);
-  const [workflows, setWorkflows] = useState<RegisteredWorkflow[]>([]);
-  const [loadingWorkflows, setLoadingWorkflows] = useState(false);
-  const [selectedFqn, setSelectedFqn] = useState("");
-  const [input, setInput] = useState("{}");
-  const [timing, setTiming] = useState<TimingMode>("now");
-  const [scheduledAt, setScheduledAt] = useState("");
-  const [cronExpression, setCronExpression] = useState("");
-  const [jitter, setJitter] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const resultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [formValues, setFormValues] = useState<Record<string, unknown>>({});
+  const { control, handleSubmit: rhfSubmit, reset, watch, setValue, getValues } = useForm<TriggerFormValues>({
+    resolver: zodResolver(triggerFormSchema),
+    defaultValues: {
+      selectedFqn: "",
+      input: "{}",
+      timing: "now",
+      scheduledAt: "",
+      cronExpression: "",
+      jitter: "",
+      formValues: {},
+    },
+  });
+
+  const timing = watch("timing");
+  const selectedFqn = watch("selectedFqn");
+  const formValues = watch("formValues");
+  const input = watch("input");
+
+  const { data: workflows = [], isLoading } = useQuery<RegisteredWorkflow[]>({
+    queryKey: ["registered-workflows-triggerable"],
+    queryFn: () =>
+      pbClient
+        .collection("pt_workflows")
+        .getFullList<RegisteredWorkflow>({ filter: "triggerable = true" }),
+    staleTime: 10 * 60 * 1000,
+    enabled: open,
+  });
+  const loadingWorkflows = isLoading && open;
 
   const selectedWorkflow = workflows.find((w) => w.fqn === selectedFqn);
-  const schema = selectedWorkflow?.inputSchema;
+  const schema = selectedWorkflow?.input_schema;
   const hasSchema = schema?.fields && schema.fields.length > 0;
 
-  useEffect(() => {
-    if (!open) return;
-    setLoadingWorkflows(true);
-    pbClient
-      .send<RegisteredWorkflow[]>("/api/pt/registered", { method: "GET" })
-      .then((data) => {
-        setWorkflows(data.filter((w) => w.triggerable));
-      })
-      .catch(() => {})
-      .finally(() => setLoadingWorkflows(false));
-  }, [open]);
-
-  // Clear auto-dismiss timer on unmount
-  useEffect(() => {
-    return () => {
-      if (resultTimerRef.current !== null) {
-        clearTimeout(resultTimerRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!selectedFqn) return;
-    const wf = workflows.find((w) => w.fqn === selectedFqn);
-    if (wf?.inputSchema?.fields) {
-      const defaults: Record<string, unknown> = {};
-      for (const field of wf.inputSchema.fields) {
-        if (field.default !== undefined) {
-          defaults[field.name] = field.default;
-        } else if (field.type === "boolean") {
-          defaults[field.name] = false;
-        } else if (field.type === "number") {
-          defaults[field.name] = 0;
-        } else {
-          defaults[field.name] = "";
-        }
-      }
-      setFormValues(defaults);
+  const handleWorkflowChange = (fqn: string) => {
+    const wf = workflows.find((w) => w.fqn === fqn);
+    if (wf?.input_schema?.fields) {
+      const defaults = getFieldDefaults(wf.input_schema.fields);
+      setValue("selectedFqn", fqn);
+      setValue("formValues", defaults);
+    } else {
+      setValue("selectedFqn", fqn);
+      setValue("formValues", {});
     }
-  }, [selectedFqn, workflows]);
-
-  const scheduleResultDismiss = () => {
-    if (resultTimerRef.current !== null) {
-      clearTimeout(resultTimerRef.current);
-    }
-    resultTimerRef.current = setTimeout(() => {
-      setResult(null);
-      resultTimerRef.current = null;
-    }, 4000);
-  };
-
-  const reset = () => {
-    if (resultTimerRef.current !== null) {
-      clearTimeout(resultTimerRef.current);
-      resultTimerRef.current = null;
-    }
-    setSelectedFqn("");
-    setInput("{}");
-    setTiming("now");
-    setScheduledAt("");
-    setCronExpression("");
-    setJitter("");
-    setFormValues({});
-    setResult(null);
-    setError(null);
   };
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
-    if (!next) reset();
+    if (!next) {
+      reset();
+      setError(null);
+    }
   };
 
-  const handleSubmit = async () => {
-    setSubmitting(true);
-    setResult(null);
-    setError(null);
-
-    try {
-      let parsedInput: unknown;
-      if (hasSchema) {
-        for (const field of schema!.fields) {
-          if (field.required && (formValues[field.name] === "" || formValues[field.name] === undefined)) {
-            setError(`${field.label ?? field.name} is required`);
-            setSubmitting(false);
-            return;
-          }
-        }
-        parsedInput = formValues;
-      } else {
-        try {
-          parsedInput = JSON.parse(input);
-        } catch {
-          setError("Invalid JSON input");
-          setSubmitting(false);
-          return;
-        }
-      }
-
-      if (timing === "now") {
+  const submitMutation = useMutation({
+    mutationFn: async (parsedInput: unknown) => {
+      const values = getValues();
+      if (values.timing === "now") {
         const res = await pbClient.send<{ workflow_id: string }>(
           "/api/pt/trigger",
           {
             method: "POST",
             body: {
-              workflow_fqn: selectedFqn,
+              workflow_fqn: values.selectedFqn,
               input: parsedInput,
             },
           }
         );
-        setResult(`Workflow triggered: ${res.workflow_id}`);
-        scheduleResultDismiss();
-      } else if (timing === "schedule") {
-        if (!scheduledAt) {
-          setError("Scheduled time is required");
-          setSubmitting(false);
-          return;
-        }
-        const res = await pbClient.send<{ id: string }>(
-          "/api/pt/schedules",
-          {
-            method: "POST",
-            body: {
-              workflow_fqn: selectedFqn,
-              input: parsedInput,
-              type: "once",
-              scheduled_at: new Date(scheduledAt).toISOString(),
-            },
-          }
-        );
-        setResult(`Schedule created: ${res.id}`);
-        scheduleResultDismiss();
-      } else if (timing === "cron") {
-        if (!cronExpression) {
-          setError("Cron expression is required");
-          setSubmitting(false);
-          return;
-        }
-        const res = await pbClient.send<{ id: string }>(
-          "/api/pt/schedules",
-          {
-            method: "POST",
-            body: {
-              workflow_fqn: selectedFqn,
-              input: parsedInput,
-              type: "cron",
-              cron_expression: cronExpression,
-              ...(jitter ? { jitter } : {}),
-            },
-          }
-        );
-        setResult(`Cron schedule created: ${res.id}`);
-        scheduleResultDismiss();
+        return { timing: values.timing as TimingMode, id: res.workflow_id };
+      } else if (values.timing === "schedule") {
+        const res = await pbClient
+          .collection("pt_schedules")
+          .create<{ id: string }>({
+            workflow_fqn: values.selectedFqn,
+            input: parsedInput,
+            type: "once",
+            enabled: true,
+            scheduled_at: new Date(values.scheduledAt).toISOString(),
+          });
+        return { timing: values.timing as TimingMode, id: res.id };
+      } else {
+        const res = await pbClient
+          .collection("pt_schedules")
+          .create<{ id: string }>({
+            workflow_fqn: values.selectedFqn,
+            input: parsedInput,
+            type: "cron",
+            enabled: true,
+            cron_expression: values.cronExpression,
+            ...(values.jitter ? { jitter: values.jitter } : {}),
+          });
+        return { timing: values.timing as TimingMode, id: res.id };
       }
-    } catch (err: any) {
+    },
+    onSuccess: (data) => {
+      if (data.timing === "now") {
+        toast.success(`Workflow triggered: ${data.id}`);
+        invalidate({ resource: "pt_workflow_status", invalidates: ["list"] });
+      } else if (data.timing === "schedule") {
+        toast.success(`Schedule created: ${data.id}`);
+      } else {
+        toast.success(`Cron schedule created: ${data.id}`);
+      }
+      setOpen(false);
+    },
+    onError: (err: any) => {
       setError(err?.message || "Failed to submit");
-    } finally {
-      setSubmitting(false);
+    },
+  });
+
+  const handleSubmit = () => {
+    setError(null);
+    const values = getValues();
+
+    let parsedInput: unknown;
+    if (hasSchema) {
+      for (const field of schema!.fields) {
+        if (field.required && (values.formValues[field.name] === "" || values.formValues[field.name] === undefined)) {
+          setError(`${field.label ?? field.name} is required`);
+          return;
+        }
+      }
+      parsedInput = values.formValues;
+    } else {
+      try {
+        parsedInput = JSON.parse(values.input);
+      } catch {
+        setError("Invalid JSON input");
+        return;
+      }
     }
+
+    if (values.timing === "schedule" && !values.scheduledAt) {
+      setError("Scheduled time is required");
+      return;
+    }
+    if (values.timing === "cron" && !values.cronExpression) {
+      setError("Cron expression is required");
+      return;
+    }
+
+    submitMutation.mutate(parsedInput);
   };
 
   const handleTimingKeyDown = (e: React.KeyboardEvent, current: TimingMode) => {
@@ -317,7 +215,7 @@ export function TriggerRunButton() {
     }
     if (next !== null) {
       e.preventDefault();
-      setTiming(TIMING_OPTIONS[next].value);
+      setValue("timing", TIMING_OPTIONS[next].value);
     }
   };
 
@@ -339,13 +237,11 @@ export function TriggerRunButton() {
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="space-y-1.5">
-            <label htmlFor={`${id}-workflow`} className="text-sm font-medium">
-              Workflow
-            </label>
+          <Field>
+            <FieldLabel htmlFor={`${id}-workflow`}>Workflow</FieldLabel>
             <Select
               value={selectedFqn}
-              onValueChange={setSelectedFqn}
+              onValueChange={handleWorkflowChange}
               disabled={loadingWorkflows}
             >
               <SelectTrigger id={`${id}-workflow`}>
@@ -369,42 +265,44 @@ export function TriggerRunButton() {
                 )}
               </SelectContent>
             </Select>
-          </div>
+          </Field>
 
           {hasSchema ? (
             <div className="space-y-3">
-              <span className="text-sm font-medium">Input</span>
+              <FieldLabel>Input</FieldLabel>
               {schema!.fields.map((field) => (
                 <SchemaFormField
                   key={field.name}
                   field={field}
                   value={formValues[field.name]}
-                  onChange={(v) =>
-                    setFormValues((prev) => ({ ...prev, [field.name]: v }))
-                  }
+                  onChange={(v) => {
+                    const current = getValues("formValues");
+                    setValue("formValues", { ...current, [field.name]: v });
+                  }}
                   id={id}
                 />
               ))}
             </div>
           ) : (
-            <div className="space-y-1.5">
-              <label htmlFor={`${id}-input`} className="text-sm font-medium">
-                Input
-              </label>
-              <textarea
-                id={`${id}-input`}
-                className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="{}"
+            <Field>
+              <FieldLabel htmlFor={`${id}-input`}>Input</FieldLabel>
+              <Controller
+                control={control}
+                name="input"
+                render={({ field }) => (
+                  <Textarea
+                    {...field}
+                    id={`${id}-input`}
+                    className="min-h-[120px] font-mono"
+                    placeholder="{}"
+                  />
+                )}
               />
-            </div>
+            </Field>
           )}
 
-          <div className="space-y-1.5">
-            <span id={`${id}-timing-label`} className="text-sm font-medium">
-              Timing
-            </span>
+          <Field>
+            <FieldLabel id={`${id}-timing-label`}>Timing</FieldLabel>
             <div
               role="radiogroup"
               aria-labelledby={`${id}-timing-label`}
@@ -421,82 +319,70 @@ export function TriggerRunButton() {
                       ? "bg-background font-medium shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
-                  onClick={() => setTiming(opt.value)}
+                  onClick={() => setValue("timing", opt.value)}
                   onKeyDown={(e) => handleTimingKeyDown(e, opt.value)}
                 >
                   {opt.label}
                 </button>
               ))}
             </div>
-          </div>
+          </Field>
 
           {timing === "schedule" && (
-            <div className="space-y-1.5">
-              <label
-                htmlFor={`${id}-scheduled-at`}
-                className="text-sm font-medium"
-              >
-                Scheduled Time
-              </label>
-              <Input
-                id={`${id}-scheduled-at`}
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={(e) => setScheduledAt(e.target.value)}
+            <Field>
+              <FieldLabel htmlFor={`${id}-scheduled-at`}>Scheduled Time</FieldLabel>
+              <Controller
+                control={control}
+                name="scheduledAt"
+                render={({ field }) => (
+                  <Input
+                    {...field}
+                    id={`${id}-scheduled-at`}
+                    type="datetime-local"
+                  />
+                )}
               />
-            </div>
+            </Field>
           )}
 
           {timing === "cron" && (
             <>
-              <div className="space-y-1.5">
-                <label
-                  htmlFor={`${id}-cron`}
-                  className="text-sm font-medium"
-                >
-                  Cron Expression
-                </label>
-                <Input
-                  id={`${id}-cron`}
-                  className="font-mono"
-                  value={cronExpression}
-                  onChange={(e) => setCronExpression(e.target.value)}
-                  placeholder="0 * * * *"
+              <Field>
+                <FieldLabel htmlFor={`${id}-cron`}>Cron Expression</FieldLabel>
+                <Controller
+                  control={control}
+                  name="cronExpression"
+                  render={({ field }) => (
+                    <Input
+                      {...field}
+                      id={`${id}-cron`}
+                      className="font-mono"
+                      placeholder="0 * * * *"
+                    />
+                  )}
                 />
-              </div>
-              <div className="space-y-1.5">
-                <label
-                  htmlFor={`${id}-jitter`}
-                  className="text-sm font-medium"
-                >
-                  Jitter (optional)
-                </label>
-                <Input
-                  id={`${id}-jitter`}
-                  className="font-mono"
-                  value={jitter}
-                  onChange={(e) => setJitter(e.target.value)}
-                  placeholder="30s"
-                  aria-describedby={`${id}-jitter-hint`}
-                />
-                <p
-                  id={`${id}-jitter-hint`}
-                  className="text-xs text-muted-foreground"
-                >
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`${id}-jitter`}>Jitter (optional)</FieldLabel>
+                <FieldDescription>
                   Random delay before each execution (e.g. 30s, 2m)
-                </p>
-              </div>
+                </FieldDescription>
+                <Controller
+                  control={control}
+                  name="jitter"
+                  render={({ field }) => (
+                    <Input
+                      {...field}
+                      id={`${id}-jitter`}
+                      className="font-mono"
+                      placeholder="30s"
+                    />
+                  )}
+                />
+              </Field>
             </>
           )}
 
-          {result && (
-            <div
-              role="status"
-              className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-400"
-            >
-              {result}
-            </div>
-          )}
           {error && (
             <div
               role="alert"
@@ -509,9 +395,9 @@ export function TriggerRunButton() {
           <div className="flex justify-end">
             <Button
               onClick={handleSubmit}
-              disabled={!selectedFqn || submitting}
+              disabled={!selectedFqn || submitMutation.isPending}
             >
-              {submitting ? "Submitting..." : "Submit"}
+              {submitMutation.isPending ? "Submitting..." : "Submit"}
             </Button>
           </div>
         </div>

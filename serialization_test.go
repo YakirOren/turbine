@@ -3,12 +3,11 @@ package turbine
 import "testing"
 
 func TestSerializerRoundTrip(t *testing.T) {
-	s := newJSONSerializer[string]()
-	encoded, err := s.Encode("hello")
+	encoded, err := encodeJSON("hello")
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := s.Decode(encoded)
+	decoded, err := decodeJSON[string](encoded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -18,12 +17,11 @@ func TestSerializerRoundTrip(t *testing.T) {
 }
 
 func TestSerializerNil(t *testing.T) {
-	s := newJSONSerializer[*string]()
-	encoded, err := s.Encode(nil)
+	encoded, err := encodeJSON[*string](nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := s.Decode(encoded)
+	decoded, err := decodeJSON[*string](encoded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,13 +35,12 @@ func TestSerializerStruct(t *testing.T) {
 		Name  string
 		Value int
 	}
-	s := newJSONSerializer[testData]()
 	input := testData{Name: "test", Value: 42}
-	encoded, err := s.Encode(input)
+	encoded, err := encodeJSON(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := s.Decode(encoded)
+	decoded, err := decodeJSON[testData](encoded)
 	if err != nil {
 		t.Fatal(err)
 	}

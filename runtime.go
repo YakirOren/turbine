@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -51,6 +52,9 @@ type Runtime struct {
 
 	scheduleManager *scheduleManager
 
+	// Disabled compile-time schedules (key = schedule name, value = struct{}{})
+	disabledSchedules *sync.Map
+
 	productSender ProductSender
 }
 
@@ -85,10 +89,11 @@ func New(app core.App, config Config) *Runtime {
 		config:                  &config,
 		applicationVersion:      config.ApplicationVersion,
 		executorID:              config.ExecutorID,
-		workflowsWg:            &sync.WaitGroup{},
+		workflowsWg:             &sync.WaitGroup{},
 		workflowRegistry:        &sync.Map{},
 		workflowCustomNameToFQN: &sync.Map{},
 		activeWorkflowIDs:       &sync.Map{},
+		disabledSchedules:       &sync.Map{},
 		productSender:           config.ProductSender,
 	}
 
@@ -117,6 +122,16 @@ func (rt *Runtime) Launch() error {
 	}
 	if len(handles) > 0 {
 		rt.app.Logger().Info("recovered pending workflows", "count", len(handles))
+	}
+
+	// Sync compile-time schedules to pt_schedules and load disabled state.
+	if err := rt.syncCompileTimeSchedules(); err != nil {
+		rt.app.Logger().Error("failed to sync compile-time schedules", "error", err)
+	}
+
+	// Sync registered workflows to pt_workflows collection.
+	if err := rt.syncRegisteredWorkflows(); err != nil {
+		rt.app.Logger().Error("failed to sync registered workflows", "error", err)
 	}
 
 	rt.launched.Store(true)
@@ -213,8 +228,8 @@ func (rt *Runtime) GetApplicationVersion() string { return rt.applicationVersion
 func (rt *Runtime) GetExecutorID() string         { return rt.executorID }
 func (rt *Runtime) GetApplicationID() string      { return rt.applicationID }
 func (rt *Runtime) IsLaunched() bool              { return rt.launched.Load() }
-func (rt *Runtime) App() core.App                { return rt.app }
-func (rt *Runtime) Queues() []WorkflowQueue      { return rt.queueRunner.listQueues() }
+func (rt *Runtime) App() core.App                 { return rt.app }
+func (rt *Runtime) Queues() []WorkflowQueue       { return rt.queueRunner.listQueues() }
 
 // SetProductSender sets the product sender after construction.
 // Use this when the sender needs a reference to the runtime (e.g., WorkflowSender).
@@ -222,32 +237,36 @@ func (rt *Runtime) SetProductSender(sender ProductSender) {
 	rt.productSender = sender
 }
 
-// ScheduledWorkflow describes a registered scheduled workflow.
-type ScheduledWorkflow struct {
-	Name         string `json:"name"`
-	FQN          string `json:"fqn"`
-	CronSchedule string `json:"cronSchedule"`
-}
-
-// ScheduledWorkflows returns all workflows registered with a cron schedule.
-func (rt *Runtime) ScheduledWorkflows() []ScheduledWorkflow {
-	var result []ScheduledWorkflow
+// syncCompileTimeSchedules ensures every compile-time scheduled workflow has a
+// corresponding record in pt_schedules (type = scheduleTypeCompile). This lets the UI
+// and toggle API treat all schedules uniformly.
+func (rt *Runtime) syncCompileTimeSchedules() error {
 	rt.workflowRegistry.Range(func(_, value any) bool {
 		entry, ok := value.(workflowRegistryEntry)
-		if ok && entry.CronSchedule != "" {
-			name := entry.Name
-			if name == "" {
-				name = entry.FQN
-			}
-			result = append(result, ScheduledWorkflow{
-				Name:         name,
-				FQN:          entry.FQN,
-				CronSchedule: entry.CronSchedule,
-			})
+		if !ok || entry.CronSchedule == "" {
+			return true
 		}
+		fqn := entry.FQN
+
+		existing, err := findCompileScheduleByFQN(rt.app, fqn)
+		if err == nil {
+			// Update cron expression in case it changed in code.
+			if existing.CronExpression() != entry.CronSchedule {
+				existing.SetCronExpression(entry.CronSchedule)
+				_ = rt.app.Save(existing)
+			}
+			// Load disabled state into memory.
+			if !existing.Enabled() {
+				rt.disabledSchedules.Store(fqn, struct{}{})
+			}
+			return true
+		}
+
+		// Create a new record.
+		_, _ = createSchedule(rt.app, fqn, nil, scheduleTypeCompile, entry.CronSchedule, time.Time{})
 		return true
 	})
-	return result
+	return nil
 }
 
 type RegisteredWorkflow struct {
@@ -281,6 +300,67 @@ func (rt *Runtime) RegisteredWorkflows() []RegisteredWorkflow {
 		return true
 	})
 	return result
+}
+
+// syncRegisteredWorkflows upserts every registered workflow into the pt_workflows
+// collection so the standard PocketBase API can serve them.
+func (rt *Runtime) syncRegisteredWorkflows() error {
+	rt.workflowRegistry.Range(func(_, value any) bool {
+		entry, ok := value.(workflowRegistryEntry)
+		if !ok {
+			return true
+		}
+		fqn := entry.FQN
+		name := entry.Name
+		if name == "" {
+			name = fqn
+		}
+
+		// Try to find existing record by FQN.
+		existing, _ := rt.app.FindFirstRecordByFilter(collectionWorkflows, "fqn = {:fqn}", dbx.Params{"fqn": fqn})
+		var rec *core.Record
+		if existing != nil {
+			rec = existing
+		} else {
+			col, err := rt.app.FindCollectionByNameOrId(collectionWorkflows)
+			if err != nil {
+				rt.app.Logger().Error("failed to find pt_workflows collection", "error", err)
+				return true
+			}
+			rec = core.NewRecord(col)
+		}
+
+		rec.Set("name", name)
+		rec.Set("fqn", fqn)
+		rec.Set("triggerable", entry.Triggerable)
+		rec.Set("cron_schedule", entry.CronSchedule)
+		rec.Set("input_schema", entry.InputSchema)
+		rec.Set("tags", entry.Tags)
+
+		if err := rt.app.Save(rec); err != nil {
+			rt.app.Logger().Error("failed to sync workflow to pt_workflows", "fqn", fqn, "error", err)
+		}
+		return true
+	})
+
+	// Remove records for workflows that are no longer registered.
+	var registeredFQNs []any
+	rt.workflowRegistry.Range(func(key, _ any) bool {
+		registeredFQNs = append(registeredFQNs, key)
+		return true
+	})
+	if len(registeredFQNs) > 0 {
+		_, err := rt.app.DB().Delete(collectionWorkflows, dbx.NotIn("fqn", registeredFQNs...)).Execute()
+		if err != nil {
+			return err
+		}
+	} else {
+		_, err := rt.app.DB().Delete(collectionWorkflows, nil).Execute()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (rt *Runtime) triggerByFQNWithOpts(fqn string, rawInput json.RawMessage, extraOpts ...WorkflowOption) (string, error) {

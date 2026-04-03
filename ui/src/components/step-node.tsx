@@ -1,5 +1,6 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { cn } from "@/lib/utils";
+import { formatDuration } from "@/lib/format";
 import {
   CheckCircle,
   XCircle,
@@ -26,12 +27,6 @@ const statusIcon: Record<string, React.ReactNode> = {
   error: <XCircle className="h-3 w-3 text-red-400" />,
   running: <Loader2 className="h-3 w-3 animate-spin text-blue-400" />,
 };
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
-}
 
 const statusBorder: Record<string, string> = {
   success: "border-green-500/40",
