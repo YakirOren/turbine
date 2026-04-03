@@ -167,6 +167,9 @@ export function WorkflowSidebar({
                     />
                   )}
                 </SheetTitle>
+                {typeof record.summary === "string" && record.summary && (
+                  <p className="text-sm text-muted-foreground mt-1">{record.summary}</p>
+                )}
               </SheetHeader>
 
               {/* Actions: Show Steps is primary, Cancel/Resume only when applicable, Delete separated */}

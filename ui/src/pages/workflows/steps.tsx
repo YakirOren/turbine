@@ -324,7 +324,14 @@ function StepFlowContent({workflowId}: { workflowId: string }) {
                 return (
                     <div className="flex items-center border-b px-4 py-2">
                         <div className="flex flex-col gap-0.5">
-                            <span className="font-medium">{workflow.name as string}</span>
+                            <span className="font-medium">
+                                {workflow.name as string}
+                                {typeof workflow.summary === "string" && workflow.summary && (
+                                    <span className="ml-2 font-normal text-sm text-muted-foreground">
+                                        &middot; {workflow.summary as string}
+                                    </span>
+                                )}
+                            </span>
                             <span className="font-mono text-xs text-muted-foreground">
                 {workflow.id as string}
               </span>

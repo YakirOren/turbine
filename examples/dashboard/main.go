@@ -83,7 +83,13 @@ func ShipOrder(ctx context.Context) (string, error) {
 
 // OrderWorkflow demonstrates a multi-step workflow with both
 // sequential and parallel steps, visible in the dashboard.
-func OrderWorkflow(ctx turbine.Context, orderID string) (string, error) {
+type OrderInput struct {
+	OrderID  string `json:"order_id"`
+	Customer string `json:"customer"`
+}
+
+func OrderWorkflow(ctx turbine.Context, input OrderInput) (string, error) {
+	orderID := input.OrderID
 	ctx.SetAppStatus("validating", "yellow")
 
 	// Step 1: Validate
@@ -170,7 +176,18 @@ func main() {
 		ProductSender: &LogSender{},
 	})
 
-	turbine.Register(rt, OrderWorkflow, turbine.WithDashboardTrigger())
+	turbine.Register(rt, OrderWorkflow,
+		turbine.WithDashboardTrigger(),
+		turbine.WithSummaryFunc(func(in OrderInput) string {
+			return fmt.Sprintf("Order %s for %s", in.OrderID, in.Customer)
+		}),
+		turbine.WithInputSchema(map[string]any{
+			"fields": []map[string]any{
+				{"name": "order_id", "type": "string", "label": "Order ID", "required": true, "placeholder": "ORD-123"},
+				{"name": "customer", "type": "string", "label": "Customer", "required": true, "placeholder": "Alice"},
+			},
+		}),
+	)
 
 	// Mount the dashboard at /_/turbine/
 	dashboard.Mount(app, rt)
@@ -180,7 +197,10 @@ func main() {
 		e.Router.POST("/order/{id}", func(re *core.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
-			handle, err := turbine.Run(rt, OrderWorkflow, id)
+			handle, err := turbine.Run(rt, OrderWorkflow, OrderInput{
+				OrderID:  id,
+				Customer: re.Request.URL.Query().Get("customer"),
+			})
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}

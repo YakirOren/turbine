@@ -24,6 +24,7 @@ Register a workflow function. Options:
 | `WithDashboardTrigger()` | Enable triggering from the dashboard UI |
 | `WithTags(tags...)` | Tags for filtering in the dashboard |
 | `WithInputSchema(schema)` | Input schema for typed dashboard forms |
+| `WithSummaryFunc[P](fn)` | Generate a one-line summary from the input (max 200 chars) |
 
 ## `turbine.Run`
 

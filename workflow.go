@@ -56,6 +56,7 @@ type workflowOptions struct {
 	Timeout             time.Duration
 	Deadline            time.Time
 	Tags                []string
+	Summary             string
 	alreadyEncodedInput bool
 	isDequeue           bool
 	isRecovery          bool
@@ -124,6 +125,10 @@ func withTags(tags []string) WorkflowOption {
 	return func(o *workflowOptions) { o.Tags = tags }
 }
 
+func withSummary(summary string) WorkflowOption {
+	return func(p *workflowOptions) { p.Summary = summary }
+}
+
 /*******************************/
 /******* WORKFLOW HANDLES *****/
 /*******************************/
@@ -147,7 +152,7 @@ func (h *baseHandle) GetStatus() (Status, error) {
 		return h.runtime.systemDB.listWorkflows(h.runtime.ctx, listWorkflowsDBInput{
 			workflowIDs: []string{h.workflowID},
 		})
-	}, withRetrierLogger(h.runtime.app.Logger()))
+	}, withRetrierLogger(h.runtime.app.Logger()), withMaxRetries(3))
 	if err != nil {
 		return Status{}, fmt.Errorf("failed to get workflow status: %w", err)
 	}
@@ -223,6 +228,7 @@ type wrappedWorkflowFunc func(rt *Runtime, input any, opts ...WorkflowOption) (H
 // workflowRegistryEntry stores a registered workflow's metadata.
 type workflowRegistryEntry struct {
 	wrappedFunction wrappedWorkflowFunc
+	summaryFunc     func(encodedInput *string) string
 	MaxRetries      int
 	Name            string
 	FQN             string
@@ -239,6 +245,7 @@ type workflowRegistrationOptions struct {
 	triggerable  bool
 	inputSchema  map[string]any
 	tags         []string
+	summaryFunc  func(encodedInput *string) string
 }
 
 // WorkflowRegistrationOption configures workflow registration.
@@ -270,6 +277,51 @@ func WithInputSchema(schema map[string]any) WorkflowRegistrationOption {
 
 func WithTags(tags ...string) WorkflowRegistrationOption {
 	return func(p *workflowRegistrationOptions) { p.tags = tags }
+}
+
+// WithSummaryFunc registers a function that generates a human-readable summary
+// from the workflow input. The summary is computed once at workflow start
+// and stored in the database. Maximum 200 characters.
+func WithSummaryFunc[P any](fn func(P) string) WorkflowRegistrationOption {
+	return func(opts *workflowRegistrationOptions) {
+		opts.summaryFunc = func(encodedInput *string) string {
+			typedInput, err := decodeJSON[P](encodedInput)
+			if err != nil {
+				return ""
+			}
+			return fn(typedInput)
+		}
+	}
+}
+
+const maxSummaryLength = 200
+
+func computeSummary(summaryFunc func(*string) string, input any, rt *Runtime) (result string) {
+	defer func() {
+		if r := recover(); r != nil {
+			rt.app.Logger().Warn("summary func panicked", "error", r, "source", "system")
+			result = ""
+		}
+	}()
+
+	var encodedInput *string
+	switch v := input.(type) {
+	case *string:
+		encodedInput = v
+	default:
+		// Direct call: encode to JSON first so summaryFunc can decode to P
+		encoded, err := encodeJSON[any](input)
+		if err != nil {
+			return ""
+		}
+		encodedInput = encoded
+	}
+
+	result = summaryFunc(encodedInput)
+	if len([]rune(result)) > maxSummaryLength {
+		result = string([]rune(result)[:maxSummaryLength])
+	}
+	return result
 }
 
 func resolveWorkflowFunctionName[P any, R any](fn Workflow[P, R]) string {
@@ -320,6 +372,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 
 	entry := workflowRegistryEntry{
 		wrappedFunction: wrapped,
+		summaryFunc:     regOpts.summaryFunc,
 		FQN:             fqn,
 		MaxRetries:      regOpts.maxRetries,
 		Name:            regOpts.name,
@@ -445,6 +498,9 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	if len(params.Tags) == 0 && len(registered.Tags) > 0 {
 		params.Tags = registered.Tags
 	}
+	if params.Summary == "" && registered.summaryFunc != nil {
+		params.Summary = computeSummary(registered.summaryFunc, input, rt)
+	}
 
 	// Validate queue options
 	if params.QueuePartitionKey != "" && params.QueueName == "" {
@@ -501,6 +557,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		Timeout:            params.Timeout,
 		Deadline:           params.Deadline,
 		Tags:               params.Tags,
+		Summary:            params.Summary,
 	}
 
 	ownerXID := core.GenerateDefaultRandomId()
@@ -1031,7 +1088,7 @@ func Retrieve[R any](rt *Runtime, workflowID string) Handle[R] {
 func (rt *Runtime) Cancel(workflowID string) error {
 	err := retry(rt.ctx, func() error {
 		return rt.systemDB.cancelWorkflow(rt.ctx, cancelWorkflowDBInput{workflowID: workflowID})
-	}, withRetrierLogger(rt.app.Logger()))
+	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
 	if err != nil {
 		return err
 	}
@@ -1047,7 +1104,7 @@ func (rt *Runtime) Resume(workflowID string) error {
 			executorID: rt.executorID,
 			appVersion: rt.applicationVersion,
 		})
-	}, withRetrierLogger(rt.app.Logger()))
+	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
 	if err != nil {
 		return err
 	}
@@ -1059,14 +1116,14 @@ func (rt *Runtime) Resume(workflowID string) error {
 func (rt *Runtime) List(input listWorkflowsDBInput) ([]Status, error) {
 	return retryWithResult(rt.ctx, func() ([]Status, error) {
 		return rt.systemDB.listWorkflows(rt.ctx, input)
-	}, withRetrierLogger(rt.app.Logger()))
+	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
 }
 
 // Steps returns the execution steps for a workflow.
 func (rt *Runtime) Steps(workflowID string) ([]StepInfo, error) {
 	steps, err := retryWithResult(rt.ctx, func() ([]stepInfo, error) {
 		return rt.systemDB.getWorkflowSteps(rt.ctx, getWorkflowStepsInput{workflowID: workflowID})
-	}, withRetrierLogger(rt.app.Logger()))
+	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
 	if err != nil {
 		return nil, err
 	}

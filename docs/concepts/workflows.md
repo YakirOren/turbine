@@ -37,6 +37,35 @@ turbine.Register(rt, myWorkflow,
 )
 ```
 
+## Workflow Summary
+
+When you have many instances of the same workflow, the list view just shows repeated names. `WithSummaryFunc` generates a one-line description from the input so you can tell them apart at a glance.
+
+```go
+type OrderInput struct {
+    OrderID  string `json:"order_id"`
+    Customer string `json:"customer"`
+}
+
+turbine.Register(rt, OrderWorkflow,
+    turbine.WithSummaryFunc(func(in OrderInput) string {
+        return fmt.Sprintf("Order %s for %s", in.OrderID, in.Customer)
+    }),
+)
+```
+
+The summary is:
+- Computed once when the workflow starts, from the decoded input
+- Stored in the database and shown in the dashboard list, detail sidebar, and steps page
+- Limited to 200 characters (silently truncated)
+- Safe — if the function panics, the workflow still runs with an empty summary
+
+```go
+// Access it programmatically
+status, _ := handle.GetStatus()
+fmt.Println(status.Summary) // "Order ORD-123 for Alice"
+```
+
 ## Input Schema
 
 When a workflow is registered with `WithDashboardTrigger()`, the dashboard shows a raw JSON textarea for the input. You can provide an input schema to render a typed form instead:

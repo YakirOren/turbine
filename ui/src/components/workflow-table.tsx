@@ -33,6 +33,7 @@ export interface WorkflowRecord {
   priority: number;
   app_status: string;
   app_status_color: string;
+  summary: string;
 }
 
 interface Props {
@@ -44,6 +45,7 @@ interface Props {
 const tableColumns = [
   { key: "created_at_epoch_ms", header: "Created At" },
   { key: "name", header: "Workflow Name" },
+  { key: "summary", header: "Summary" },
   { key: "status", header: "Status" },
   { key: "duration", header: "Duration" },
   { key: "app_status", header: "App Status" },
@@ -95,6 +97,11 @@ export function WorkflowTable({ filters, sorters, onRowClick }: Props) {
                       : "\u2014"}
                   </TableCell>
                   <TableCell>{row.name}</TableCell>
+                  <TableCell>
+                    <span className="block font-mono text-xs text-muted-foreground max-w-[300px] truncate">
+                      {row.summary || "\u2014"}
+                    </span>
+                  </TableCell>
                   <TableCell>
                     <StatusBadge status={row.status} />
                   </TableCell>

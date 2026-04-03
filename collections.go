@@ -189,6 +189,24 @@ func downCreateWorkflows(app core.App) error {
 	return app.Delete(col)
 }
 
+func init() {
+	core.AppMigrations.Register(func(app core.App) error {
+		col, err := app.FindCollectionByNameOrId(collectionStatus)
+		if err != nil {
+			return err
+		}
+		col.Fields.Add(&core.TextField{Name: "summary"})
+		return app.Save(col)
+	}, func(app core.App) error {
+		col, err := app.FindCollectionByNameOrId(collectionStatus)
+		if err != nil {
+			return nil
+		}
+		col.Fields.RemoveByName("summary")
+		return app.Save(col)
+	}, "pt_9_add_summary")
+}
+
 func upCreateCollections(app core.App) error {
 	// 1. Workflow status
 	wfStatus := core.NewBaseCollection(collectionStatus)

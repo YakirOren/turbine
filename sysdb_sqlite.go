@@ -120,14 +120,14 @@ func (s *sqliteSysDB) insertStatus(ctx context.Context, input insertStatusDBInpu
 		created_at_epoch_ms, recovery_attempts, updated_at_epoch_ms,
 		workflow_timeout_ms, workflow_deadline_epoch_ms,
 		inputs, deduplication_id, priority, queue_partition_key,
-		owner_xid, parent_workflow_id, tags
+		owner_xid, parent_workflow_id, tags, summary
 	) VALUES(
 		{:id}, {:status}, {:name}, {:queue_name},
 		{:executor_id}, {:app_version}, {:app_id},
 		{:created_at}, {:attempts}, {:updated_at},
 		{:timeout_ms}, {:deadline_ms},
 		{:inputs}, {:dedup_id}, {:priority}, {:partition_key},
-		{:owner_xid}, {:parent_wf_id}, {:tags}
+		{:owner_xid}, {:parent_wf_id}, {:tags}, {:summary}
 	)
 	ON CONFLICT (id)
 	DO UPDATE SET
@@ -191,6 +191,7 @@ func (s *sqliteSysDB) insertStatus(ctx context.Context, input insertStatusDBInpu
 			b, _ := json.Marshal(input.status.Tags)
 			return string(b)
 		}(),
+		"summary":          input.status.Summary,
 		"enqueued_status1": string(StatusEnqueued),
 		"enqueued_status2": string(StatusEnqueued),
 		"recovery_inc":     recoveryIncrement,
@@ -249,7 +250,7 @@ func (s *sqliteSysDB) listWorkflows(ctx context.Context, input listWorkflowsDBIn
 		"application_version", "application_id", "recovery_attempts", "queue_name",
 		"workflow_timeout_ms", "workflow_deadline_epoch_ms",
 		"deduplication_id", "priority", "queue_partition_key", "forked_from_workflow_id", "parent_workflow_id",
-		"app_status", "app_status_color", "tags",
+		"app_status", "app_status_color", "tags", "summary",
 	}
 	if input.loadInput {
 		cols = append(cols, "inputs")
@@ -324,6 +325,7 @@ func (s *sqliteSysDB) listWorkflows(ctx context.Context, input listWorkflowsDBIn
 		var appStatus, appStatusColor sql.NullString
 		var inputStr sql.NullString
 		var tagsStr sql.NullString
+		var summary sql.NullString
 
 		scanArgs := []any{
 			&wf.ID, &wf.Status, &wf.Name, &wf.ExecutorID,
@@ -331,7 +333,7 @@ func (s *sqliteSysDB) listWorkflows(ctx context.Context, input listWorkflowsDBIn
 			&appVersion, &wf.ApplicationID, &wf.Attempts,
 			&queueName, &timeoutMs, &deadlineMs,
 			&dedupID, &wf.Priority, &partitionKey, &forkedFrom, &parentWfID,
-			&appStatus, &appStatusColor, &tagsStr,
+			&appStatus, &appStatusColor, &tagsStr, &summary,
 		}
 		if input.loadInput {
 			scanArgs = append(scanArgs, &inputStr)
@@ -381,6 +383,9 @@ func (s *sqliteSysDB) listWorkflows(ctx context.Context, input listWorkflowsDBIn
 			if unmarshalErr := json.Unmarshal([]byte(tagsStr.String), &wf.Tags); unmarshalErr != nil {
 				s.app.Logger().Warn("failed to parse workflow tags", "workflow_id", wf.ID, "error", unmarshalErr)
 			}
+		}
+		if summary.Valid {
+			wf.Summary = summary.String
 		}
 
 		workflows = append(workflows, wf)
