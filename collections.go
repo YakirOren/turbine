@@ -5,11 +5,12 @@ import (
 )
 
 const (
-	collectionStatus     = "pf_workflow_status"
+	collectionStatus             = "pf_workflow_status"
 	collectionOperationOutputs   = "pf_operation_outputs"
 	collectionNotifications      = "pf_notifications"
 	collectionWorkflowEvents     = "pf_workflow_events"
 	collectionWorkflowEventsHist = "pf_workflow_events_history"
+	collectionSchedules          = "pf_schedules"
 )
 
 func init() {
@@ -111,11 +112,27 @@ func upCreateCollections(app core.App) error {
 		return err
 	}
 
+	// 6. Schedules (UI-created cron and one-time triggers)
+	schedules := core.NewBaseCollection(collectionSchedules)
+	schedules.Fields.Add(
+		&core.TextField{Name: "workflow_fqn", Required: true},
+		&core.JSONField{Name: "input"},
+		&core.TextField{Name: "type", Required: true},
+		&core.TextField{Name: "cron_expression"},
+		&core.TextField{Name: "jitter"},
+		&core.DateField{Name: "scheduled_at"},
+	)
+	schedules.AddIndex("idx_schedules_type", false, "type", "")
+	if err := app.Save(schedules); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func downCreateCollections(app core.App) error {
 	names := []string{
+		collectionSchedules,
 		collectionWorkflowEventsHist,
 		collectionWorkflowEvents,
 		collectionNotifications,

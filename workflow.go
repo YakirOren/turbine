@@ -142,7 +142,7 @@ func (h *baseHandle) GetStatus() (Status, error) {
 		return h.runtime.systemDB.listWorkflows(h.runtime.ctx, listWorkflowsDBInput{
 			workflowIDs: []string{h.workflowID},
 		})
-	}, withRetrierLogger(h.runtime.logger))
+	}, withRetrierLogger(h.runtime.app.Logger()))
 	if err != nil {
 		return Status{}, fmt.Errorf("failed to get workflow status: %w", err)
 	}
@@ -188,7 +188,7 @@ func (h *workflowPollingHandle[R]) GetResult(opts ...GetResultOption) (R, error)
 
 	encodedResult, err := retryWithResult(h.runtime.ctx, func() (*string, error) {
 		return h.runtime.systemDB.awaitWorkflowResult(h.runtime.ctx, h.workflowID, options.pollInterval)
-	}, withRetrierLogger(h.runtime.logger))
+	}, withRetrierLogger(h.runtime.app.Logger()))
 	if err != nil {
 		return *new(R), err
 	}
@@ -223,12 +223,14 @@ type workflowRegistryEntry struct {
 	Name            string
 	FQN             string
 	CronSchedule    string
+	Triggerable     bool
 }
 
 type workflowRegistrationOptions struct {
 	maxRetries   int
 	name         string
 	cronSchedule string
+	triggerable  bool
 }
 
 // WorkflowRegistrationOption configures workflow registration.
@@ -246,6 +248,10 @@ func WithName(name string) WorkflowRegistrationOption {
 // Scheduled workflows must accept time.Time as input — they receive the scheduled execution time.
 func WithSchedule(cronExpr string) WorkflowRegistrationOption {
 	return func(p *workflowRegistrationOptions) { p.cronSchedule = cronExpr }
+}
+
+func WithDashboardTrigger() WorkflowRegistrationOption {
+	return func(p *workflowRegistrationOptions) { p.triggerable = true }
 }
 
 func resolveWorkflowFunctionName[P any, R any](fn Workflow[P, R]) string {
@@ -300,6 +306,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 		FQN:             fqn,
 		MaxRetries:      regOpts.maxRetries,
 		Name:            regOpts.name,
+		Triggerable:     regOpts.triggerable,
 	}
 
 	if _, exists := rt.workflowRegistry.LoadOrStore(fqn, entry); exists {
@@ -335,7 +342,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 				WithQueue(_PF_INTERNAL_QUEUE_NAME),
 			)
 			if err != nil {
-				rt.logger.Error("failed to run scheduled workflow", "name", customName, "error", err)
+				rt.app.Logger().Error("failed to run scheduled workflow", "name", customName, "error", err)
 			}
 		}); err != nil {
 			panic(fmt.Sprintf("failed to register cron job for %s: %v", customName, err))
@@ -504,6 +511,8 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 
 	wfCtx := &pfContext{Context: baseCtx, runtime: rt}
 
+	rt.app.Logger().Info("workflow started", "workflow_id", workflowID, "name", wfStatus.Name, "source", "system")
+
 	outcomeChan := make(chan workflowOutcome[any], 1)
 	rt.workflowsWg.Add(1)
 	go func() {
@@ -519,10 +528,10 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		// Handle workflow ID conflict — another goroutine owns this workflow ID.
 		// Wait for the existing workflow to complete and return its result.
 		if errors.Is(fnErr, &PFError{Code: ErrConflictingID}) {
-			rt.logger.Warn("workflow ID conflict, waiting for existing workflow", "workflow_id", workflowID)
+			rt.app.Logger().Warn("workflow ID conflict, waiting for existing workflow", "workflow_id", workflowID)
 			encoded, awaitErr := retryWithResult(rt.ctx, func() (*string, error) {
 				return rt.systemDB.awaitWorkflowResult(rt.ctx, workflowID, _DB_RETRY_INTERVAL)
-			}, withRetrierLogger(rt.logger))
+			}, withRetrierLogger(rt.app.Logger()))
 			outcomeChan <- workflowOutcome[any]{result: encoded, err: awaitErr}
 			close(outcomeChan)
 			return
@@ -531,6 +540,9 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		outcomeStatus := StatusSuccess
 		if fnErr != nil {
 			outcomeStatus = StatusError
+			rt.app.Logger().Error("workflow failed", "workflow_id", workflowID, "error", fnErr.Error(), "source", "system")
+		} else {
+			rt.app.Logger().Info("workflow completed", "workflow_id", workflowID, "source", "system")
 		}
 
 		// Serialize output
@@ -555,7 +567,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 				output:     encodedOutput,
 				errorMsg:   errorMsg,
 			})
-		}, withRetrierLogger(rt.logger))
+		}, withRetrierLogger(rt.app.Logger()))
 		if recordErr != nil {
 			outcomeChan <- workflowOutcome[any]{err: recordErr}
 			close(outcomeChan)
@@ -695,11 +707,12 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn StepFunc, opts ...St
 			workflowUUID: wfState.workflowID,
 			functionID:   stepID,
 		})
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()))
 	if err != nil {
 		return nil, fmt.Errorf("checking step execution: %w", err)
 	}
 	if recorded != nil {
+		rt.app.Logger().Debug("step replayed from checkpoint", "workflow_id", wfState.workflowID, "step", stepOpts.stepName, "step_id", stepID, "source", "system")
 		var stepErr error
 		if recorded.errorMsg != nil && *recorded.errorMsg != "" {
 			stepErr = errors.New(*recorded.errorMsg)
@@ -708,6 +721,7 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn StepFunc, opts ...St
 	}
 
 	// Execute with retry
+	rt.app.Logger().Info("step started", "workflow_id", wfState.workflowID, "step", stepOpts.stepName, "step_id", stepID, "source", "system")
 	stepState := &workflowState{workflowID: wfState.workflowID, isWithinStep: true}
 	stepState.stepID.Store(int64(stepID))
 	stepCtx := context.WithValue(ctx, workflowStateKey, stepState)
@@ -739,9 +753,16 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn StepFunc, opts ...St
 			startedAt:    startTime.UnixMilli(),
 			endedAt:      endTime.UnixMilli(),
 		})
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()))
 	if recErr != nil {
 		return nil, fmt.Errorf("recording step result: %w", recErr)
+	}
+
+	dur := endTime.Sub(startTime)
+	if stepErr != nil {
+		rt.app.Logger().Error("step failed", "workflow_id", wfState.workflowID, "step", stepOpts.stepName, "step_id", stepID, "duration", dur, "error", stepErr.Error(), "source", "system")
+	} else {
+		rt.app.Logger().Info("step completed", "workflow_id", wfState.workflowID, "step", stepOpts.stepName, "step_id", stepID, "duration", dur, "source", "system")
 	}
 
 	return stepOutput, stepErr
@@ -761,7 +782,7 @@ func executeStepWithRetry(ctx context.Context, rt *Runtime, opts *stepOptions, r
 			expDelay := float64(opts.baseInterval) * math.Pow(opts.backoffFactor, float64(retry-1))
 			delay = time.Duration(math.Min(expDelay, float64(opts.maxInterval)))
 		}
-		rt.logger.Error("step failed, retrying", "step_name", opts.stepName, "retry", retry, "delay", delay)
+		rt.app.Logger().Error("step failed, retrying", "step_name", opts.stepName, "retry", retry, "delay", delay)
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("context cancelled during retry: %w", ctx.Err())
@@ -828,7 +849,7 @@ func Send(ctx Context, destinationID string, message any, topic string) error {
 			Topic:           topic,
 			Message:         encoded,
 		})
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()))
 }
 
 // Recv receives a message within a workflow.
@@ -848,7 +869,7 @@ func Recv[R any](ctx Context, topic string, timeout time.Duration) (R, error) {
 			topic:        topic,
 			timeout:      timeout,
 		})
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()))
 	if err != nil {
 		return *new(R), err
 	}
@@ -892,7 +913,7 @@ func GetValue[R any](ctx Context, targetWorkflowID string, key string, timeout t
 			key:                key,
 			timeout:            timeout,
 		})
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()))
 	if err != nil {
 		return *new(R), err
 	}
@@ -963,7 +984,7 @@ func Retrieve[R any](rt *Runtime, workflowID string) Handle[R] {
 func (rt *Runtime) Cancel(workflowID string) error {
 	return retry(rt.ctx, func() error {
 		return rt.systemDB.cancelWorkflow(rt.ctx, cancelWorkflowDBInput{workflowID: workflowID})
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()))
 }
 
 // Resume resumes a cancelled workflow.
@@ -974,21 +995,21 @@ func (rt *Runtime) Resume(workflowID string) error {
 			executorID: rt.executorID,
 			appVersion: rt.applicationVersion,
 		})
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()))
 }
 
 // List returns workflows matching the given filters.
 func (rt *Runtime) List(input listWorkflowsDBInput) ([]Status, error) {
 	return retryWithResult(rt.ctx, func() ([]Status, error) {
 		return rt.systemDB.listWorkflows(rt.ctx, input)
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()))
 }
 
 // Steps returns the execution steps for a workflow.
 func (rt *Runtime) Steps(workflowID string) ([]StepInfo, error) {
 	steps, err := retryWithResult(rt.ctx, func() ([]stepInfo, error) {
 		return rt.systemDB.getWorkflowSteps(rt.ctx, getWorkflowStepsInput{workflowID: workflowID})
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()))
 	if err != nil {
 		return nil, err
 	}

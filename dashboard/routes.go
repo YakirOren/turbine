@@ -42,4 +42,46 @@ func registerRoutes(se *core.ServeEvent, rt *pocketflow.Runtime) {
 		}
 		return h.queueStats(e)
 	})
+
+	se.Router.GET("/api/pf/scheduled", func(e *core.RequestEvent) error {
+		if !e.HasSuperuserAuth() {
+			return e.ForbiddenError("", nil)
+		}
+		return h.listScheduled(e)
+	})
+
+	se.Router.GET("/api/pf/registered", func(e *core.RequestEvent) error {
+		if !e.HasSuperuserAuth() {
+			return e.ForbiddenError("", nil)
+		}
+		return h.listRegistered(e)
+	})
+
+	se.Router.POST("/api/pf/trigger", func(e *core.RequestEvent) error {
+		if !e.HasSuperuserAuth() {
+			return e.ForbiddenError("", nil)
+		}
+		return h.triggerWorkflow(e)
+	})
+
+	se.Router.GET("/api/pf/schedules", func(e *core.RequestEvent) error {
+		if !e.HasSuperuserAuth() {
+			return e.ForbiddenError("", nil)
+		}
+		return h.listSchedules(e)
+	})
+
+	se.Router.POST("/api/pf/schedules", func(e *core.RequestEvent) error {
+		if !e.HasSuperuserAuth() {
+			return e.ForbiddenError("", nil)
+		}
+		return h.createSchedule(e)
+	})
+
+	se.Router.DELETE("/api/pf/schedules/{id}", func(e *core.RequestEvent) error {
+		if !e.HasSuperuserAuth() {
+			return e.ForbiddenError("", nil)
+		}
+		return h.deleteSchedule(e)
+	})
 }

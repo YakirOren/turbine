@@ -2,9 +2,9 @@ package pocketflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,7 +23,6 @@ type Runtime struct {
 	app      core.App
 	systemDB systemDatabase
 	config   *Config
-	logger   *slog.Logger
 
 	// Queue runner
 	queueRunner *queueRunner
@@ -42,13 +41,12 @@ type Runtime struct {
 
 	// Set of workflow IDs currently running (key = workflow ID, value = struct{}{})
 	activeWorkflowIDs *sync.Map
+
+	scheduleManager *scheduleManager
 }
 
 // New creates a new Runtime. Must be called before Launch().
 func New(app core.App, config Config) *Runtime {
-	if config.Logger == nil {
-		config.Logger = slog.Default()
-	}
 	if config.ExecutorID == "" {
 		config.ExecutorID = "local"
 	}
@@ -65,7 +63,7 @@ func New(app core.App, config Config) *Runtime {
 	baseCtx, cancelFunc := context.WithCancelCause(context.Background())
 	eb := newEventBus()
 
-	sysDB := newSQLiteSysDB(app, eb, config.Logger)
+	sysDB := newSQLiteSysDB(app, eb)
 
 	rt := &Runtime{
 		ctx:                     baseCtx,
@@ -73,7 +71,6 @@ func New(app core.App, config Config) *Runtime {
 		app:                     app,
 		systemDB:                sysDB,
 		config:                  &config,
-		logger:                  config.Logger,
 		applicationVersion:      config.ApplicationVersion,
 		executorID:              config.ExecutorID,
 		workflowsWg:            &sync.WaitGroup{},
@@ -82,8 +79,9 @@ func New(app core.App, config Config) *Runtime {
 		activeWorkflowIDs:       &sync.Map{},
 	}
 
-	rt.queueRunner = newQueueRunner(rt.logger)
+	rt.queueRunner = newQueueRunner()
 	newWorkflowQueue(rt, _PF_INTERNAL_QUEUE_NAME)
+	rt.scheduleManager = newScheduleManager()
 
 	return rt
 }
@@ -105,14 +103,22 @@ func (rt *Runtime) Launch() error {
 		return fmt.Errorf("pocketflow: failed to recover workflows: %w", err)
 	}
 	if len(handles) > 0 {
-		rt.logger.Info("recovered pending workflows", "count", len(handles))
+		rt.app.Logger().Info("recovered pending workflows", "count", len(handles))
 	}
 
 	rt.launched.Store(true)
 
 	// Start the queue runner after recovery is complete
 	go rt.queueRunner.run(rt)
-	rt.logger.Debug("queue runner started")
+	rt.app.Logger().Debug("queue runner started")
+
+	// Register schedule hooks (must happen before loading to avoid race)
+	rt.scheduleManager.registerHooks(rt)
+
+	// Load existing schedules from database
+	if err := rt.scheduleManager.loadExisting(rt); err != nil {
+		rt.app.Logger().Error("failed to load schedules", "error", err)
+	}
 
 	// Register garbage collection cron job if retention is positive
 	if rt.config.GCRetention > 0 {
@@ -124,20 +130,20 @@ func (rt *Runtime) Launch() error {
 			if err := rt.systemDB.garbageCollectWorkflows(rt.ctx, garbageCollectWorkflowsInput{
 				cutoffTime: cutoff,
 			}); err != nil {
-				rt.logger.Error("workflow garbage collection failed", "error", err)
+				rt.app.Logger().Error("workflow garbage collection failed", "error", err)
 			}
 		}); err != nil {
 			return fmt.Errorf("pocketflow: failed to register GC cron job: %w", err)
 		}
 	}
 
-	rt.logger.Info("pocketflow launched", "app_name", rt.applicationID, "executor_id", rt.executorID)
+	rt.app.Logger().Info("pocketflow launched", "app_name", rt.applicationID, "executor_id", rt.executorID)
 	return nil
 }
 
 // Shutdown gracefully stops the runtime.
 func (rt *Runtime) Shutdown(timeout time.Duration) {
-	rt.logger.Debug("pocketflow shutting down")
+	rt.app.Logger().Debug("pocketflow shutting down")
 
 	rt.ctxCancelFunc(errors.New("pocketflow shutdown"))
 
@@ -150,7 +156,7 @@ func (rt *Runtime) Shutdown(timeout time.Duration) {
 	select {
 	case <-done:
 	case <-time.After(timeout):
-		rt.logger.Warn("timeout waiting for workflows to complete")
+		rt.app.Logger().Warn("timeout waiting for workflows to complete")
 	}
 
 	// Wait for queue runner
@@ -158,7 +164,7 @@ func (rt *Runtime) Shutdown(timeout time.Duration) {
 		select {
 		case <-rt.queueRunner.completionChan:
 		case <-time.After(timeout):
-			rt.logger.Warn("timeout waiting for queue runner")
+			rt.app.Logger().Warn("timeout waiting for queue runner")
 		}
 	}
 
@@ -183,3 +189,95 @@ func (rt *Runtime) GetApplicationID() string      { return rt.applicationID }
 func (rt *Runtime) IsLaunched() bool              { return rt.launched.Load() }
 func (rt *Runtime) App() core.App                { return rt.app }
 func (rt *Runtime) Queues() []WorkflowQueue      { return rt.queueRunner.listQueues() }
+
+// ScheduledWorkflow describes a registered scheduled workflow.
+type ScheduledWorkflow struct {
+	Name         string `json:"name"`
+	FQN          string `json:"fqn"`
+	CronSchedule string `json:"cronSchedule"`
+}
+
+// ScheduledWorkflows returns all workflows registered with a cron schedule.
+func (rt *Runtime) ScheduledWorkflows() []ScheduledWorkflow {
+	var result []ScheduledWorkflow
+	rt.workflowRegistry.Range(func(_, value any) bool {
+		entry, ok := value.(workflowRegistryEntry)
+		if ok && entry.CronSchedule != "" {
+			name := entry.Name
+			if name == "" {
+				name = entry.FQN
+			}
+			result = append(result, ScheduledWorkflow{
+				Name:         name,
+				FQN:          entry.FQN,
+				CronSchedule: entry.CronSchedule,
+			})
+		}
+		return true
+	})
+	return result
+}
+
+type RegisteredWorkflow struct {
+	Name         string `json:"name"`
+	FQN          string `json:"fqn"`
+	Triggerable  bool   `json:"triggerable"`
+	CronSchedule string `json:"cronSchedule"`
+}
+
+func (rt *Runtime) RegisteredWorkflows() []RegisteredWorkflow {
+	var result []RegisteredWorkflow
+	rt.workflowRegistry.Range(func(_, value any) bool {
+		entry, ok := value.(workflowRegistryEntry)
+		if !ok {
+			return true
+		}
+		name := entry.Name
+		if name == "" {
+			name = entry.FQN
+		}
+		result = append(result, RegisteredWorkflow{
+			Name:         name,
+			FQN:          entry.FQN,
+			Triggerable:  entry.Triggerable,
+			CronSchedule: entry.CronSchedule,
+		})
+		return true
+	})
+	return result
+}
+
+func (rt *Runtime) triggerByFQNWithOpts(fqn string, rawInput json.RawMessage, extraOpts ...WorkflowOption) (string, error) {
+	registeredAny, ok := rt.workflowRegistry.Load(fqn)
+	if !ok {
+		return "", fmt.Errorf("workflow not found: %s", fqn)
+	}
+	entry := registeredAny.(workflowRegistryEntry)
+	if !entry.Triggerable {
+		return "", fmt.Errorf("workflow is not triggerable: %s", fqn)
+	}
+
+	encoded := string(rawInput)
+	opts := append([]WorkflowOption{
+		withAlreadyEncodedInput(),
+		WithQueue(_PF_INTERNAL_QUEUE_NAME),
+	}, extraOpts...)
+
+	handle, err := entry.wrappedFunction(rt, &encoded, opts...)
+	if err != nil {
+		return "", fmt.Errorf("failed to trigger workflow: %w", err)
+	}
+	return handle.GetWorkflowID(), nil
+}
+
+func (rt *Runtime) TriggerByFQN(fqn string, rawInput json.RawMessage) (string, error) {
+	return rt.triggerByFQNWithOpts(fqn, rawInput)
+}
+
+func (rt *Runtime) IsTriggerable(fqn string) bool {
+	registeredAny, ok := rt.workflowRegistry.Load(fqn)
+	if !ok {
+		return false
+	}
+	return registeredAny.(workflowRegistryEntry).Triggerable
+}
