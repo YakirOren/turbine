@@ -9,9 +9,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Check for UI changes
+        id: ui-changes
+        run: |
+          if git diff --name-only origin/main...HEAD | grep -q '^ui/'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.ui-changes.outputs.changed == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build UI
+        if: steps.ui-changes.outputs.changed == 'true'
+        run: cd ui && npm ci && npm run build
       - run: go build ./...
       - run: go test ./...
 
