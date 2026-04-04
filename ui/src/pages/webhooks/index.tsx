@@ -41,7 +41,7 @@ import { TableSkeleton } from "@/components/table-skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { PtWebhooksResponse } from "@/types/pocketbase-types";
 
-type WebhookRecord = PtWebhooksResponse<string[]>;
+type WebhookRecord = PtWebhooksResponse<string[]> & { events: string[] };
 
 const webhookFormSchema = z.object({
   url: z.string().url("Invalid URL"),
@@ -373,7 +373,7 @@ export function WebhookList() {
             <div className="flex justify-end">
               <Button
                 onClick={rhfSubmit((data) => saveMutation.mutate(data))}
-                disabled={saveMutation.isPending}
+                disabled={saveMutation.isPending || events.length === 0}
               >
                 {saveMutation.isPending ? (editingId ? "Saving..." : "Creating...") : (editingId ? "Save" : "Create")}
               </Button>

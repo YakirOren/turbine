@@ -156,6 +156,7 @@ export type PtProductsRecord<Tmetadata = unknown> = {
 }
 
 export type PtSchedulesRecord<Tinput = unknown> = {
+	created: IsoAutoDateString
 	cron_expression?: string
 	enabled?: boolean
 	id: string

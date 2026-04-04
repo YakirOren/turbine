@@ -3,3 +3,5 @@ node_modules/
 .superpowers/
 *pb_data/
 .agents
+dashboard/dist/*
+!dashboard/dist/.gitkeep
