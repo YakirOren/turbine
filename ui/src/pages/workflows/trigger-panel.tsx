@@ -46,7 +46,7 @@ const triggerFormSchema = z.object({
   scheduledAt: z.string(),
   cronExpression: z.string(),
   jitter: z.string(),
-  formValues: z.record(z.unknown()),
+  formValues: z.record(z.string(), z.unknown()),
 });
 type TriggerFormValues = z.infer<typeof triggerFormSchema>;
 
@@ -56,7 +56,7 @@ export function TriggerRunButton() {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { control, handleSubmit: rhfSubmit, reset, watch, setValue, getValues, setError: setFieldError, formState: { errors: fieldErrors }, clearErrors } = useForm<TriggerFormValues>({
+  const { control, reset, watch, setValue, getValues, setError: setFieldError, formState: { errors: fieldErrors }, clearErrors } = useForm<TriggerFormValues>({
     resolver: zodResolver(triggerFormSchema),
     defaultValues: {
       selectedFqn: "",
@@ -72,8 +72,6 @@ export function TriggerRunButton() {
   const timing = watch("timing");
   const selectedFqn = watch("selectedFqn");
   const formValues = watch("formValues");
-  const input = watch("input");
-
   const { data: workflows = [], isLoading } = useQuery<RegisteredWorkflow[]>({
     queryKey: ["registered-workflows-triggerable"],
     queryFn: () =>

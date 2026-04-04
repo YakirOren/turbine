@@ -195,7 +195,7 @@ export function NotificationList() {
   };
 
   const openEdit = (record: AlertChannelRecord) => {
-    reset({ name: record.name, url: "", events: [...record.events], enabled: record.enabled });
+    reset({ name: record.name, url: "", events: [...(record.events ?? [])], enabled: record.enabled });
     setEditingId(record.id);
     setDialogOpen(true);
   };

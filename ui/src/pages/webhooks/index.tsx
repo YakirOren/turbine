@@ -158,7 +158,7 @@ export function WebhookList() {
   };
 
   const openEdit = (record: WebhookRecord) => {
-    reset({ url: record.url, events: [...record.events], secret: "", enabled: record.enabled });
+    reset({ url: record.url, events: [...(record.events ?? [])], secret: "", enabled: record.enabled });
     setEditingId(record.id);
     setDialogOpen(true);
   };
@@ -222,7 +222,7 @@ export function WebhookList() {
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
-                      {record.events.map((event) => (
+                      {(record.events ?? []).map((event) => (
                         <Badge
                           key={event}
                           variant="secondary"

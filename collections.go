@@ -365,6 +365,7 @@ func upCreateCollections(app core.App) error {
 		&core.DateField{Name: "scheduled_at"},
 		&core.BoolField{Name: "enabled"},
 	)
+	schedules.Fields.Add(&core.AutodateField{Name: "created", OnCreate: true})
 	schedules.AddIndex("idx_schedules_type", false, "type", "")
 	if err := app.Save(schedules); err != nil {
 		return err
