@@ -1,10 +1,23 @@
-package pocketflow
+package turbine
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 )
+
+var validAppStatusColors = map[string]bool{
+	"green": true, "red": true, "yellow": true, "blue": true, "gray": true,
+	"lime": true, "orange": true, "purple": true, "pink": true, "cyan": true,
+}
+
+func validateAppStatusColor(color string) error {
+	if !validAppStatusColors[color] {
+		return fmt.Errorf("invalid app status color %q: must be one of green, red, yellow, blue, gray, lime, orange, purple, pink, cyan", color)
+	}
+	return nil
+}
 
 // StatusType represents the current execution state of a workflow.
 type StatusType string
@@ -16,31 +29,36 @@ const (
 	StatusError                       StatusType = "ERROR"
 	StatusCancelled                   StatusType = "CANCELLED"
 	StatusMaxRecoveryAttemptsExceeded StatusType = "MAX_RECOVERY_ATTEMPTS_EXCEEDED"
+	StatusWaitingForApproval          StatusType = "WAITING_FOR_APPROVAL"
 )
 
 // Status contains information about a workflow's current state.
 type Status struct {
-	ID                 string             `json:"workflow_id"`
-	Status             StatusType `json:"status"`
-	Name               string             `json:"name"`
-	Output             any                `json:"output,omitempty"`
-	Error              error              `json:"error,omitempty"`
-	ExecutorID         string             `json:"executor_id"`
-	CreatedAt          time.Time          `json:"created_at"`
-	UpdatedAt          time.Time          `json:"updated_at"`
-	ApplicationVersion string             `json:"application_version"`
-	ApplicationID      string             `json:"application_id,omitempty"`
-	Attempts           int                `json:"attempts"`
-	QueueName          string             `json:"queue_name,omitempty"`
-	Timeout            time.Duration      `json:"timeout,omitempty"`
-	Deadline           time.Time          `json:"deadline"`
-	StartedAt          time.Time          `json:"started_at"`
-	DeduplicationID    string             `json:"deduplication_id,omitempty"`
-	Input              any                `json:"input,omitempty"`
-	Priority           int                `json:"priority,omitempty"`
-	QueuePartitionKey  string             `json:"queue_partition_key,omitempty"`
-	ForkedFrom         string             `json:"forked_from,omitempty"`
-	ParentWorkflowID   string             `json:"parent_workflow_id,omitempty"`
+	ID                 string        `json:"workflow_id"`
+	Status             StatusType    `json:"status"`
+	Name               string        `json:"name"`
+	Output             any           `json:"output,omitempty"`
+	Error              error         `json:"error,omitempty"`
+	ExecutorID         string        `json:"executor_id"`
+	CreatedAt          time.Time     `json:"created_at"`
+	UpdatedAt          time.Time     `json:"updated_at"`
+	ApplicationVersion string        `json:"application_version"`
+	ApplicationID      string        `json:"application_id,omitempty"`
+	Attempts           int           `json:"attempts"`
+	QueueName          string        `json:"queue_name,omitempty"`
+	Timeout            time.Duration `json:"timeout,omitempty"`
+	Deadline           time.Time     `json:"deadline"`
+	StartedAt          time.Time     `json:"started_at"`
+	DeduplicationID    string        `json:"deduplication_id,omitempty"`
+	Input              any           `json:"input,omitempty"`
+	Priority           int           `json:"priority,omitempty"`
+	QueuePartitionKey  string        `json:"queue_partition_key,omitempty"`
+	ForkedFrom         string        `json:"forked_from,omitempty"`
+	ParentWorkflowID   string        `json:"parent_workflow_id,omitempty"`
+	AppStatus          string        `json:"app_status,omitempty"`
+	AppStatusColor     string        `json:"app_status_color,omitempty"`
+	Summary            string        `json:"summary,omitempty"`
+	Tags               []string      `json:"tags,omitempty"`
 }
 
 // Handle provides methods to interact with a running or completed workflow.
@@ -59,7 +77,7 @@ type getResultOptions struct {
 
 // StepInfo contains information about a workflow step execution.
 type StepInfo struct {
-	WorkflowID string `json:"workflow_id"`
+	WorkflowID   string `json:"workflow_id"`
 	FunctionID   int    `json:"function_id"`
 	FunctionName string `json:"function_name"`
 	Output       string `json:"output,omitempty"`
@@ -70,9 +88,13 @@ type StepInfo struct {
 
 // workflowState holds the runtime state for a workflow execution.
 type workflowState struct {
-	workflowID   string
-	stepID       atomic.Int64
-	isWithinStep bool
+	workflowID     string
+	workflowName   string
+	stepID         atomic.Int64
+	isWithinStep   bool
+	recovering     bool
+	appStatus      string
+	appStatusColor string
 }
 
 func (ws *workflowState) nextStepID() int {
@@ -89,6 +111,9 @@ type insertWorkflowResult struct {
 	timeout          time.Duration
 	workflowDeadline time.Time
 	ownerXID         string
+	appStatus        string
+	appStatusColor   string
+	hasSteps         bool
 }
 
 type insertStatusDBInput struct {
@@ -123,9 +148,9 @@ type cancelWorkflowDBInput struct {
 }
 
 type resumeWorkflowDBInput struct {
-	workflowID  string
-	executorID  string
-	appVersion  string
+	workflowID string
+	executorID string
+	appVersion string
 }
 
 type forkWorkflowDBInput struct {
@@ -136,8 +161,8 @@ type forkWorkflowDBInput struct {
 }
 
 type recordChildWorkflowDBInput struct {
-	workflowUUID   string
-	functionID     int
+	workflowUUID    string
+	functionID      int
 	childWorkflowID string
 }
 
@@ -229,6 +254,12 @@ type dequeuedWorkflow struct {
 	input      *string
 }
 
+type updateAppStatusDBInput struct {
+	workflowID     string
+	appStatus      string
+	appStatusColor string
+}
+
 type garbageCollectWorkflowsInput struct {
 	cutoffTime time.Time
 }
@@ -237,6 +268,34 @@ type garbageCollectWorkflowsInput struct {
 type RateLimiter struct {
 	Limit  int
 	Period time.Duration
+}
+
+// ProductSender is the interface for sending products to external systems.
+// Users implement this to define custom destinations.
+type ProductSender interface {
+	Send(ctx context.Context, product ProductRecord) error
+}
+
+// ProductRecord is the reference to a stored product passed to ProductSender.Send().
+type ProductRecord struct {
+	ID       string         `json:"id"`
+	FileName string         `json:"file_name"`
+	Size     int            `json:"size"`
+	Metadata map[string]any `json:"metadata"`
+	FileURL  string         `json:"file_url"`
+}
+
+type setKVInput struct {
+	key   string
+	value *string
+}
+
+type getKVInput struct {
+	key string
+}
+
+type deleteKVInput struct {
+	key string
 }
 
 // systemDatabase is the internal interface for database operations.
@@ -248,7 +307,7 @@ type systemDatabase interface {
 	listWorkflows(ctx context.Context, input listWorkflowsDBInput) ([]Status, error)
 	updateWorkflowOutcome(ctx context.Context, input updateWorkflowOutcomeDBInput) error
 	awaitWorkflowResult(ctx context.Context, workflowID string, pollInterval time.Duration) (*string, error)
-	cancelWorkflow(ctx context.Context, input cancelWorkflowDBInput) error
+	cancelWorkflow(ctx context.Context, input cancelWorkflowDBInput) (bool, error)
 	resumeWorkflow(ctx context.Context, input resumeWorkflowDBInput) error
 	forkWorkflow(ctx context.Context, input forkWorkflowDBInput) (string, error)
 
@@ -271,5 +330,11 @@ type systemDatabase interface {
 	waitForEnqueue(ctx context.Context, queueName string) chan struct{}
 	stopWaitForEnqueue(queueName string, ch chan struct{})
 
+	updateAppStatus(ctx context.Context, input updateAppStatusDBInput) error
+
 	garbageCollectWorkflows(ctx context.Context, input garbageCollectWorkflowsInput) error
+
+	setKV(ctx context.Context, input setKVInput) error
+	getKV(ctx context.Context, input getKVInput) (*string, error)
+	deleteKV(ctx context.Context, input deleteKVInput) error
 }

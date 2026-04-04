@@ -1,4 +1,4 @@
-package pocketflow
+package turbine
 
 import (
 	"context"
@@ -55,6 +55,8 @@ type workflowOptions struct {
 	QueuePartitionKey   string
 	Timeout             time.Duration
 	Deadline            time.Time
+	Tags                []string
+	Summary             string
 	alreadyEncodedInput bool
 	isDequeue           bool
 	isRecovery          bool
@@ -119,6 +121,10 @@ func withIsRecovery() WorkflowOption {
 	return func(p *workflowOptions) { p.isRecovery = true }
 }
 
+func withTags(tags []string) WorkflowOption {
+	return func(o *workflowOptions) { o.Tags = tags }
+}
+
 /*******************************/
 /******* WORKFLOW HANDLES *****/
 /*******************************/
@@ -142,7 +148,7 @@ func (h *baseHandle) GetStatus() (Status, error) {
 		return h.runtime.systemDB.listWorkflows(h.runtime.ctx, listWorkflowsDBInput{
 			workflowIDs: []string{h.workflowID},
 		})
-	}, withRetrierLogger(h.runtime.logger))
+	}, withRetrierLogger(h.runtime.app.Logger()), withMaxRetries(3))
 	if err != nil {
 		return Status{}, fmt.Errorf("failed to get workflow status: %w", err)
 	}
@@ -188,15 +194,14 @@ func (h *workflowPollingHandle[R]) GetResult(opts ...GetResultOption) (R, error)
 
 	encodedResult, err := retryWithResult(h.runtime.ctx, func() (*string, error) {
 		return h.runtime.systemDB.awaitWorkflowResult(h.runtime.ctx, h.workflowID, options.pollInterval)
-	}, withRetrierLogger(h.runtime.logger))
+	}, withRetrierLogger(h.runtime.app.Logger()))
 	if err != nil {
 		return *new(R), err
 	}
 	if encodedResult == nil {
 		return *new(R), nil
 	}
-	serializer := newJSONSerializer[R]()
-	return serializer.Decode(encodedResult)
+	return decodeJSON[R](encodedResult)
 }
 
 // WithHandlePollingInterval sets the polling interval for GetResult.
@@ -219,16 +224,24 @@ type wrappedWorkflowFunc func(rt *Runtime, input any, opts ...WorkflowOption) (H
 // workflowRegistryEntry stores a registered workflow's metadata.
 type workflowRegistryEntry struct {
 	wrappedFunction wrappedWorkflowFunc
+	summaryFunc     func(encodedInput *string) string
 	MaxRetries      int
 	Name            string
 	FQN             string
 	CronSchedule    string
+	Triggerable     bool
+	InputSchema     map[string]any
+	Tags            []string
 }
 
 type workflowRegistrationOptions struct {
 	maxRetries   int
 	name         string
 	cronSchedule string
+	triggerable  bool
+	inputSchema  map[string]any
+	tags         []string
+	summaryFunc  func(encodedInput *string) string
 }
 
 // WorkflowRegistrationOption configures workflow registration.
@@ -246,6 +259,65 @@ func WithName(name string) WorkflowRegistrationOption {
 // Scheduled workflows must accept time.Time as input — they receive the scheduled execution time.
 func WithSchedule(cronExpr string) WorkflowRegistrationOption {
 	return func(p *workflowRegistrationOptions) { p.cronSchedule = cronExpr }
+}
+
+func WithDashboardTrigger() WorkflowRegistrationOption {
+	return func(p *workflowRegistrationOptions) { p.triggerable = true }
+}
+
+// WithInputSchema attaches a JSON schema to the workflow, enabling the
+// dashboard to render a typed form instead of a raw JSON textarea.
+func WithInputSchema(schema map[string]any) WorkflowRegistrationOption {
+	return func(p *workflowRegistrationOptions) { p.inputSchema = schema }
+}
+
+func WithTags(tags ...string) WorkflowRegistrationOption {
+	return func(p *workflowRegistrationOptions) { p.tags = tags }
+}
+
+// WithSummaryFunc registers a function that generates a human-readable summary
+// from the workflow input. The summary is computed once at workflow start
+// and stored in the database. Maximum 200 characters.
+func WithSummaryFunc[P any](fn func(P) string) WorkflowRegistrationOption {
+	return func(opts *workflowRegistrationOptions) {
+		opts.summaryFunc = func(encodedInput *string) string {
+			typedInput, err := decodeJSON[P](encodedInput)
+			if err != nil {
+				return ""
+			}
+			return fn(typedInput)
+		}
+	}
+}
+
+const maxSummaryLength = 200
+
+func computeSummary(summaryFunc func(*string) string, input any, rt *Runtime) (result string) {
+	defer func() {
+		if r := recover(); r != nil {
+			rt.app.Logger().Warn("summary func panicked", "error", r, "source", "system")
+			result = ""
+		}
+	}()
+
+	var encodedInput *string
+	switch v := input.(type) {
+	case *string:
+		encodedInput = v
+	default:
+		// Direct call: encode to JSON first so summaryFunc can decode to P
+		encoded, err := encodeJSON[any](input)
+		if err != nil {
+			return ""
+		}
+		encodedInput = encoded
+	}
+
+	result = summaryFunc(encodedInput)
+	if len([]rune(result)) > maxSummaryLength {
+		result = string([]rune(result)[:maxSummaryLength])
+	}
+	return result
 }
 
 func resolveWorkflowFunctionName[P any, R any](fn Workflow[P, R]) string {
@@ -282,8 +354,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 				return nil, fmt.Errorf("expected *string input, got %T", input)
 			}
 		}
-		serializer := newJSONSerializer[P]()
-		typedInput, err := serializer.Decode(encodedInput)
+		typedInput, err := decodeJSON[P](encodedInput)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode input: %w", err)
 		}
@@ -291,15 +362,19 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 	})
 
 	wrapped := wrappedWorkflowFunc(func(rt *Runtime, input any, opts ...WorkflowOption) (Handle[any], error) {
-		opts = append(opts, withWorkflowName(fqn))
+		opts = append(opts, withWorkflowName(fqn), withTags(regOpts.tags))
 		return runWorkflowInternal(rt, typedErasedWF, input, opts...)
 	})
 
 	entry := workflowRegistryEntry{
 		wrappedFunction: wrapped,
+		summaryFunc:     regOpts.summaryFunc,
 		FQN:             fqn,
 		MaxRetries:      regOpts.maxRetries,
 		Name:            regOpts.name,
+		Triggerable:     regOpts.triggerable,
+		InputSchema:     regOpts.inputSchema,
+		Tags:            regOpts.tags,
 	}
 
 	if _, exists := rt.workflowRegistry.LoadOrStore(fqn, entry); exists {
@@ -319,23 +394,27 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 			panic(fmt.Sprintf("scheduled workflow must accept time.Time as input, got %s", reflect.TypeFor[P]().String()))
 		}
 
-		// Update entry with cron schedule
+		// Update entry with cron schedule and tags
 		entry.CronSchedule = regOpts.cronSchedule
+		entry.Tags = regOpts.tags
 		rt.workflowRegistry.Store(fqn, entry)
 
-		cronJobID := fmt.Sprintf("pf_sched_%s", customName)
+		cronJobID := fmt.Sprintf("pt_sched_%s", customName)
 		if err := rt.app.Cron().Add(cronJobID, regOpts.cronSchedule, func() {
 			if !rt.launched.Load() {
+				return
+			}
+			if _, disabled := rt.disabledSchedules.Load(fqn); disabled {
 				return
 			}
 			scheduledTime := time.Now()
 			wfID := fmt.Sprintf("sched-%s-%s", customName, scheduledTime.UTC().Format(time.RFC3339))
 			_, err := wrapped(rt, scheduledTime,
 				WithID(wfID),
-				WithQueue(_PF_INTERNAL_QUEUE_NAME),
+				WithQueue(_PT_INTERNAL_QUEUE_NAME),
 			)
 			if err != nil {
-				rt.logger.Error("failed to run scheduled workflow", "name", customName, "error", err)
+				rt.app.Logger().Error("failed to run scheduled workflow", "name", customName, "error", err)
 			}
 		}); err != nil {
 			panic(fmt.Sprintf("failed to register cron job for %s: %v", customName, err))
@@ -380,8 +459,8 @@ func Run[P any, R any](rt *Runtime, fn Workflow[P, R], input P, opts ...Workflow
 			typedChan <- workflowOutcome[R]{result: typedResult, err: outcome.err}
 		}()
 		return &workflowHandle[R]{
-			baseHandle: wh.baseHandle,
-			outcomeChan:        typedChan,
+			baseHandle:  wh.baseHandle,
+			outcomeChan: typedChan,
 		}, nil
 	}
 
@@ -395,6 +474,11 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		opt(&params)
 	}
 
+	// Reject new workflows during drain (allow dequeue and recovery to finish)
+	if rt.draining.Load() && !params.isDequeue && !params.isRecovery {
+		return nil, ErrShuttingDown
+	}
+
 	// Lookup registry for registration-time options
 	registeredAny, exists := rt.workflowRegistry.Load(params.WorkflowName)
 	if !exists {
@@ -406,6 +490,12 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	}
 	if registered.Name != "" {
 		params.WorkflowName = registered.Name
+	}
+	if len(params.Tags) == 0 && len(registered.Tags) > 0 {
+		params.Tags = registered.Tags
+	}
+	if params.Summary == "" && registered.summaryFunc != nil {
+		params.Summary = computeSummary(registered.summaryFunc, input, rt)
 	}
 
 	// Validate queue options
@@ -440,9 +530,8 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	if params.alreadyEncodedInput {
 		encodedInput = input
 	} else {
-		ser := newJSONSerializer[any]()
 		var err error
-		encodedInput, err = ser.Encode(input)
+		encodedInput, err = encodeJSON[any](input)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize input: %w", err)
 		}
@@ -463,6 +552,8 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		QueuePartitionKey:  params.QueuePartitionKey,
 		Timeout:            params.Timeout,
 		Deadline:           params.Deadline,
+		Tags:               params.Tags,
+		Summary:            params.Summary,
 	}
 
 	ownerXID := core.GenerateDefaultRandomId()
@@ -474,6 +565,10 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	}
 	insertResult, err := rt.systemDB.insertStatus(rt.ctx, insertInput)
 	if err != nil {
+		var ptErr *Error
+		if errors.As(err, &ptErr) && ptErr.Code == ErrDeadLetter {
+			go rt.dispatchEvent(workflowID, params.WorkflowName, StatusMaxRecoveryAttemptsExceeded, nil, &ptErr.Message)
+		}
 		return nil, fmt.Errorf("failed to insert workflow: %w", err)
 	}
 
@@ -490,7 +585,13 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	}
 
 	// Create workflow state
-	wfState := &workflowState{workflowID: workflowID}
+	wfState := &workflowState{
+		workflowID:     workflowID,
+		workflowName:   params.WorkflowName,
+		recovering:     insertResult.hasSteps,
+		appStatus:      insertResult.appStatus,
+		appStatusColor: insertResult.appStatusColor,
+	}
 	wfState.stepID.Store(-1)
 	baseCtx := context.WithValue(rt.ctx, workflowStateKey, wfState)
 
@@ -502,7 +603,9 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		baseCtx, cancelTimeout = context.WithDeadline(baseCtx, insertResult.workflowDeadline)
 	}
 
-	wfCtx := &pfContext{Context: baseCtx, runtime: rt}
+	wfCtx := &ptContext{Context: baseCtx, runtime: rt}
+
+	rt.app.Logger().Info("workflow started", "workflow_id", workflowID, "name", wfStatus.Name, "source", "system")
 
 	outcomeChan := make(chan workflowOutcome[any], 1)
 	rt.workflowsWg.Add(1)
@@ -518,11 +621,11 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 
 		// Handle workflow ID conflict — another goroutine owns this workflow ID.
 		// Wait for the existing workflow to complete and return its result.
-		if errors.Is(fnErr, &PFError{Code: ErrConflictingID}) {
-			rt.logger.Warn("workflow ID conflict, waiting for existing workflow", "workflow_id", workflowID)
+		if errors.Is(fnErr, &Error{Code: ErrConflictingID}) {
+			rt.app.Logger().Warn("workflow ID conflict, waiting for existing workflow", "workflow_id", workflowID)
 			encoded, awaitErr := retryWithResult(rt.ctx, func() (*string, error) {
 				return rt.systemDB.awaitWorkflowResult(rt.ctx, workflowID, _DB_RETRY_INTERVAL)
-			}, withRetrierLogger(rt.logger))
+			}, withRetrierLogger(rt.app.Logger()))
 			outcomeChan <- workflowOutcome[any]{result: encoded, err: awaitErr}
 			close(outcomeChan)
 			return
@@ -531,11 +634,13 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		outcomeStatus := StatusSuccess
 		if fnErr != nil {
 			outcomeStatus = StatusError
+			rt.app.Logger().Error("workflow failed", "workflow_id", workflowID, "error", fnErr.Error(), "source", "system")
+		} else {
+			rt.app.Logger().Info("workflow completed", "workflow_id", workflowID, "source", "system")
 		}
 
 		// Serialize output
-		ser := newJSONSerializer[any]()
-		encodedOutput, serErr := ser.Encode(result)
+		encodedOutput, serErr := encodeJSON[any](result)
 		if serErr != nil {
 			outcomeChan <- workflowOutcome[any]{err: fmt.Errorf("failed to serialize output: %w", serErr)}
 			close(outcomeChan)
@@ -555,20 +660,23 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 				output:     encodedOutput,
 				errorMsg:   errorMsg,
 			})
-		}, withRetrierLogger(rt.logger))
+		}, withRetrierLogger(rt.app.Logger()))
 		if recordErr != nil {
 			outcomeChan <- workflowOutcome[any]{err: recordErr}
 			close(outcomeChan)
 			return
 		}
 
+		// Dispatch webhooks and notifications after outcome is recorded
+		go rt.dispatchEvent(workflowID, params.WorkflowName, outcomeStatus, encodedOutput, errorMsg)
+
 		outcomeChan <- workflowOutcome[any]{result: result, err: fnErr}
 		close(outcomeChan)
 	}()
 
 	return &workflowHandle[any]{
-		baseHandle: baseHandle{workflowID: workflowID, runtime: rt},
-		outcomeChan:        outcomeChan,
+		baseHandle:  baseHandle{workflowID: workflowID, runtime: rt},
+		outcomeChan: outcomeChan,
 	}, nil
 }
 
@@ -583,12 +691,13 @@ const (
 )
 
 type stepOptions struct {
-	maxRetries    int
-	backoffFactor float64
-	baseInterval  time.Duration
-	maxInterval   time.Duration
-	stepName      string
-	preStepID     *int
+	maxRetries     int
+	backoffFactor  float64
+	baseInterval   time.Duration
+	maxInterval    time.Duration
+	stepName       string
+	preStepID      *int
+	skipCheckpoint bool
 }
 
 func (opts *stepOptions) setDefaults() {
@@ -634,6 +743,13 @@ func WithNextStepID(stepID int) StepOption {
 	return func(opts *stepOptions) { opts.preStepID = &stepID }
 }
 
+// WithoutCheckpoint skips persisting the step result to the database.
+// The step will always re-execute during recovery instead of replaying from a checkpoint.
+// Use this for steps that establish non-serializable resources like network connections.
+func WithoutCheckpoint() StepOption {
+	return func(opts *stepOptions) { opts.skipCheckpoint = true }
+}
+
 // Do executes a function as a durable step within a workflow.
 func Do[R any](ctx Context, fn Step[R], opts ...StepOption) (R, error) {
 	rt := runtimeFromContext(ctx)
@@ -653,8 +769,7 @@ func Do[R any](ctx Context, fn Step[R], opts ...StepOption) (R, error) {
 		if !ok {
 			return *new(R), fmt.Errorf("checkpointed value is not *string")
 		}
-		ser := newJSONSerializer[R]()
-		return ser.Decode(encoded)
+		return decodeJSON[R](encoded)
 	}
 
 	if typed, ok := result.(R); ok {
@@ -689,25 +804,33 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn StepFunc, opts ...St
 		stepID = wfState.nextStepID()
 	}
 
-	// Check if already executed
-	recorded, err := retryWithResult(ctx, func() (*recordedResult, error) {
-		return rt.systemDB.checkOperationExecution(ctx, checkOperationExecutionDBInput{
-			workflowUUID: wfState.workflowID,
-			functionID:   stepID,
-		})
-	}, withRetrierLogger(rt.logger))
-	if err != nil {
-		return nil, fmt.Errorf("checking step execution: %w", err)
-	}
-	if recorded != nil {
-		var stepErr error
-		if recorded.errorMsg != nil && *recorded.errorMsg != "" {
-			stepErr = errors.New(*recorded.errorMsg)
+	if !stepOpts.skipCheckpoint {
+		// Check if already executed
+		recorded, err := retryWithResult(ctx, func() (*recordedResult, error) {
+			return rt.systemDB.checkOperationExecution(ctx, checkOperationExecutionDBInput{
+				workflowUUID: wfState.workflowID,
+				functionID:   stepID,
+			})
+		}, withRetrierLogger(rt.app.Logger()))
+		if err != nil {
+			return nil, fmt.Errorf("checking step execution: %w", err)
 		}
-		return stepCheckpointedOutcome{value: recorded.output}, stepErr
+		if recorded != nil {
+			rt.app.Logger().Debug("step replayed from checkpoint", "workflow_id", wfState.workflowID, "step", stepOpts.stepName, "step_id", stepID, "source", "system")
+			wfState.recovering = true
+			var stepErr error
+			if recorded.errorMsg != nil && *recorded.errorMsg != "" {
+				stepErr = errors.New(*recorded.errorMsg)
+			}
+			return stepCheckpointedOutcome{value: recorded.output}, stepErr
+		}
+
+		// Clear recovering flag — we've passed replay and are executing new steps
+		wfState.recovering = false
 	}
 
 	// Execute with retry
+	rt.app.Logger().Info("step started", "workflow_id", wfState.workflowID, "step", stepOpts.stepName, "step_id", stepID, "source", "system")
 	stepState := &workflowState{workflowID: wfState.workflowID, isWithinStep: true}
 	stepState.stepID.Store(int64(stepID))
 	stepCtx := context.WithValue(ctx, workflowStateKey, stepState)
@@ -715,33 +838,41 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn StepFunc, opts ...St
 
 	stepOutput, stepErr := executeStepWithRetry(ctx, rt, stepOpts, func() (any, error) { return fn(stepCtx) })
 
-	// Serialize and record
-	ser := newJSONSerializer[any]()
-	encodedOutput, serErr := ser.Encode(stepOutput)
-	if serErr != nil {
-		return nil, fmt.Errorf("failed to serialize step output: %w", serErr)
-	}
-
 	endTime := time.Now()
-	var errorMsg *string
+	dur := endTime.Sub(startTime)
 	if stepErr != nil {
-		s := stepErr.Error()
-		errorMsg = &s
+		rt.app.Logger().Error("step failed", "workflow_id", wfState.workflowID, "step", stepOpts.stepName, "step_id", stepID, "duration", dur, "error", stepErr.Error(), "source", "system")
+	} else {
+		rt.app.Logger().Info("step completed", "workflow_id", wfState.workflowID, "step", stepOpts.stepName, "step_id", stepID, "duration", dur, "source", "system")
 	}
 
-	recErr := retry(ctx, func() error {
-		return rt.systemDB.recordOperationResult(ctx, recordOperationResultDBInput{
-			workflowUUID: wfState.workflowID,
-			functionID:   stepID,
-			functionName: stepOpts.stepName,
-			output:       encodedOutput,
-			errorMsg:     errorMsg,
-			startedAt:    startTime.UnixMilli(),
-			endedAt:      endTime.UnixMilli(),
-		})
-	}, withRetrierLogger(rt.logger))
-	if recErr != nil {
-		return nil, fmt.Errorf("recording step result: %w", recErr)
+	if !stepOpts.skipCheckpoint {
+		// Serialize and record
+		encodedOutput, serErr := encodeJSON[any](stepOutput)
+		if serErr != nil {
+			return nil, fmt.Errorf("failed to serialize step output: %w", serErr)
+		}
+
+		var errorMsg *string
+		if stepErr != nil {
+			s := stepErr.Error()
+			errorMsg = &s
+		}
+
+		recErr := retry(ctx, func() error {
+			return rt.systemDB.recordOperationResult(ctx, recordOperationResultDBInput{
+				workflowUUID: wfState.workflowID,
+				functionID:   stepID,
+				functionName: stepOpts.stepName,
+				output:       encodedOutput,
+				errorMsg:     errorMsg,
+				startedAt:    startTime.UnixMilli(),
+				endedAt:      endTime.UnixMilli(),
+			})
+		}, withRetrierLogger(rt.app.Logger()))
+		if recErr != nil {
+			return nil, fmt.Errorf("recording step result: %w", recErr)
+		}
 	}
 
 	return stepOutput, stepErr
@@ -761,7 +892,7 @@ func executeStepWithRetry(ctx context.Context, rt *Runtime, opts *stepOptions, r
 			expDelay := float64(opts.baseInterval) * math.Pow(opts.backoffFactor, float64(retry-1))
 			delay = time.Duration(math.Min(expDelay, float64(opts.maxInterval)))
 		}
-		rt.logger.Error("step failed, retrying", "step_name", opts.stepName, "retry", retry, "delay", delay)
+		rt.app.Logger().Error("step failed, retrying", "step_name", opts.stepName, "retry", retry, "delay", delay)
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("context cancelled during retry: %w", ctx.Err())
@@ -773,14 +904,14 @@ func executeStepWithRetry(ctx context.Context, rt *Runtime, opts *stepOptions, r
 		}
 		joinedErrors = errors.Join(joinedErrors, err)
 	}
-	return output, newErrMaxRetriesError("", opts.stepName, opts.maxRetries, joinedErrors)
+	return output, newErrMaxRetries("", opts.stepName, opts.maxRetries, joinedErrors)
 }
 
 // Go runs a step in a goroutine. Must be within a workflow.
 func DoAsync[R any](ctx Context, fn Step[R], opts ...StepOption) (chan AsyncResult[R], error) {
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
-		return nil, fmt.Errorf("Go must be called within a workflow")
+		return nil, fmt.Errorf("doAsync must be called within a workflow")
 	}
 	opts = append(opts, WithNextStepID(wfState.nextStepID()))
 
@@ -800,8 +931,7 @@ func DoAsync[R any](ctx Context, fn Step[R], opts ...StepOption) (chan AsyncResu
 // Send sends a message to another workflow.
 func Send(ctx Context, destinationID string, message any, topic string) error {
 	rt := runtimeFromContext(ctx)
-	ser := newJSONSerializer[any]()
-	encoded, err := ser.Encode(message)
+	encoded, err := encodeJSON[any](message)
 	if err != nil {
 		return fmt.Errorf("failed to serialize message: %w", err)
 	}
@@ -818,7 +948,7 @@ func Send(ctx Context, destinationID string, message any, topic string) error {
 				Topic:           topic,
 				Message:         encoded,
 			})
-		}, WithStepName("pf.send"))
+		}, WithStepName("pt.send"))
 		return err
 	}
 
@@ -828,7 +958,7 @@ func Send(ctx Context, destinationID string, message any, topic string) error {
 			Topic:           topic,
 			Message:         encoded,
 		})
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()))
 }
 
 // Recv receives a message within a workflow.
@@ -848,22 +978,20 @@ func Recv[R any](ctx Context, topic string, timeout time.Duration) (R, error) {
 			topic:        topic,
 			timeout:      timeout,
 		})
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()))
 	if err != nil {
 		return *new(R), err
 	}
 	if encoded == nil {
 		return *new(R), nil
 	}
-	ser := newJSONSerializer[R]()
-	return ser.Decode(encoded)
+	return decodeJSON[R](encoded)
 }
 
 // SetValue sets a key-value event for the current workflow.
 func SetValue(ctx Context, key string, value any) error {
 	rt := runtimeFromContext(ctx)
-	ser := newJSONSerializer[any]()
-	encoded, err := ser.Encode(value)
+	encoded, err := encodeJSON[any](value)
 	if err != nil {
 		return fmt.Errorf("failed to serialize event value: %w", err)
 	}
@@ -879,7 +1007,7 @@ func SetValue(ctx Context, key string, value any) error {
 			Key:          key,
 			Value:        encoded,
 		})
-	}, WithStepName("pf.setEvent"))
+	}, WithStepName("pt.setEvent"))
 	return err
 }
 
@@ -892,15 +1020,14 @@ func GetValue[R any](ctx Context, targetWorkflowID string, key string, timeout t
 			key:                key,
 			timeout:            timeout,
 		})
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()))
 	if err != nil {
 		return *new(R), err
 	}
 	if encoded == nil {
 		return *new(R), nil
 	}
-	ser := newJSONSerializer[R]()
-	return ser.Decode(encoded)
+	return decodeJSON[R](encoded)
 }
 
 // Sleep performs a durable sleep within a workflow.
@@ -910,7 +1037,7 @@ func GetValue[R any](ctx Context, targetWorkflowID string, key string, timeout t
 func Pause(ctx Context, duration time.Duration) error {
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
-		return fmt.Errorf("Sleep must be called within a workflow")
+		return fmt.Errorf("pause must be called within a workflow")
 	}
 	if wfState.isWithinStep {
 		return fmt.Errorf("cannot call Sleep within a step")
@@ -930,7 +1057,7 @@ func Pause(ctx Context, duration time.Duration) error {
 			}
 		}
 		return wakeUpTime.UnixMilli(), nil
-	}, WithStepName("pf.sleep"))
+	}, WithStepName("pt.sleep"))
 	if err != nil {
 		return err
 	}
@@ -953,7 +1080,6 @@ func Pause(ctx Context, duration time.Duration) error {
 /******* WORKFLOW MANAGEMENT ***********/
 /****************************************/
 
-
 // Retrieve returns a handle to an existing workflow.
 func Retrieve[R any](rt *Runtime, workflowID string) Handle[R] {
 	return &workflowPollingHandle[R]{baseHandle: baseHandle{workflowID: workflowID, runtime: rt}}
@@ -961,41 +1087,67 @@ func Retrieve[R any](rt *Runtime, workflowID string) Handle[R] {
 
 // Cancel cancels a workflow by ID.
 func (rt *Runtime) Cancel(workflowID string) error {
-	return retry(rt.ctx, func() error {
-		return rt.systemDB.cancelWorkflow(rt.ctx, cancelWorkflowDBInput{workflowID: workflowID})
-	}, withRetrierLogger(rt.logger))
+	var transitioned bool
+	err := retry(rt.ctx, func() error {
+		changed, err := rt.systemDB.cancelWorkflow(rt.ctx, cancelWorkflowDBInput{workflowID: workflowID})
+		if err != nil {
+			return err
+		}
+		transitioned = changed
+		return nil
+	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
+	if err != nil {
+		return err
+	}
+	if transitioned {
+		rt.app.Logger().Info("workflow cancelled", "workflow_id", workflowID, "source", "system")
+		record, err := rt.app.FindRecordById(collectionStatus, workflowID)
+		if err != nil {
+			rt.app.Logger().Error("failed to look up cancelled workflow for dispatch", "workflow_id", workflowID, "error", err, "source", "system")
+			return nil
+		}
+		name := record.GetString("name")
+		go rt.dispatchEvent(workflowID, name, StatusCancelled, nil, nil)
+	}
+
+	return nil
 }
 
 // Resume resumes a cancelled workflow.
 func (rt *Runtime) Resume(workflowID string) error {
-	return retry(rt.ctx, func() error {
+	err := retry(rt.ctx, func() error {
 		return rt.systemDB.resumeWorkflow(rt.ctx, resumeWorkflowDBInput{
 			workflowID: workflowID,
 			executorID: rt.executorID,
 			appVersion: rt.applicationVersion,
 		})
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
+	if err != nil {
+		return err
+	}
+	rt.app.Logger().Info("workflow resumed", "workflow_id", workflowID, "source", "system")
+	return nil
 }
 
 // List returns workflows matching the given filters.
 func (rt *Runtime) List(input listWorkflowsDBInput) ([]Status, error) {
 	return retryWithResult(rt.ctx, func() ([]Status, error) {
 		return rt.systemDB.listWorkflows(rt.ctx, input)
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
 }
 
 // Steps returns the execution steps for a workflow.
 func (rt *Runtime) Steps(workflowID string) ([]StepInfo, error) {
 	steps, err := retryWithResult(rt.ctx, func() ([]stepInfo, error) {
 		return rt.systemDB.getWorkflowSteps(rt.ctx, getWorkflowStepsInput{workflowID: workflowID})
-	}, withRetrierLogger(rt.logger))
+	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
 	if err != nil {
 		return nil, err
 	}
 	result := make([]StepInfo, len(steps))
 	for i, s := range steps {
 		result[i] = StepInfo{
-			WorkflowID: s.workflowUUID,
+			WorkflowID:   s.workflowUUID,
 			FunctionID:   s.functionID,
 			FunctionName: s.functionName,
 		}

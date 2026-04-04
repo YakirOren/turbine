@@ -7,7 +7,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/YakirOren/pocketflow"
+	"github.com/YakirOren/turbine"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -20,13 +20,13 @@ func CallUnreliableAPI(ctx context.Context) (string, error) {
 }
 
 // FetchWorkflow calls an unreliable API with automatic retries and exponential backoff.
-func FetchWorkflow(ctx pocketflow.Context, url string) (string, error) {
-	result, err := pocketflow.Do(ctx, CallUnreliableAPI,
-		pocketflow.WithStepName("fetch"),
-		pocketflow.WithStepMaxRetries(5),
-		pocketflow.WithBackoffFactor(2.0),
-		pocketflow.WithBaseInterval(500*time.Millisecond),
-		pocketflow.WithMaxInterval(10*time.Second),
+func FetchWorkflow(ctx turbine.Context, url string) (string, error) {
+	result, err := turbine.Do(ctx, CallUnreliableAPI,
+		turbine.WithStepName("fetch"),
+		turbine.WithStepMaxRetries(5),
+		turbine.WithBackoffFactor(2.0),
+		turbine.WithBaseInterval(500*time.Millisecond),
+		turbine.WithMaxInterval(10*time.Second),
 	)
 	if err != nil {
 		return "", err
@@ -38,15 +38,15 @@ func FetchWorkflow(ctx pocketflow.Context, url string) (string, error) {
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Setup(app, pocketflow.Config{})
+	rt := turbine.Setup(app, turbine.Config{})
 
-	pocketflow.Register(rt, FetchWorkflow)
+	turbine.Register(rt, FetchWorkflow)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/fetch/{url}", func(re *core.RequestEvent) error {
 			url := re.Request.PathValue("url")
 
-			handle, err := pocketflow.Run(rt, FetchWorkflow, url)
+			handle, err := turbine.Run(rt, FetchWorkflow, url)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}

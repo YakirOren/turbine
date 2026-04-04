@@ -3,27 +3,27 @@ package main
 import (
 	"log"
 
-	"github.com/YakirOren/pocketflow"
+	"github.com/YakirOren/turbine"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 )
 
-func Greet(ctx pocketflow.Context, name string) (string, error) {
+func Greet(ctx turbine.Context, name string) (string, error) {
 	return "hello " + name, nil
 }
 
 func main() {
 	app := pocketbase.New()
 
-	rt := pocketflow.Setup(app, pocketflow.Config{})
+	rt := turbine.Setup(app, turbine.Config{})
 
-	pocketflow.Register(rt, Greet)
+	turbine.Register(rt, Greet)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST("/greet/{name}", func(re *core.RequestEvent) error {
 			name := re.Request.PathValue("name")
 
-			handle, err := pocketflow.Run(rt, Greet, name)
+			handle, err := turbine.Run(rt, Greet, name)
 			if err != nil {
 				return re.JSON(500, map[string]string{"error": err.Error()})
 			}
