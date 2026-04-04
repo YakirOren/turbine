@@ -30,10 +30,6 @@ func Mount(app core.App, rt *turbine.Runtime) {
 		fileServer := http.StripPrefix("/_/turbine/", http.FileServerFS(subFS))
 
 		se.Router.GET("/_/turbine/{path...}", func(e *core.RequestEvent) error {
-			if !e.HasSuperuserAuth() {
-				return e.Redirect(http.StatusTemporaryRedirect, "/_/")
-			}
-
 			path := e.Request.PathValue("path")
 
 			if path != "" {

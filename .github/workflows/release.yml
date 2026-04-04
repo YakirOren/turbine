@@ -90,12 +90,14 @@ jobs:
       - name: Build dashboard UI
         run: npm --prefix=./ui ci && npm --prefix=./ui run build
 
-      - name: Verify dashboard dist is up to date
+      - name: Commit dashboard dist if changed
         run: |
           if ! git diff --quiet dashboard/dist/; then
-            echo "::error::dashboard/dist/ is out of date — run 'cd ui && npm run build' and commit before tagging"
-            git diff --stat dashboard/dist/
-            exit 1
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add dashboard/dist/
+            git commit -m "update dashboard dist"
+            git push
           fi
 
       - name: Run tests
