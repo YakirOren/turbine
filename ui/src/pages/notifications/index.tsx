@@ -41,7 +41,7 @@ import { TableSkeleton } from "@/components/table-skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { PtAlertChannelsResponse } from "@/types/pocketbase-types";
 
-type AlertChannelRecord = PtAlertChannelsResponse<string[]>;
+type AlertChannelRecord = PtAlertChannelsResponse<string[]> & { events: string[] };
 
 const formSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -195,7 +195,7 @@ export function NotificationList() {
   };
 
   const openEdit = (record: AlertChannelRecord) => {
-    reset({ name: record.name, url: "", events: [...(record.events ?? [])], enabled: record.enabled });
+    reset({ name: record.name, url: "", events: [...record.events], enabled: record.enabled });
     setEditingId(record.id);
     setDialogOpen(true);
   };
@@ -347,7 +347,7 @@ export function NotificationList() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editingId ? "Edit Channel" : "Add Channel"}</DialogTitle>
+            <DialogTitle>{editingId ? "Edit Notification Channel" : "Add Notification Channel"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <Field>
@@ -423,7 +423,7 @@ export function NotificationList() {
             <div className="flex justify-end">
               <Button
                 onClick={rhfSubmit((data) => saveMutation.mutate(data))}
-                disabled={saveMutation.isPending}
+                disabled={saveMutation.isPending || events.length === 0}
               >
                 {saveMutation.isPending ? (editingId ? "Saving..." : "Creating...") : (editingId ? "Save" : "Create")}
               </Button>

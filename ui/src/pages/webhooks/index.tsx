@@ -41,7 +41,7 @@ import { TableSkeleton } from "@/components/table-skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { PtWebhooksResponse } from "@/types/pocketbase-types";
 
-type WebhookRecord = PtWebhooksResponse<string[]>;
+type WebhookRecord = PtWebhooksResponse<string[]> & { events: string[] };
 
 const webhookFormSchema = z.object({
   url: z.string().url("Invalid URL"),
@@ -158,7 +158,7 @@ export function WebhookList() {
   };
 
   const openEdit = (record: WebhookRecord) => {
-    reset({ url: record.url, events: [...(record.events ?? [])], secret: "", enabled: record.enabled });
+    reset({ url: record.url, events: [...record.events], secret: "", enabled: record.enabled });
     setEditingId(record.id);
     setDialogOpen(true);
   };
@@ -222,7 +222,7 @@ export function WebhookList() {
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
-                      {(record.events ?? []).map((event) => (
+                      {record.events.map((event) => (
                         <Badge
                           key={event}
                           variant="secondary"
@@ -373,7 +373,7 @@ export function WebhookList() {
             <div className="flex justify-end">
               <Button
                 onClick={rhfSubmit((data) => saveMutation.mutate(data))}
-                disabled={saveMutation.isPending}
+                disabled={saveMutation.isPending || events.length === 0}
               >
                 {saveMutation.isPending ? (editingId ? "Saving..." : "Creating...") : (editingId ? "Save" : "Create")}
               </Button>
