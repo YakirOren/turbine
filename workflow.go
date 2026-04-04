@@ -125,10 +125,6 @@ func withTags(tags []string) WorkflowOption {
 	return func(o *workflowOptions) { o.Tags = tags }
 }
 
-func withSummary(summary string) WorkflowOption {
-	return func(p *workflowOptions) { p.Summary = summary }
-}
-
 /*******************************/
 /******* WORKFLOW HANDLES *****/
 /*******************************/
@@ -915,7 +911,7 @@ func executeStepWithRetry(ctx context.Context, rt *Runtime, opts *stepOptions, r
 func DoAsync[R any](ctx Context, fn Step[R], opts ...StepOption) (chan AsyncResult[R], error) {
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
-		return nil, fmt.Errorf("Go must be called within a workflow")
+		return nil, fmt.Errorf("doAsync must be called within a workflow")
 	}
 	opts = append(opts, WithNextStepID(wfState.nextStepID()))
 
@@ -1041,7 +1037,7 @@ func GetValue[R any](ctx Context, targetWorkflowID string, key string, timeout t
 func Pause(ctx Context, duration time.Duration) error {
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
-		return fmt.Errorf("Sleep must be called within a workflow")
+		return fmt.Errorf("pause must be called within a workflow")
 	}
 	if wfState.isWithinStep {
 		return fmt.Errorf("cannot call Sleep within a step")

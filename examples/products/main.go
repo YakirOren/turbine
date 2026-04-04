@@ -42,9 +42,9 @@ func ReportWorkflow(ctx turbine.Context, input ReportInput) (string, error) {
 
 		var buf bytes.Buffer
 		w := csv.NewWriter(&buf)
-		w.Write([]string{"date", "item", "amount"})
-		w.Write([]string{"2026-03-01", "Widget A", "49.00"})
-		w.Write([]string{"2026-03-15", "Widget B", "129.00"})
+		_ = w.Write([]string{"date", "item", "amount"})
+		_ = w.Write([]string{"2026-03-01", "Widget A", "49.00"})
+		_ = w.Write([]string{"2026-03-15", "Widget B", "129.00"})
 		w.Flush()
 
 		name := fmt.Sprintf("%s-%s.csv", input.Customer, input.Month)

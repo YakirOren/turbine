@@ -106,7 +106,7 @@ func (rt *Runtime) dispatchWebhooks(workflowID, name string, status StatusType, 
 				rt.app.Logger().Error("webhook delivery failed", "url", url, "error", err)
 				return
 			}
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}(wh.url, wh.secret)
 	}
 }

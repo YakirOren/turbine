@@ -29,7 +29,7 @@ func ApprovalWorkflow(ctx turbine.Context, requestID string) (string, error) {
 	}
 
 	if !approved {
-		turbine.SetValue(ctx, "status", "rejected")
+		_ = turbine.SetValue(ctx, "status", "rejected")
 		return fmt.Sprintf("request %s rejected", requestID), nil
 	}
 
@@ -38,7 +38,7 @@ func ApprovalWorkflow(ctx turbine.Context, requestID string) (string, error) {
 		return "", err
 	}
 
-	turbine.SetValue(ctx, "status", "completed")
+	_ = turbine.SetValue(ctx, "status", "completed")
 	return fmt.Sprintf("request %s approved and processed", requestID), nil
 }
 

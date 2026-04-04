@@ -69,7 +69,7 @@ func DeployWorkflow(ctx turbine.Context, host string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer d.ssh.Close(ctx)
+	defer func() { _ = d.ssh.Close(ctx) }()
 
 	// Durable steps — checkpointed as normal
 	_, err = turbine.Do(ctx, d.Deploy, turbine.WithStepName("deploy"))

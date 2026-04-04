@@ -316,7 +316,7 @@ func (s *sqliteSysDB) listWorkflows(ctx context.Context, input listWorkflowsDBIn
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workflows: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var workflows []Status
 	for rows.Next() {
@@ -722,7 +722,7 @@ func (s *sqliteSysDB) getWorkflowSteps(ctx context.Context, input getWorkflowSte
 	if err != nil {
 		return nil, fmt.Errorf("failed to query workflow steps: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var steps []stepInfo
 	for rows.Next() {
@@ -1123,7 +1123,7 @@ func (s *sqliteSysDB) scanDequeuedWorkflows(q *dbx.Query) ([]dequeuedWorkflow, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to dequeue workflows: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var workflows []dequeuedWorkflow
 	for rows.Next() {
