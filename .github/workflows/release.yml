@@ -74,6 +74,7 @@ jobs:
             PATCH=$((PATCH + 1))
           fi
 
+          echo "prev_tag=$LATEST" >> "$GITHUB_OUTPUT"
           echo "tag=v${MAJOR}.${MINOR}.${PATCH}" >> "$GITHUB_OUTPUT"
           echo "Bumping $BUMP: $LATEST -> v${MAJOR}.${MINOR}.${PATCH}"
 
@@ -92,10 +93,10 @@ jobs:
 
       - name: Commit dashboard dist if changed
         run: |
-          if ! git diff --quiet dashboard/dist/; then
+          git add -f dashboard/dist/
+          if ! git diff --cached --quiet dashboard/dist/; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add dashboard/dist/
             git commit -m "update dashboard dist"
             git push
           fi
@@ -112,4 +113,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          generate_release_notes: true
+          generate_release_notes: false
