@@ -74,6 +74,7 @@ jobs:
             PATCH=$((PATCH + 1))
           fi
 
+          echo "prev_tag=$LATEST" >> "$GITHUB_OUTPUT"
           echo "tag=v${MAJOR}.${MINOR}.${PATCH}" >> "$GITHUB_OUTPUT"
           echo "Bumping $BUMP: $LATEST -> v${MAJOR}.${MINOR}.${PATCH}"
 
@@ -112,4 +113,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          generate_release_notes: true
+          generate_release_notes: false
+          body: "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.version.outputs.prev_tag }}...${{ steps.version.outputs.tag }}"
