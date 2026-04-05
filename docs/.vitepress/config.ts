@@ -3,9 +3,20 @@ import { defineConfig } from "vitepress";
 export default defineConfig({
   title: "Turbine",
   description: "Durable workflow engine for PocketBase",
-  base: "/turbine/",
   cleanUrls: true,
-  head: [["link", { rel: "icon", type: "image/svg+xml", href: "/turbine/favicon.svg" }]],
+  sitemap: {
+    hostname: "https://turbine.yakir.io",
+  },
+  head: [
+    ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
+    ["meta", { property: "og:type", content: "website" }],
+    ["meta", { property: "og:title", content: "Turbine" }],
+    ["meta", { property: "og:description", content: "Durable workflow engine for PocketBase" }],
+    ["meta", { property: "og:url", content: "https://turbine.yakir.io/" }],
+    ["meta", { name: "twitter:card", content: "summary" }],
+    ["meta", { name: "twitter:title", content: "Turbine" }],
+    ["meta", { name: "twitter:description", content: "Durable workflow engine for PocketBase" }],
+  ],
   themeConfig: {
     logo: "/favicon.svg",
     nav: [
