@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://yakiroren.github.io/turbine/sitemap.xml
