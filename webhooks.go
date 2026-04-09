@@ -2,12 +2,15 @@ package turbine
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/hashicorp/go-retryablehttp"
 )
 
 type cachedWebhook struct {
@@ -47,6 +50,26 @@ func (rt *Runtime) reloadWebhookCache() {
 	rt.webhookCache.Store(webhooks)
 }
 
+func (rt *Runtime) newWebhookClient() *retryablehttp.Client {
+	c := retryablehttp.NewClient()
+	c.RetryMax = rt.config.WebhookMaxRetries - 1
+	c.HTTPClient.Timeout = rt.config.WebhookTimeout
+	c.Logger = nil // suppress default log output; we log on final failure
+	c.CheckRetry = func(ctx context.Context, resp *http.Response, err error) (bool, error) {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		if err != nil {
+			return true, nil
+		}
+		if resp.StatusCode >= http.StatusInternalServerError {
+			return true, nil
+		}
+		return false, nil
+	}
+	return c
+}
+
 func (rt *Runtime) dispatchWebhooks(workflowID, name string, status StatusType, output *string, errorMsg *string) {
 	webhooks, _ := rt.webhookCache.Load().([]cachedWebhook)
 	if len(webhooks) == 0 {
@@ -80,33 +103,36 @@ func (rt *Runtime) dispatchWebhooks(workflowID, name string, status StatusType, 
 		return
 	}
 
+	client := rt.newWebhookClient()
+
 	for _, wh := range webhooks {
 		if !matchesEvent(wh.events, eventName) {
 			continue
 		}
 
 		go func(url, secret string) {
-			req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+			req, err := retryablehttp.NewRequestWithContext(rt.ctx, http.MethodPost, url, bytes.NewReader(body))
 			if err != nil {
-				rt.app.Logger().Error("webhook request failed", "url", url, "error", err)
+				rt.app.Logger().Error("webhook request creation failed", "url", url, "error", err)
 				return
 			}
 			req.Header.Set("Content-Type", "application/json")
-
 			if secret != "" {
 				mac := hmac.New(sha256.New, []byte(secret))
 				mac.Write(body)
-				sig := hex.EncodeToString(mac.Sum(nil))
-				req.Header.Set("X-Turbine-Signature", sig)
+				req.Header.Set("X-Turbine-Signature", hex.EncodeToString(mac.Sum(nil)))
 			}
 
-			client := &http.Client{Timeout: 10 * time.Second}
 			resp, err := client.Do(req)
 			if err != nil {
-				rt.app.Logger().Error("webhook delivery failed", "url", url, "error", err)
+				rt.app.Logger().Warn("webhook delivery failed after retries", "url", url, "error", err)
 				return
 			}
 			_ = resp.Body.Close()
+
+			if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+				rt.app.Logger().Warn("webhook delivery got unexpected status", "url", url, "status", resp.StatusCode)
+			}
 		}(wh.url, wh.secret)
 	}
 }

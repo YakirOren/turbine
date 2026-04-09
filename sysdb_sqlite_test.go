@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/tests"
 )
 
@@ -714,5 +715,95 @@ func TestGarbageCollectWorkflows(t *testing.T) {
 	err = sysDB.garbageCollectWorkflows(context.Background(), gcInput)
 	if err != nil {
 		t.Fatalf("garbageCollectWorkflows failed: %v", err)
+	}
+}
+
+func TestCancelWorkflowClearsDedupAndQueue(t *testing.T) {
+	sysDB, cleanup := setupSysDB(t)
+	defer cleanup()
+
+	wfID := "wf-cancel-dedup-1"
+	s := makeStatus(wfID)
+	s.Status = StatusEnqueued
+	s.QueueName = "my-queue"
+	s.DeduplicationID = "dedup-abc"
+	input := insertStatusDBInput{status: s}
+	_, err := sysDB.insertStatus(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = sysDB.cancelWorkflow(context.Background(), cancelWorkflowDBInput{workflowID: wfID})
+	if err != nil {
+		t.Fatalf("cancelWorkflow failed: %v", err)
+	}
+
+	// Verify dedup_id and queue_name were cleared
+	var dedupID, queueName string
+	err = sysDB.app.DB().Select("deduplication_id", "queue_name").
+		From("pt_workflow_status").
+		Where(dbx.HashExp{"id": wfID}).
+		Row(&dedupID, &queueName)
+	if err != nil {
+		t.Fatalf("failed to query workflow: %v", err)
+	}
+	if dedupID != "" {
+		t.Fatalf("expected deduplication_id to be cleared, got %q", dedupID)
+	}
+	if queueName != "" {
+		t.Fatalf("expected queue_name to be cleared, got %q", queueName)
+	}
+
+	// Verify we can now enqueue a new workflow with the same dedup ID
+	wfID2 := "wf-cancel-dedup-2"
+	s2 := makeStatus(wfID2)
+	s2.Status = StatusEnqueued
+	s2.QueueName = "my-queue"
+	s2.DeduplicationID = "dedup-abc"
+	_, err = sysDB.insertStatus(context.Background(), insertStatusDBInput{status: s2})
+	if err != nil {
+		t.Fatalf("expected to enqueue with same dedup ID after cancel, got: %v", err)
+	}
+}
+
+func TestGetQueuePartitionsExcludesTerminal(t *testing.T) {
+	sysDB, cleanup := setupSysDB(t)
+	defer cleanup()
+
+	// Insert an ENQUEUED workflow with a partition key
+	s1 := makeStatus("wf-partition-1")
+	s1.Status = StatusEnqueued
+	s1.QueueName = "partitioned-q"
+	s1.QueuePartitionKey = "tenant-a"
+	_, err := sysDB.insertStatus(context.Background(), insertStatusDBInput{status: s1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert a CANCELLED workflow with a different partition key
+	s2 := makeStatus("wf-partition-2")
+	s2.Status = StatusEnqueued
+	s2.QueueName = "partitioned-q"
+	s2.QueuePartitionKey = "tenant-b"
+	_, err = sysDB.insertStatus(context.Background(), insertStatusDBInput{status: s2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = sysDB.cancelWorkflow(context.Background(), cancelWorkflowDBInput{workflowID: "wf-partition-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	partitions, err := sysDB.getQueuePartitions(context.Background(), "partitioned-q")
+	if err != nil {
+		t.Fatalf("getQueuePartitions failed: %v", err)
+	}
+
+	// Should only contain tenant-a, not tenant-b (cancelled)
+	if len(partitions) != 1 {
+		t.Fatalf("expected 1 partition, got %d: %v", len(partitions), partitions)
+	}
+	if partitions[0] != "tenant-a" {
+		t.Fatalf("expected partition tenant-a, got %s", partitions[0])
 	}
 }

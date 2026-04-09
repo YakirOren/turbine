@@ -11,4 +11,6 @@ type Config struct {
 	GCRetention        time.Duration // How long to keep completed workflows. 0 = use default (72h). Negative = disabled.
 	GCSchedule         string        // Cron expression for GC. Default: "0 0 * * *" (daily midnight)
 	ProductSender      ProductSender // Optional: sender for dispatching products to external systems
+	WebhookMaxRetries  int           // Max webhook delivery attempts. 0 = use default (3).
+	WebhookTimeout     time.Duration // Timeout per webhook delivery attempt. 0 = use default (10s).
 }
