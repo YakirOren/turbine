@@ -91,9 +91,6 @@ func SendProduct(ctx context.Context, fileName string, data io.Reader, metadata 
 	record.Set("size", len(fileBytes))
 
 	if err := rt.app.Save(record); err != nil {
-		if isSQLiteUniqueViolation(err) {
-			return nil // concurrent duplicate — dedup
-		}
 		return fmt.Errorf("turbine: failed to save product: %w", err)
 	}
 

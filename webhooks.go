@@ -44,7 +44,7 @@ func (rt *Runtime) reloadWebhookCache() {
 		webhooks = append(webhooks, cachedWebhook{
 			url:    r.GetString("url"),
 			secret: r.GetString("secret"),
-			events: parseEvents(r.Get("events")),
+			events: r.GetStringSlice("events"),
 		})
 	}
 	rt.webhookCache.Store(webhooks)

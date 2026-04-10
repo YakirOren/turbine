@@ -1,8 +1,6 @@
 package turbine
 
 import (
-	"encoding/json"
-
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -50,17 +48,6 @@ func (rt *Runtime) registerDispatchHooks() {
 		rt.app.OnRecordAfterUpdateSuccess(col).BindFunc(reload)
 		rt.app.OnRecordAfterDeleteSuccess(col).BindFunc(reload)
 	}
-}
-
-// parseEvents extracts a []string from a PocketBase JSON field value.
-func parseEvents(raw any) []string {
-	b, err := json.Marshal(raw)
-	if err != nil {
-		return nil
-	}
-	var events []string
-	_ = json.Unmarshal(b, &events)
-	return events
 }
 
 // matchesEvent checks if eventName matches any entry in the events list,

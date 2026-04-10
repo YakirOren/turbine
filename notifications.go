@@ -26,7 +26,7 @@ func (rt *Runtime) reloadAlertChannelCache() {
 		}
 		channels = append(channels, cachedAlertChannel{
 			url:    r.GetString("url"),
-			events: parseEvents(r.Get("events")),
+			events: r.GetStringSlice("events"),
 		})
 	}
 	rt.alertChannelCache.Store(channels)
