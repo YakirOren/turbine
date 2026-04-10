@@ -30,7 +30,7 @@ Create a record in `pt_alert_channels` with:
 | Matrix | `matrix://user:pass@host` |
 | Generic webhook | `generic+https://example.com/endpoint` |
 
-See the [Shoutrrr docs](https://containrrr.dev/shoutrrr/v0.8/services/overview/) for the full list of 21 supported services and their URL formats.
+See the [Shoutrrr docs](https://shoutrrr.nickfedor.com/v0.14.3/services/overview/) for the full list of supported services and their URL formats.
 
 ## Events
 
@@ -68,6 +68,10 @@ Notifications are fire-and-forget. Failed deliveries are logged but **not retrie
 :::
 
 Notifications are dispatched asynchronously and don't block workflow completion.
+
+## Dashboard
+
+![Notifications page](../screenshots/notifications-page.png)
 
 ## Security
 

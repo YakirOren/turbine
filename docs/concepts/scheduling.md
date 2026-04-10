@@ -60,4 +60,8 @@ Compile-time schedules can be disabled at runtime through the `pt_schedules` col
 The `scheduledAt` parameter is useful for idempotency — you can use it to derive deterministic IDs or to check whether a scheduled window was already processed.
 :::
 
+## Dashboard
+
+![Scheduled workflows](../screenshots/scheduled.png)
+
 See the [scheduled example](/examples/scheduled) for a working demo.

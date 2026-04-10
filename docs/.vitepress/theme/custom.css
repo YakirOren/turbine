@@ -36,3 +36,12 @@
     transform: rotate(360deg);
   }
 }
+
+/* medium-zoom */
+.medium-zoom-overlay {
+  z-index: 30;
+}
+
+.medium-zoom-image--opened {
+  z-index: 31;
+}

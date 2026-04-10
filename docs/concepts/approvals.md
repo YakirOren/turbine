@@ -73,4 +73,8 @@ turbine.Send(ctx, targetWorkflowID,
 
 The Turbine dashboard shows an approve/reject UI for workflows that are waiting for approval.
 
+![Steps waiting for approval](../screenshots/steps-waiting-for-approval.png)
+
+![Sidebar with approval actions](../screenshots/side-bar-waiting-for-approval.png)
+
 See the [dashboard example](/examples/dashboard) for a deploy workflow with an approval gate (`DeployWorkflow`).

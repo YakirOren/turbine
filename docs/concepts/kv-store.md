@@ -76,3 +76,13 @@ Keys are plain strings — Turbine does not namespace them. Use conventions like
 ::: info
 The KV store is persistent across restarts — it's backed by the same SQLite database as everything else. Values are JSON-serialized and stored in the `pt_kv` collection.
 :::
+
+## Dashboard
+
+Browse and edit key-value pairs from the dashboard. Click a key to edit its value or view its JSON schema.
+
+![KV Store page](../screenshots/kv-storage-page.png)
+
+![Edit key settings](../screenshots/edit-key.png)
+
+![Edit key schema](../screenshots/edit-key-schea.png)

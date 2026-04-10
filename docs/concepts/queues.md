@@ -67,4 +67,8 @@ By default, every instance processes all queues. Use `Listen` to restrict which 
 rt.Listen(q)
 ```
 
+## Dashboard
+
+![Queues page](../screenshots/queues-page.png)
+
 See the [queue example](/examples/queue) for a working demo.
