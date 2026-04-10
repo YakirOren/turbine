@@ -71,3 +71,7 @@ Webhooks are fire-and-forget. Each delivery has a **10-second timeout** and **fa
 :::
 
 Webhooks are dispatched asynchronously and don't block workflow completion.
+
+## Dashboard
+
+![Webhooks page](../screenshots/webhooks-page.png)

@@ -71,3 +71,11 @@ result, err := turbine.Do(ctx, func(ctx context.Context) (string, error) {
 ## Skipping Checkpoints
 
 By default, every step result is saved to SQLite for replay on recovery. For steps that produce non-serializable results (like network connections), use `WithoutCheckpoint()` to always re-execute. See [Checkpoints](/concepts/checkpoints) for details.
+
+## Dashboard
+
+The workflow detail view renders a visual DAG of your steps, showing execution order, duration per step, and current status. Tabs below the graph let you switch between **Logs** and **Products**.
+
+![Workflow steps with logs](../screenshots/steps-page-logs.png)
+
+![Workflow steps with products](../screenshots/steps-page-products.png)

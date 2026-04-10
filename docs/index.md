@@ -4,6 +4,8 @@ Turbine is a durable workflow engine for [PocketBase](https://pocketbase.io). It
 
 You define workflows as Go functions. Turbine handles persistence, retries, scheduling, and recovery.
 
+![Turbine dashboard](./screenshots/steps-page-logs.png)
+
 ## Install
 
 ```bash
