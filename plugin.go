@@ -37,7 +37,6 @@ func Setup(app core.App, config Config) *Runtime {
 
 	registerWebhookHooks(app)
 	registerAlertChannelHooks(app)
-	registerKVHooks(app)
 
 	return rt
 }
@@ -51,18 +50,7 @@ func validateWebhookRecord(r *core.Record) error {
 	}
 
 	// Validate events
-	var events []string
-	raw2 := r.Get("events")
-	switch v := raw2.(type) {
-	case []string:
-		events = v
-	case []any:
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				events = append(events, s)
-			}
-		}
-	}
+	events := r.GetStringSlice("events")
 
 	if len(events) == 0 {
 		return router.NewBadRequestError("at least one event is required", nil)
@@ -75,22 +63,6 @@ func validateWebhookRecord(r *core.Record) error {
 	}
 
 	return nil
-}
-
-func registerKVHooks(app core.App) {
-	app.OnRecordCreate(collectionKV).BindFunc(func(e *core.RecordEvent) error {
-		if e.Record.GetString("key") == "" {
-			return router.NewBadRequestError("key must not be empty", nil)
-		}
-		return e.Next()
-	})
-
-	app.OnRecordUpdate(collectionKV).BindFunc(func(e *core.RecordEvent) error {
-		if e.Record.GetString("key") == "" {
-			return router.NewBadRequestError("key must not be empty", nil)
-		}
-		return e.Next()
-	})
 }
 
 func registerWebhookHooks(app core.App) {
@@ -129,18 +101,7 @@ func validateAlertChannelRecord(r *core.Record) error {
 	}
 
 	// Validate events
-	var events []string
-	eventsRaw := r.Get("events")
-	switch v := eventsRaw.(type) {
-	case []string:
-		events = v
-	case []any:
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				events = append(events, s)
-			}
-		}
-	}
+	events := r.GetStringSlice("events")
 
 	if len(events) == 0 {
 		return router.NewBadRequestError("at least one event is required", nil)

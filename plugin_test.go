@@ -94,8 +94,6 @@ func TestKVHookValidation(t *testing.T) {
 	}
 	defer rt.Shutdown(0)
 
-	registerKVHooks(app)
-
 	col, err := app.FindCollectionByNameOrId(collectionKV)
 	if err != nil {
 		t.Fatal(err)

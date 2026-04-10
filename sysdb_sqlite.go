@@ -481,7 +481,8 @@ func (s *sqliteSysDB) awaitWorkflowResult(ctx context.Context, workflowID string
 
 func (s *sqliteSysDB) cancelWorkflow(ctx context.Context, input cancelWorkflowDBInput) (bool, error) {
 	result, err := s.app.DB().NewQuery(`UPDATE pt_workflow_status
-		SET status = {:status}, updated_at_epoch_ms = {:updated_at}
+		SET status = {:status}, updated_at_epoch_ms = {:updated_at},
+		    deduplication_id = '', queue_name = ''
 		WHERE id = {:id}
 		  AND status NOT IN ({:success}, {:error}, {:cancelled})`).Bind(dbx.Params{
 		"status":     string(StatusCancelled),

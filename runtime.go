@@ -76,6 +76,12 @@ func New(app core.App, config Config) *Runtime {
 	if config.GCSchedule == "" {
 		config.GCSchedule = "0 0 * * *"
 	}
+	if config.WebhookMaxRetries == 0 {
+		config.WebhookMaxRetries = 3
+	}
+	if config.WebhookTimeout == 0 {
+		config.WebhookTimeout = 10 * time.Second
+	}
 
 	baseCtx, cancelFunc := context.WithCancelCause(context.Background())
 	drainCtx, drainCancel := context.WithCancel(baseCtx)
