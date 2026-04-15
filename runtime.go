@@ -190,6 +190,10 @@ func (rt *Runtime) IsDraining() bool { return rt.draining.Load() }
 // 1. Drain — stop accepting new work, let running workflows finish naturally
 // 2. Force — if timeout expires, cancel root context to kill remaining workflows
 func (rt *Runtime) Shutdown(timeout time.Duration) {
+	if !rt.launched.Load() {
+		return
+	}
+
 	rt.app.Logger().Info("turbine shutting down")
 
 	// Phase 1: Drain — stop accepting new work
