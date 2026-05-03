@@ -28,6 +28,16 @@ function loadFilters(): WorkflowFilters {
   }
 }
 
+export function patchWorkflowFilters(partial: Partial<WorkflowFilters>) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...parsed, ...partial }));
+  } catch {
+    /* ignore */
+  }
+}
+
 function timeRangeToEpochMs(range: string): number | null {
   const now = Date.now();
   switch (range) {
@@ -118,41 +128,50 @@ export function WorkflowList() {
   ];
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Workflows</h1>
-      <CalendarView
-        timeRange={filters.timeRange}
-        name={filters.name}
-        status={filters.status}
-        tag={filters.tag}
-        onDayClick={(day) => {
-          const dayStart = new Date(day + "T00:00:00").getTime();
-          const dayEnd = dayStart + 86400_000;
-          localStorage.setItem(STORAGE_KEY, JSON.stringify({
-            timeRange: "custom",
-            customFrom: dayStart,
-            customTo: dayEnd,
-            name: "",
-            status: "all",
-          }));
-          setFilters(loadFilters());
-        }}
-      />
-      <div className="flex items-center gap-3">
-        <WorkflowFilterBar filters={filters} onChange={setFilters} />
-        <div className="ml-auto">
-          <TriggerRunButton />
+    <div className="flex h-full min-h-0 flex-1 bg-card">
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto p-6">
+        <div className="space-y-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Workflows</h1>
+          </div>
+          <CalendarView
+            timeRange={filters.timeRange}
+            name={filters.name}
+            status={filters.status}
+            tag={filters.tag}
+            onDayClick={(day) => {
+              const dayStart = new Date(day + "T00:00:00").getTime();
+              const dayEnd = dayStart + 86400_000;
+              localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                timeRange: "custom",
+                customFrom: dayStart,
+                customTo: dayEnd,
+                name: "",
+                status: "all",
+              }));
+              setFilters(loadFilters());
+            }}
+          />
+          <div className="flex items-center gap-3">
+            <WorkflowFilterBar filters={filters} onChange={setFilters} />
+            <div className="ml-auto">
+              <TriggerRunButton />
+            </div>
+          </div>
+          <WorkflowTable
+            key={JSON.stringify(crudFilters)}
+            filters={crudFilters}
+            sorters={sorters}
+            selectedId={selectedId}
+            onRowClick={(record) => setSelectedId(record.id)}
+          />
         </div>
       </div>
-      <WorkflowTable
-        key={JSON.stringify(crudFilters)}
-        filters={crudFilters}
-        sorters={sorters}
-        onRowClick={(record) => setSelectedId(record.id)}
-      />
       <WorkflowSidebar
         workflowId={selectedId}
         onClose={() => setSelectedId(null)}
+        activeTag={filters.tag}
+        onTagClick={(tag) => setFilters({ ...filters, tag })}
       />
     </div>
   );

@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Toaster } from "sonner";
 import { useTheme } from "next-themes";
+import "@fontsource-variable/jetbrains-mono/index.css";
 import "./index.css";
 import App from "./App";
 import { ThemeProvider } from "@/components/theme-provider";

@@ -30,26 +30,26 @@ export function generateDayGrid(from: string, to: string): string[] {
 }
 
 export function cellColor(stat: DayStat | undefined, maxTotal: number): string {
-  if (!stat || stat.total === 0) return "bg-muted";
+  if (!stat || stat.total === 0) return "bg-[var(--heat-empty)]";
   const errorRate = stat.error / stat.total;
   const intensity = stat.total / maxTotal;
 
   if (errorRate > 0.5) {
-    if (intensity <= 0.25) return "bg-red-200 dark:bg-red-900/60";
-    if (intensity <= 0.5) return "bg-red-300 dark:bg-red-800";
-    if (intensity <= 0.75) return "bg-red-400 dark:bg-red-700";
-    return "bg-red-500 dark:bg-red-600";
+    if (intensity <= 0.25) return "bg-[var(--heat-danger-1)]";
+    if (intensity <= 0.5) return "bg-[var(--heat-danger-2)]";
+    if (intensity <= 0.75) return "bg-[var(--heat-danger-3)]";
+    return "bg-[var(--heat-danger-4)]";
   }
   if (errorRate > 0.2) {
-    if (intensity <= 0.25) return "bg-yellow-200 dark:bg-yellow-900/60";
-    if (intensity <= 0.5) return "bg-yellow-300 dark:bg-yellow-800";
-    if (intensity <= 0.75) return "bg-orange-400 dark:bg-orange-700";
-    return "bg-orange-500 dark:bg-orange-600";
+    if (intensity <= 0.25) return "bg-[var(--heat-warning-1)]";
+    if (intensity <= 0.5) return "bg-[var(--heat-warning-2)]";
+    if (intensity <= 0.75) return "bg-[var(--heat-warning-3)]";
+    return "bg-[var(--heat-warning-4)]";
   }
-  if (intensity <= 0.25) return "bg-green-200 dark:bg-green-900";
-  if (intensity <= 0.5) return "bg-green-400 dark:bg-green-700";
-  if (intensity <= 0.75) return "bg-green-500 dark:bg-green-500";
-  return "bg-green-600 dark:bg-green-400";
+  if (intensity <= 0.25) return "bg-[var(--heat-success-1)]";
+  if (intensity <= 0.5) return "bg-[var(--heat-success-2)]";
+  if (intensity <= 0.75) return "bg-[var(--heat-success-3)]";
+  return "bg-[var(--heat-success-4)]";
 }
 
 export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

@@ -41,6 +41,12 @@ export function formatReadableDate(dateStr: string): string {
   return dayjs(dateStr).format("ddd, MMM D");
 }
 
+export function formatScheduledAt(dateStr: string): string | null {
+  const d = dayjs(dateStr);
+  if (!d.isValid()) return null;
+  return `${d.format("ddd, MMM D [at] h:mm A")} · ${d.fromNow()}`;
+}
+
 export function formatMonthShort(dateStr: string): string {
   return dayjs(dateStr).format("MMM");
 }

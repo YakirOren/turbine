@@ -79,9 +79,9 @@ function formatTooltipLabel(timeRange: string): (v: number) => string {
 }
 
 const chartConfig = {
-  success: { label: "Success", color: "var(--color-green-500)" },
-  error: { label: "Error", color: "var(--color-red-500)" },
-  cancelled: { label: "Cancelled", color: "var(--color-gray-500)" },
+  success: { label: "Success", color: "var(--success)" },
+  error: { label: "Error", color: "var(--danger)" },
+  cancelled: { label: "Cancelled", color: "var(--muted-foreground)" },
 } satisfies ChartConfig;
 
 export function CalendarView({ timeRange = "all", name, status, tag, onDayClick }: CalendarViewProps) {
@@ -112,6 +112,12 @@ export function CalendarView({ timeRange = "all", name, status, tag, onDayClick 
   const hasError = stats.some((s) => s.error > 0);
   const hasCancelled = stats.some((s) => s.cancelled > 0);
 
+  const totals = useMemo(() => {
+    let success = 0, error = 0, cancelled = 0;
+    for (const s of stats) { success += s.success; error += s.error; cancelled += s.cancelled; }
+    return { success, error, cancelled };
+  }, [stats]);
+
   const tickFormatter = useMemo(() => formatTick(timeRange), [timeRange]);
   const tooltipFormatter = useMemo(() => formatTooltipLabel(timeRange), [timeRange]);
 
@@ -135,8 +141,15 @@ export function CalendarView({ timeRange = "all", name, status, tag, onDayClick 
     );
   }
 
+  const ariaLabel = `Workflow activity, ${timeRange}: ${totals.success} success, ${totals.error} error, ${totals.cancelled} cancelled.`;
+
   return (
-    <ChartContainer config={chartConfig} className="h-[120px] w-full">
+    <ChartContainer
+      config={chartConfig}
+      className="h-[120px] w-full"
+      role="img"
+      aria-label={ariaLabel}
+    >
       <AreaChart
         data={stats}
         margin={{ top: 4, right: 4, bottom: 0, left: 0 }}
@@ -188,6 +201,7 @@ export function CalendarView({ timeRange = "all", name, status, tag, onDayClick 
             stroke="var(--color-success)"
             fillOpacity={0.3}
             stackId="a"
+            isAnimationActive={false}
           />
         )}
         {hasError && (
@@ -198,6 +212,7 @@ export function CalendarView({ timeRange = "all", name, status, tag, onDayClick 
             stroke="var(--color-error)"
             fillOpacity={0.3}
             stackId="a"
+            isAnimationActive={false}
           />
         )}
         {hasCancelled && (
@@ -208,6 +223,7 @@ export function CalendarView({ timeRange = "all", name, status, tag, onDayClick 
             stroke="var(--color-cancelled)"
             fillOpacity={0.3}
             stackId="a"
+            isAnimationActive={false}
           />
         )}
       </AreaChart>

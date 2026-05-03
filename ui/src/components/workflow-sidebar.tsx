@@ -1,14 +1,9 @@
-import { useState } from "react";
 import { useShow, useList, useInvalidate } from "@refinedev/core";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge, AppStatusBadge } from "@/components/status-badge";
+import { TERMINAL_STATUSES } from "@/components/step-status";
 import {
   Collapsible,
   CollapsibleContent,
@@ -26,11 +21,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { DrawerShell } from "@/components/drawer-shell";
 import { toast } from "sonner";
-import { Ban, Play, Copy, ChevronDown, GitBranch, Trash2, CheckCircle, XCircle } from "lucide-react";
+import { Ban, Play, Copy, ChevronDown, GitBranch, Trash2, CheckCircle, XCircle, X } from "lucide-react";
 import { useNavigate } from "react-router";
 import { pbClient } from "@/providers/pocketbase";
 import { timeAgo, formatDurationRange, formatTimestamp } from "@/lib/format";
+import { useMediaQuery } from "@/lib/use-media-query";
+import { cn } from "@/lib/utils";
 
 function CopyField({ label, value }: { label: string; value: string }) {
   return (
@@ -41,10 +39,11 @@ function CopyField({ label, value }: { label: string; value: string }) {
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 w-6 p-0"
+          aria-label={`Copy ${label}`}
+          className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
           onClick={() => navigator.clipboard.writeText(value)}
         >
-          <Copy className="h-3 w-3" />
+          <Copy className="h-3.5 w-3.5" />
         </Button>
       </div>
     </div>
@@ -54,7 +53,7 @@ function CopyField({ label, value }: { label: string; value: string }) {
 function JsonSection({ label, data }: { label: string; data: unknown }) {
   if (!data) return null;
   return (
-    <Collapsible>
+    <Collapsible defaultOpen>
       <CollapsibleTrigger className="group flex w-full items-center justify-between py-1 text-sm text-muted-foreground hover:text-foreground">
         {label}
         <ChevronDown className="h-4 w-4 transition-transform group-data-[state=open]:rotate-180" />
@@ -76,52 +75,121 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function WorkflowSidebar({
+function CancelResumeActions({
   workflowId,
-  onClose,
+  canCancel,
+  canResume,
 }: {
-  workflowId: string | null;
-  onClose: () => void;
+  workflowId: string;
+  canCancel: boolean;
+  canResume: boolean;
 }) {
-  const navigate = useNavigate();
   const invalidate = useInvalidate();
-  const [actionLoading, setActionLoading] = useState<"cancel" | "resume" | null>(null);
-
-  const handleAction = async (action: "cancel" | "resume") => {
-    setActionLoading(action);
-    try {
+  const mutation = useMutation({
+    mutationFn: async (action: "cancel" | "resume") => {
       await pbClient.send(`/api/pt/workflows/${workflowId}/${action}`, { method: "POST" });
+      return action;
+    },
+    onSuccess: (action) => {
       invalidate({ resource: "pt_workflow_status", invalidates: ["detail", "list"] });
       toast.success(action === "cancel" ? "Workflow cancelled" : "Workflow resumed");
-    } catch {
+    },
+    onError: (_err, action) => {
       toast.error(`Failed to ${action} workflow`);
-    } finally {
-      setActionLoading(null);
-    }
-  };
+    },
+  });
 
-  const [approvalLoading, setApprovalLoading] = useState<"approve" | "reject" | null>(null);
+  return (
+    <>
+      {canCancel && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={mutation.isPending && mutation.variables === "cancel"}
+          onClick={() => mutation.mutate("cancel")}
+        >
+          <Ban className="mr-1 h-4 w-4" />
+          {mutation.isPending && mutation.variables === "cancel" ? "Cancelling..." : "Cancel"}
+        </Button>
+      )}
+      {canResume && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={mutation.isPending && mutation.variables === "resume"}
+          onClick={() => mutation.mutate("resume")}
+        >
+          <Play className="mr-1 h-4 w-4" />
+          {mutation.isPending && mutation.variables === "resume" ? "Resuming..." : "Resume"}
+        </Button>
+      )}
+    </>
+  );
+}
 
-  const handleApproval = async (approved: boolean) => {
-    setApprovalLoading(approved ? "approve" : "reject");
-    try {
+function ApprovalActions({ workflowId }: { workflowId: string }) {
+  const invalidate = useInvalidate();
+  const mutation = useMutation({
+    mutationFn: async (approved: boolean) => {
       await pbClient.send(`/api/pt/workflows/${workflowId}/approve`, {
         method: "POST",
         body: { approved, comment: "" },
       });
+      return approved;
+    },
+    onSuccess: (approved) => {
       invalidate({ resource: "pt_workflow_status", invalidates: ["detail", "list"] });
       toast.success(approved ? "Workflow approved" : "Workflow rejected");
-    } catch {
+    },
+    onError: () => {
       toast.error("Failed to send approval decision");
-    } finally {
-      setApprovalLoading(null);
-    }
-  };
+    },
+  });
+
+  if (mutation.isPending || mutation.isSuccess) return null;
+
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        className="border-success/40 text-success-foreground hover:bg-success-soft"
+        onClick={() => mutation.mutate(true)}
+      >
+        <CheckCircle className="mr-1 h-4 w-4" />
+        Approve
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        className="border-danger/40 text-danger-foreground hover:bg-danger-soft"
+        onClick={() => mutation.mutate(false)}
+      >
+        <XCircle className="mr-1 h-4 w-4" />
+        Reject
+      </Button>
+    </div>
+  );
+}
+
+export function WorkflowSidebar({
+  workflowId,
+  onClose,
+  activeTag,
+  onTagClick,
+}: {
+  workflowId: string | null;
+  onClose: () => void;
+  activeTag?: string;
+  onTagClick?: (tag: string) => void;
+}) {
+  const navigate = useNavigate();
 
   const { query } = useShow({
     resource: "pt_workflow_status",
     id: workflowId ?? "",
-    queryOptions: { enabled: !!workflowId },
+    liveMode: "auto",
+    queryOptions: { enabled: !!workflowId, refetchInterval: 5000 },
   });
   const record = query?.data?.data as Record<string, unknown> | undefined;
 
@@ -130,17 +198,15 @@ export function WorkflowSidebar({
     filters: [
       { field: "parent_workflow_id", operator: "eq", value: workflowId ?? "" },
     ],
-    queryOptions: { enabled: !!workflowId },
+    liveMode: "auto",
+    queryOptions: { enabled: !!workflowId, refetchInterval: 5000 },
     pagination: { pageSize: 50 },
   });
   const children = childQuery?.data?.data ?? [];
 
   const status = (record?.status as string) ?? "";
   const canCancel = status === "PENDING" || status === "ENQUEUED";
-  const canResume =
-    status === "ERROR" ||
-    status === "CANCELLED" ||
-    status === "MAX_RECOVERY_ATTEMPTS_EXCEEDED";
+  const canResume = status === "CANCELLED";
   const canDelete =
     status === "SUCCESS" ||
     status === "ERROR" ||
@@ -149,83 +215,69 @@ export function WorkflowSidebar({
 
   const createdMs = record?.created_at_epoch_ms as number | undefined;
   const updatedMs = record?.updated_at_epoch_ms as number | undefined;
-  const isTerminal = status === "SUCCESS" || status === "ERROR" || status === "CANCELLED" || status === "MAX_RECOVERY_ATTEMPTS_EXCEEDED";
+  const isTerminal = TERMINAL_STATUSES.has(status);
 
-  return (
-    <Sheet open={!!workflowId} onOpenChange={() => onClose()}>
-      <SheetContent className="w-[480px] overflow-y-auto p-6 sm:max-w-lg">
+  const isLg = useMediaQuery("(min-width: 1024px)");
+
+  if (!workflowId) return null;
+
+  const header = (
+    <div className="flex items-start justify-between gap-3 border-b border-border-soft px-5 py-3.5">
+      <div className="min-w-0 flex-1">
+        {record ? (
+          <>
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <span className="truncate text-[15px] font-semibold">{record.name as string}</span>
+              <StatusBadge status={status} />
+              {typeof record.app_status === "string" && record.app_status && (
+                <AppStatusBadge
+                  label={record.app_status}
+                  color={record.app_status_color as string}
+                />
+              )}
+            </div>
+            {typeof record.summary === "string" && record.summary && (
+              <p className="text-[12.5px] text-muted-foreground">{record.summary}</p>
+            )}
+          </>
+        ) : (
+          <div className="text-sm text-muted-foreground">Loading…</div>
+        )}
+      </div>
+      {isLg && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onClose}
+          aria-label="Close workflow details"
+          className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      )}
+    </div>
+  );
+
+  const body = (
+    <>
+      {header}
+
+      <div className="flex-1 overflow-y-auto px-5 py-3">
           {record && (
             <>
-              <SheetHeader>
-                <SheetTitle className="flex items-center gap-2">
-                  {record.name as string}
-                  <StatusBadge status={status} />
-                  {typeof record.app_status === "string" && record.app_status && (
-                    <AppStatusBadge
-                      label={record.app_status}
-                      color={record.app_status_color as string}
-                    />
-                  )}
-                </SheetTitle>
-                {typeof record.summary === "string" && record.summary && (
-                  <p className="text-sm text-muted-foreground mt-1">{record.summary}</p>
-                )}
-              </SheetHeader>
-
-              {/* Actions: Show Steps is primary, Cancel/Resume only when applicable, Delete separated */}
-              <div className="mt-4 flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 <Button
                   size="sm"
                   onClick={() => navigate(`/workflows/${workflowId}/steps`)}
                 >
                   <GitBranch className="mr-1 h-4 w-4" /> Show Steps
                 </Button>
-                {canCancel && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={actionLoading === "cancel"}
-                    onClick={() => handleAction("cancel")}
-                  >
-                    <Ban className="mr-1 h-4 w-4" />
-                    {actionLoading === "cancel" ? "Cancelling..." : "Cancel"}
-                  </Button>
-                )}
-                {canResume && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={actionLoading === "resume"}
-                    onClick={() => handleAction("resume")}
-                  >
-                    <Play className="mr-1 h-4 w-4" />
-                    {actionLoading === "resume" ? "Resuming..." : "Resume"}
-                  </Button>
-                )}
-                {typeof record.app_status === "string" && record.app_status === "waiting for approval" && (
-                  <>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-green-500/40 text-green-600 hover:bg-green-500/10 dark:text-green-400"
-                      disabled={approvalLoading !== null}
-                      onClick={() => handleApproval(true)}
-                    >
-                      <CheckCircle className="mr-1 h-4 w-4" />
-                      {approvalLoading === "approve" ? "Approving..." : "Approve"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-red-500/40 text-red-600 hover:bg-red-500/10 dark:text-red-400"
-                      disabled={approvalLoading !== null}
-                      onClick={() => handleApproval(false)}
-                    >
-                      <XCircle className="mr-1 h-4 w-4" />
-                      {approvalLoading === "reject" ? "Rejecting..." : "Reject"}
-                    </Button>
-                  </>
-                )}
+                <CancelResumeActions
+                  key={workflowId}
+                  workflowId={workflowId}
+                  canCancel={canCancel}
+                  canResume={canResume}
+                />
                 <div className="flex-1" />
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
@@ -233,9 +285,10 @@ export function WorkflowSidebar({
                       variant="ghost"
                       size="sm"
                       disabled={!canDelete}
-                      className="h-8 w-8 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      aria-label="Delete workflow"
+                      className="h-7 w-7 p-0 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </AlertDialogTrigger>
                   <AlertDialogContent>
@@ -269,9 +322,13 @@ export function WorkflowSidebar({
                 </AlertDialog>
               </div>
 
+              {typeof record.app_status === "string" && record.app_status === "waiting for approval" && (
+                <ApprovalActions key={workflowId} workflowId={workflowId} />
+              )}
+
               {/* Error: shown prominently right after actions */}
               {record.error && (
-                <div className="mt-3 rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                <div className="mt-3 rounded-md border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger-foreground">
                   {record.error as string}
                 </div>
               )}
@@ -332,11 +389,37 @@ export function WorkflowSidebar({
                   <div className="flex items-center justify-between py-1">
                     <span className="text-sm text-muted-foreground">Tags</span>
                     <div className="flex flex-wrap gap-1">
-                      {(record.tags as string[]).map((tag) => (
-                        <Badge key={tag} variant="secondary" className="text-xs">
-                          {tag}
-                        </Badge>
-                      ))}
+                      {(record.tags as string[]).map((tag) => {
+                        const isActive = activeTag === tag;
+                        if (!onTagClick) {
+                          return (
+                            <Badge key={tag} variant="secondary" className="text-xs">
+                              {tag}
+                            </Badge>
+                          );
+                        }
+                        return (
+                          <Badge
+                            key={tag}
+                            asChild
+                            variant={isActive ? "default" : "secondary"}
+                            className={cn(
+                              "cursor-pointer text-xs transition-colors",
+                              isActive
+                                ? "hover:bg-primary/85"
+                                : "hover:bg-secondary/70 hover:text-foreground",
+                            )}
+                          >
+                            <button
+                              type="button"
+                              aria-pressed={isActive}
+                              onClick={() => onTagClick(isActive ? "" : tag)}
+                            >
+                              {tag}
+                            </button>
+                          </Badge>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -360,7 +443,7 @@ export function WorkflowSidebar({
                       <button
                         type="button"
                         key={child.id as string}
-                        className="flex w-full items-center justify-between rounded border p-2 text-sm hover:bg-accent"
+                        className="flex w-full items-center justify-between rounded-md border p-2 text-sm hover:bg-accent"
                         onClick={() => navigate(`/workflows/${child.id}/steps`)}
                       >
                         <div>
@@ -379,7 +462,18 @@ export function WorkflowSidebar({
               )}
             </>
           )}
-        </SheetContent>
-    </Sheet>
+      </div>
+    </>
+  );
+
+  return (
+    <DrawerShell
+      width="w-[380px]"
+      sheetClassName="gap-0"
+      srLabel="Workflow details"
+      onClose={onClose}
+    >
+      {body}
+    </DrawerShell>
   );
 }
