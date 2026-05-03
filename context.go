@@ -127,6 +127,17 @@ func setAppStatus(ctx context.Context, rt *Runtime, label, color string) error {
 	return nil
 }
 
+// SendNotification sends a custom message to the named alert channel.
+// Usable from inside a step via the step's context.Context, mirroring
+// the SetAppStatus/LoggerFrom/AppFrom pattern.
+func SendNotification(ctx context.Context, name, message string) error {
+	rt := runtimeFromContext(ctx)
+	if rt == nil {
+		return fmt.Errorf("not within a turbine context")
+	}
+	return rt.SendNotification(name, message)
+}
+
 // LoggerFrom returns a logger from a step's context.Context.
 // The logger includes workflow_id and step_id attributes automatically.
 // Returns a no-op logger if called outside a turbine context.

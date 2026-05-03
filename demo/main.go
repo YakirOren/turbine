@@ -295,7 +295,6 @@ func DeployWorkflow(ctx turbine.Context, input DeployInput) (string, error) {
 	}
 
 	if !input.DryRun {
-		ctx.SetAppStatus("awaiting approval", "yellow")
 		logger.Info("requesting deployment approval", "environment", input.Environment)
 
 		approval, err := turbine.WaitForApproval(ctx)
@@ -338,6 +337,9 @@ func NotifyWorkflow(ctx turbine.Context, input NotifyInput) (string, error) {
 
 	result, err := turbine.Do(ctx, func(ctx context.Context) (string, error) {
 		logger.Info("sending notification", "channel", input.Channel, "urgent", input.Urgent)
+		for i := 0; i < 150; i++ {
+			logger.Info("fetching metric", "metric", fmt.Sprintf("metric_%d", i))
+		}
 		time.Sleep(1 * time.Second)
 		return fmt.Sprintf("sent to #%s: %s", input.Channel, input.Message), nil
 	}, turbine.WithStepName("send"))

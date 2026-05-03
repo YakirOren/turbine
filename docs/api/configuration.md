@@ -54,3 +54,4 @@ Turbine creates these collections automatically on first launch:
 | `pt_kv` | Global key-value store |
 | `pt_schedules` | Schedule management (enable/disable) |
 | `pt_webhooks` | [Webhook](/concepts/webhooks) subscriptions |
+| `pt_alert_channels` | [Notification](/concepts/notifications) channels |

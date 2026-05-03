@@ -88,7 +88,7 @@ func (qr *queueRunner) run(rt *Runtime) {
 	if len(queuesToListen) == 0 {
 		queuesToListen = qr.workflowQueueRegistry
 	} else {
-		queuesToListen[_PT_INTERNAL_QUEUE_NAME] = qr.workflowQueueRegistry[_PT_INTERNAL_QUEUE_NAME]
+		queuesToListen[ptInternalQueueName] = qr.workflowQueueRegistry[ptInternalQueueName]
 	}
 
 	for _, q := range queuesToListen {

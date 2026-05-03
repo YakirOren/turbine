@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	_PT_INTERNAL_QUEUE_NAME = "_pt_internal_queue"
-	_DB_RETRY_INTERVAL      = 1 * time.Second
+	ptInternalQueueName = "_pt_internal_queue"
+	dbRetryInterval     = 1 * time.Second
 )
 
 type sqliteSysDB struct {
@@ -77,10 +77,6 @@ func isSQLiteUniqueViolation(err error) bool {
 	}
 	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
-
-/*******************************/
-/******* WORKFLOWS ********/
-/*******************************/
 
 func (s *sqliteSysDB) insertStatus(ctx context.Context, input insertStatusDBInput) (*insertWorkflowResult, error) {
 	attempts := 1
@@ -228,14 +224,19 @@ func (s *sqliteSysDB) insertStatus(ctx context.Context, input insertStatusDBInpu
 	if result.status != StatusSuccess && result.status != StatusError &&
 		input.maxRetries > 0 && result.attempts > input.maxRetries+1 {
 
-		_, dlqErr := s.app.DB().Update("pt_workflow_status", dbx.Params{
-			"status":           string(StatusMaxRecoveryAttemptsExceeded),
-			"deduplication_id": "",
-			"queue_name":       "",
-		}, dbx.HashExp{
-			"id":     input.status.ID,
-			"status": string(StatusPending),
-		}).Execute()
+		dlqErr := s.app.RunInTransaction(func(txApp core.App) error {
+			record, err := txApp.FindRecordById(collectionStatus, input.status.ID)
+			if err != nil {
+				return err
+			}
+			if record.GetString("status") != string(StatusPending) {
+				return nil
+			}
+			record.Set("status", string(StatusMaxRecoveryAttemptsExceeded))
+			record.Set("deduplication_id", "")
+			record.Set("queue_name", "")
+			return txApp.SaveNoValidate(record)
+		})
 		if dlqErr != nil {
 			return nil, fmt.Errorf("failed to update workflow to %s: %w", StatusMaxRecoveryAttemptsExceeded, dlqErr)
 		}
@@ -516,7 +517,7 @@ func (s *sqliteSysDB) resumeWorkflow(ctx context.Context, input resumeWorkflowDB
 		WHERE id = {:id}
 		  AND status NOT IN ({:success}, {:error})`).Bind(dbx.Params{
 		"status":     string(StatusEnqueued),
-		"queue":      _PT_INTERNAL_QUEUE_NAME,
+		"queue":      ptInternalQueueName,
 		"updated_at": time.Now().UnixMilli(),
 		"id":         input.workflowID,
 		"success":    string(StatusSuccess),
@@ -528,7 +529,7 @@ func (s *sqliteSysDB) resumeWorkflow(ctx context.Context, input resumeWorkflowDB
 	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected > 0 {
-		s.eventBus.Notify("queue::" + _PT_INTERNAL_QUEUE_NAME)
+		s.eventBus.Notify("queue::" + ptInternalQueueName)
 	}
 	if rowsAffected == 0 {
 		if err := s.workflowExists(input.workflowID); err != nil {
@@ -576,7 +577,7 @@ func (s *sqliteSysDB) forkWorkflow(ctx context.Context, input forkWorkflowDBInpu
 			"name":        orig.Name,
 			"app_ver":     orig.ApplicationVersion,
 			"app_id":      orig.ApplicationID,
-			"queue":       _PT_INTERNAL_QUEUE_NAME,
+			"queue":       ptInternalQueueName,
 			"inputs":      input.input,
 			"created_at":  now,
 			"updated_at":  now,
@@ -639,14 +640,10 @@ func (s *sqliteSysDB) forkWorkflow(ctx context.Context, input forkWorkflowDBInpu
 		return "", err
 	}
 
-	s.eventBus.Notify("queue::" + _PT_INTERNAL_QUEUE_NAME)
+	s.eventBus.Notify("queue::" + ptInternalQueueName)
 
 	return newID, nil
 }
-
-/*******************************/
-/******* STEPS ********/
-/*******************************/
 
 func (s *sqliteSysDB) recordOperationResult(ctx context.Context, input recordOperationResultDBInput) error {
 	_, err := s.app.DB().Insert("pt_operation_outputs", dbx.Params{
@@ -757,10 +754,6 @@ func (s *sqliteSysDB) getWorkflowSteps(ctx context.Context, input getWorkflowSte
 	return steps, rows.Err()
 }
 
-/*******************************/
-/******* CHILD WORKFLOWS ********/
-/*******************************/
-
 func (s *sqliteSysDB) recordChildWorkflow(ctx context.Context, input recordChildWorkflowDBInput) error {
 	_, err := s.app.DB().Insert("pt_operation_outputs", dbx.Params{
 		"id":                fmt.Sprintf("%s_%d", input.workflowUUID, input.functionID),
@@ -819,10 +812,6 @@ func (s *sqliteSysDB) recordChildGetResult(ctx context.Context, input recordChil
 	}
 	return nil
 }
-
-/****************************************/
-/******* WORKFLOW COMMUNICATIONS ********/
-/****************************************/
 
 func (s *sqliteSysDB) send(ctx context.Context, input SendInput) error {
 	msgID := core.GenerateDefaultRandomId()
@@ -1142,23 +1131,32 @@ func (s *sqliteSysDB) scanDequeuedWorkflows(q *dbx.Query) ([]dequeuedWorkflow, e
 }
 
 func (s *sqliteSysDB) clearQueueAssignment(ctx context.Context, workflowID string) (bool, error) {
-	result, err := s.app.DB().Update("pt_workflow_status", dbx.Params{
-		"status":              string(StatusEnqueued),
-		"queue_name":          _PT_INTERNAL_QUEUE_NAME,
-		"updated_at_epoch_ms": time.Now().UnixMilli(),
-	}, dbx.HashExp{
-		"id":     workflowID,
-		"status": string(StatusPending),
-	}).Execute()
+	var changed bool
+	err := s.app.RunInTransaction(func(txApp core.App) error {
+		record, err := txApp.FindRecordById(collectionStatus, workflowID)
+		if err != nil {
+			return err
+		}
+		if record.GetString("status") != string(StatusPending) {
+			return nil
+		}
+		record.Set("status", string(StatusEnqueued))
+		record.Set("queue_name", ptInternalQueueName)
+		record.Set("updated_at_epoch_ms", time.Now().UnixMilli())
+		if err := txApp.SaveNoValidate(record); err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
 	if err != nil {
 		return false, fmt.Errorf("failed to clear queue assignment: %w", err)
 	}
 
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected > 0 {
-		s.eventBus.Notify("queue::" + _PT_INTERNAL_QUEUE_NAME)
+	if changed {
+		s.eventBus.Notify("queue::" + ptInternalQueueName)
 	}
-	return rowsAffected > 0, nil
+	return changed, nil
 }
 
 func (s *sqliteSysDB) getQueuePartitions(ctx context.Context, queueName string) ([]string, error) {
@@ -1195,28 +1193,21 @@ func (s *sqliteSysDB) stopWaitForEnqueue(queueName string, ch chan struct{}) {
 	s.eventBus.Remove("queue::"+queueName, ch)
 }
 
-/*******************************/
-/******* APP STATUS ********/
-/*******************************/
-
 func (s *sqliteSysDB) updateAppStatus(ctx context.Context, input updateAppStatusDBInput) error {
-	_, err := s.app.DB().Update("pt_workflow_status", dbx.Params{
-		"app_status":          input.appStatus,
-		"app_status_color":    input.appStatusColor,
-		"updated_at_epoch_ms": time.Now().UnixMilli(),
-	}, dbx.HashExp{
-		"id": input.workflowID,
-	}).Execute()
-
+	record, err := s.app.FindRecordById(collectionStatus, input.workflowID)
 	if err != nil {
+		return fmt.Errorf("failed to find workflow status record: %w", err)
+	}
+
+	record.Set("app_status", input.appStatus)
+	record.Set("app_status_color", input.appStatusColor)
+	record.Set("updated_at_epoch_ms", time.Now().UnixMilli())
+
+	if err := s.app.SaveNoValidate(record); err != nil {
 		return fmt.Errorf("failed to update app status: %w", err)
 	}
 	return nil
 }
-
-/*******************************/
-/******* GARBAGE COLLECTION ********/
-/*******************************/
 
 func (s *sqliteSysDB) garbageCollectWorkflows(ctx context.Context, input garbageCollectWorkflowsInput) error {
 	cutoffMs := input.cutoffTime.UnixMilli()
@@ -1271,10 +1262,6 @@ func (s *sqliteSysDB) garbageCollectWorkflows(ctx context.Context, input garbage
 	s.logger.Info("Garbage collected workflows", "cutoff", cutoffMs, "deleted", rowsAffected)
 	return nil
 }
-
-/*******************************/
-/******* KEY-VALUE STORE ********/
-/*******************************/
 
 func (s *sqliteSysDB) setKV(ctx context.Context, input setKVInput) error {
 	_, err := s.app.DB().NewQuery(`INSERT INTO pt_kv (id, key, value, updated_at_epoch_ms)

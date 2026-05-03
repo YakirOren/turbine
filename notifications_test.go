@@ -152,6 +152,74 @@ func TestExtractScheme(t *testing.T) {
 	}
 }
 
+func TestSendNotification(t *testing.T) {
+	app, err := tests.NewTestApp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Cleanup()
+
+	rt := New(app, Config{})
+	if err := rt.Launch(); err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Shutdown(0)
+
+	col, err := app.FindCollectionByNameOrId(collectionAlertChannels)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	enabled := core.NewRecord(col)
+	enabled.Set("name", "ops-alerts")
+	enabled.Set("url", "logger://")
+	enabled.Set("events", `["workflow.SUCCESS"]`)
+	enabled.Set("enabled", true)
+	if err := app.SaveNoValidate(enabled); err != nil {
+		t.Fatalf("save enabled channel: %v", err)
+	}
+
+	disabled := core.NewRecord(col)
+	disabled.Set("name", "muted-channel")
+	disabled.Set("url", "logger://")
+	disabled.Set("events", `["workflow.SUCCESS"]`)
+	disabled.Set("enabled", false)
+	if err := app.SaveNoValidate(disabled); err != nil {
+		t.Fatalf("save disabled channel: %v", err)
+	}
+
+	t.Run("by name via runtime method", func(t *testing.T) {
+		if err := rt.SendNotification("ops-alerts", "hello"); err != nil {
+			t.Errorf("SendNotification() error = %v", err)
+		}
+	})
+
+	t.Run("via context helper", func(t *testing.T) {
+		ctx := rt.NewContext(context.Background())
+		if err := SendNotification(ctx, "ops-alerts", "hello via ctx"); err != nil {
+			t.Errorf("SendNotification(ctx) error = %v", err)
+		}
+	})
+
+	t.Run("context helper outside turbine context", func(t *testing.T) {
+		if err := SendNotification(context.Background(), "ops-alerts", "x"); err == nil {
+			t.Error("expected error when ctx has no runtime")
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		if err := rt.SendNotification("does-not-exist", "x"); err == nil {
+			t.Error("expected error for missing channel")
+		}
+	})
+
+	t.Run("disabled channel is a silent no-op", func(t *testing.T) {
+		if err := rt.SendNotification("muted-channel", "x"); err != nil {
+			t.Errorf("expected nil for disabled channel, got %v", err)
+		}
+	})
+}
+
 func TestCancelWorkflowTransitionFlag(t *testing.T) {
 	sysDB, cleanup := setupSysDB(t)
 	defer cleanup()

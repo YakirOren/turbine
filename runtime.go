@@ -108,7 +108,7 @@ func New(app core.App, config Config) *Runtime {
 	}
 
 	rt.queueRunner = newQueueRunner()
-	newWorkflowQueue(rt, _PT_INTERNAL_QUEUE_NAME)
+	newWorkflowQueue(rt, ptInternalQueueName)
 	rt.scheduleManager = newScheduleManager()
 
 	return rt
@@ -389,7 +389,7 @@ func (rt *Runtime) triggerByFQNWithOpts(fqn string, rawInput json.RawMessage, ex
 	encoded := string(rawInput)
 	opts := append([]WorkflowOption{
 		withAlreadyEncodedInput(),
-		WithQueue(_PT_INTERNAL_QUEUE_NAME),
+		WithQueue(ptInternalQueueName),
 	}, extraOpts...)
 
 	handle, err := entry.wrappedFunction(rt, &encoded, opts...)
