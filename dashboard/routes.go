@@ -20,5 +20,6 @@ func registerRoutes(se *core.ServeEvent, rt *turbine.Runtime) {
 	apiGroup.POST("/trigger", h.triggerWorkflow)
 	apiGroup.POST("/workflows/{id}/approve", h.approveWorkflow)
 	apiGroup.POST("/alert-channels/{id}/test", h.testAlertChannel)
+	apiGroup.POST("/products/{id}/resend", h.resendProduct)
 	apiGroup.GET("/calendar", h.calendarStats)
 }

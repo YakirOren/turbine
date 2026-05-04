@@ -12,6 +12,7 @@ import {KVList} from "@/pages/kv/index";
 import {SettingsLayout} from "@/pages/settings/index";
 import {WebhookList} from "@/pages/webhooks/index";
 import {NotificationList} from "@/pages/notifications/index";
+import {ProductList} from "@/pages/products/index";
 
 function PaddedOutlet() {
     return (
@@ -62,6 +63,7 @@ function App() {
                         <Route path="/workflows/:id/steps" element={<WorkflowSteps/>}/>
                         <Route path="/workflows" element={<WorkflowList/>}/>
                         <Route path="/queues" element={<QueueList/>}/>
+                        <Route path="/products" element={<ProductList/>}/>
                         <Route element={<PaddedOutlet/>}>
                             <Route path="/scheduled" element={<ScheduledList/>}/>
                             <Route path="/kv" element={<KVList/>}/>

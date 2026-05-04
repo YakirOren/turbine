@@ -27,6 +27,7 @@ import { nodeTypes } from "@/components/step-node";
 import { StepTimeline } from "@/components/step-timeline";
 import { TERMINAL_STATUSES } from "@/components/step-status";
 import { pbClient } from "@/providers/pocketbase";
+import { CodeMirrorEditor } from "@/components/codemirror";
 import { useMediaQuery } from "@/lib/use-media-query";
 import {
     ArrowLeft,
@@ -43,7 +44,7 @@ import {
     X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatDuration, formatTimestampPrecise, timeAgo } from "@/lib/format";
+import { formatDuration, formatTimestampPrecise, timeAgo, formatBytes } from "@/lib/format";
 import { patchWorkflowFilters } from "@/pages/workflows/list";
 import type { PtProductsResponse } from "@/types/pocketbase-types";
 
@@ -61,12 +62,6 @@ function readStoredLayout(): Layout {
     return isLayout(v) ? v : "split";
 }
 
-function formatBytes(bytes: number): string {
-    if (!bytes) return "—";
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / 1048576).toFixed(1)} MB`;
-}
 
 interface LogRecord {
     id: string;
@@ -1306,7 +1301,6 @@ function ProductInspector({ product, onClose }: { product: ProductRecord; onClos
             )}
 
             <InspectorRow label="Created" value={formatTimestampPrecise(product.created)} mono />
-            <InspectorRow label="Updated" value={formatTimestampPrecise(product.updated)} mono />
             <InspectorRow
                 label="Step"
                 value={product.function_name || `Step ${product.function_id}`}
@@ -1314,6 +1308,19 @@ function ProductInspector({ product, onClose }: { product: ProductRecord; onClos
             />
             <InspectorRow label="Function ID" value={String(product.function_id)} mono />
             <InspectorRow label="Size" value={formatBytes(product.size)} mono />
+
+            {product.metadata && (
+                <>
+                    <SectionLabel>Metadata</SectionLabel>
+                    <CodeMirrorEditor
+                        value={JSON.stringify(product.metadata, null, 2)}
+                        onChange={() => {}}
+                        readOnly
+                        minHeight="60px"
+                        maxHeight="240px"
+                    />
+                </>
+            )}
 
             {product.error && (
                 <>

@@ -108,7 +108,7 @@ func dispatchToSender(ctx context.Context, rt *Runtime, record *core.Record, dat
 		FileName: record.GetString("file_name"),
 		Size:     record.GetInt("size"),
 		Metadata: func() map[string]any {
-			raw := record.Get("metadata")
+			raw := record.GetRaw("metadata")
 			if m, ok := raw.(map[string]any); ok {
 				return m
 			}

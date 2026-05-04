@@ -15,6 +15,7 @@ import {
   Bell,
   BookOpen,
   ArrowUpRight,
+  Package,
 } from "lucide-react";
 import { TurbineLogo } from "@/components/turbine-logo";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -56,6 +57,7 @@ const navItems: NavItem[] = [
   { label: "Queues", path: "/queues", icon: LayoutList },
   { label: "Scheduled", path: "/scheduled", icon: Clock },
   { label: "KV Store", path: "/kv", icon: Database },
+  { label: "Products", path: "/products", icon: Package },
   {
     label: "Settings",
     path: "/settings",
