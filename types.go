@@ -3,6 +3,7 @@ package turbine
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync/atomic"
 	"time"
 )
@@ -271,18 +272,21 @@ type RateLimiter struct {
 }
 
 // ProductSender is the interface for sending products to external systems.
-// Users implement this to define custom destinations.
+// Users implement this to define custom destinations. The data reader carries
+// the full file bytes; the concrete value is *bytes.Reader, so senders that
+// need to rewind for retries can type-assert to io.Seeker.
 type ProductSender interface {
-	Send(ctx context.Context, product ProductRecord) error
+	Send(ctx context.Context, product ProductRecord, data io.Reader) error
 }
 
-// ProductRecord is the reference to a stored product passed to ProductSender.Send().
+// ProductRecord is the metadata reference to a stored product passed to
+// ProductSender.Send(). It is JSON-serializable so it can also be used as a
+// workflow input (see WorkflowSender).
 type ProductRecord struct {
 	ID       string         `json:"id"`
 	FileName string         `json:"file_name"`
 	Size     int            `json:"size"`
 	Metadata map[string]any `json:"metadata"`
-	FileURL  string         `json:"file_url"`
 }
 
 type setKVInput struct {

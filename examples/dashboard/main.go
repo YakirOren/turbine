@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"math/rand/v2"
 	"time"
@@ -164,8 +165,8 @@ func OrderWorkflow(ctx turbine.Context, input OrderInput) (string, error) {
 
 type LogSender struct{}
 
-func (s *LogSender) Send(_ context.Context, product turbine.ProductRecord) error {
-	fmt.Printf("[ProductSender] file=%s url=%s metadata=%v\n", product.FileName, product.FileURL, product.Metadata)
+func (s *LogSender) Send(_ context.Context, product turbine.ProductRecord, _ io.Reader) error {
+	fmt.Printf("[ProductSender] file=%s size=%d metadata=%v\n", product.FileName, product.Size, product.Metadata)
 	return nil
 }
 

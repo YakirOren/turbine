@@ -3,6 +3,7 @@ package turbine
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -13,12 +14,16 @@ import (
 type mockProductSender struct {
 	called  bool
 	product ProductRecord
+	data    []byte
 	err     error
 }
 
-func (m *mockProductSender) Send(_ context.Context, product ProductRecord) error {
+func (m *mockProductSender) Send(_ context.Context, product ProductRecord, data io.Reader) error {
 	m.called = true
 	m.product = product
+	if data != nil {
+		m.data, _ = io.ReadAll(data)
+	}
 	return m.err
 }
 
@@ -214,10 +219,9 @@ func TestWorkflowSender(t *testing.T) {
 		ID:       "test-id",
 		FileName: "report.pdf",
 		Metadata: map[string]any{"key": "value"},
-		FileURL:  "/api/files/test/test-id/report.pdf",
 	}
 
-	if err := sender.Send(context.Background(), product); err != nil {
+	if err := sender.Send(context.Background(), product, nil); err != nil {
 		t.Fatalf("Send failed: %v", err)
 	}
 

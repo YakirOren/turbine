@@ -36,19 +36,25 @@ Implement `ProductSender` to define how products are delivered:
 
 ```go
 type ProductSender interface {
-    Send(ctx context.Context, product ProductRecord) error
+    Send(ctx context.Context, product ProductRecord, data io.Reader) error
 }
 ```
 
+The `data` reader carries the full file bytes. The concrete value is `*bytes.Reader`, so senders that need to retry can type-assert to `io.Seeker` and rewind between attempts.
+
 ```go
 type S3Sender struct {
+    client *s3.Client
     bucket string
 }
 
-func (s *S3Sender) Send(ctx context.Context, product turbine.ProductRecord) error {
-    fmt.Printf("uploading %s (%d bytes) to s3://%s/\n", product.FileName, product.Size, s.bucket)
-    // upload logic here
-    return nil
+func (s *S3Sender) Send(ctx context.Context, product turbine.ProductRecord, data io.Reader) error {
+    _, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+        Bucket: &s.bucket,
+        Key:    &product.FileName,
+        Body:   data,
+    })
+    return err
 }
 ```
 
@@ -78,7 +84,6 @@ The `ProductRecord` passed to your sender contains:
 | `FileName` | `string` | Original filename |
 | `Size` | `int` | File size in bytes |
 | `Metadata` | `map[string]any` | Custom metadata |
-| `FileURL` | `string` | Relative path to download the file |
 
 ## WorkflowSender
 
