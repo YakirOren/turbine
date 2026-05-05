@@ -64,8 +64,8 @@ function timeAgo(dateStr: string): string {
 
 export function WebhookList() {
   const invalidate = useInvalidate();
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ id: string | null } | null>(null);
+  const editingId = editing?.id ?? null;
 
   const { control, handleSubmit: rhfSubmit, reset, watch } = useForm<WebhookFormValues>({
     resolver: zodResolver(webhookFormSchema),
@@ -109,7 +109,7 @@ export function WebhookList() {
     onSuccess: () => {
       invalidateWebhooks();
       toast.success(editingId ? "Webhook updated" : "Webhook created");
-      setDialogOpen(false);
+      setEditing(null);
     },
     onError: (err: any) => {
       toast.error(err?.message || `Failed to ${editingId ? "update" : "create"} webhook`);
@@ -141,14 +141,12 @@ export function WebhookList() {
 
   const openAdd = () => {
     reset();
-    setEditingId(null);
-    setDialogOpen(true);
+    setEditing({ id: null });
   };
 
   const openEdit = (record: WebhookRecord) => {
     reset({ url: record.url, events: [...record.events], secret: "", enabled: record.enabled });
-    setEditingId(record.id);
-    setDialogOpen(true);
+    setEditing({ id: record.id });
   };
 
   if (isLoading) {
@@ -288,7 +286,7 @@ export function WebhookList() {
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingId ? "Edit Webhook" : "Add Webhook"}</DialogTitle>
@@ -359,7 +357,7 @@ export function WebhookList() {
           <DialogFooter>
             <Button
               variant="ghost"
-              onClick={() => setDialogOpen(false)}
+              onClick={() => setEditing(null)}
               disabled={saveMutation.isPending}
             >
               Cancel

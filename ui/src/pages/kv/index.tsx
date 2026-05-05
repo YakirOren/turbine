@@ -59,8 +59,8 @@ interface KVFormValues {
 export function KVList() {
   const id = useId();
   const invalidate = useInvalidate();
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editRecord, setEditRecord] = useState<KVRecord | null>(null);
+  const [editing, setEditing] = useState<{ record: KVRecord | null } | null>(null);
+  const editRecord = editing?.record ?? null;
 
   const { reset, watch, setValue, getValues } = useForm<KVFormValues>({
     defaultValues: {
@@ -100,12 +100,10 @@ export function KVList() {
 
   const openAdd = () => {
     reset();
-    setEditRecord(null);
-    setDialogOpen(true);
+    setEditing({ record: null });
   };
 
   const openEdit = (record: KVRecord) => {
-    setEditRecord(record);
     const schemaStr = record.schema ? JSON.stringify(record.schema, null, 2) : "";
     const fields = record.schema ? jsonSchemaToFields(record.schema) : [];
     reset({
@@ -115,7 +113,7 @@ export function KVList() {
       fieldValues: fields.length > 0 ? getFieldDefaults(fields, record.value) : {},
       activeTab: "value",
     });
-    setDialogOpen(true);
+    setEditing({ record });
   };
 
   const handleSchemaChange = (newSchema: string) => {
@@ -179,7 +177,7 @@ export function KVList() {
     onSuccess: () => {
       invalidateKV();
       toast.success(editRecord ? "Key updated" : "Key created");
-      setDialogOpen(false);
+      setEditing(null);
     },
     onError: (err: any) => {
       toast.error(err?.message || "Failed to save");
@@ -330,7 +328,7 @@ export function KVList() {
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>{editRecord ? "Edit Key" : "Add Key"}</DialogTitle>
@@ -405,7 +403,7 @@ export function KVList() {
           <DialogFooter>
             <Button
               variant="ghost"
-              onClick={() => setDialogOpen(false)}
+              onClick={() => setEditing(null)}
               disabled={saveMutation.isPending}
             >
               Cancel

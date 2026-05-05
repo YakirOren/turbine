@@ -103,9 +103,9 @@ function timeAgo(dateStr: string): string {
 
 export function NotificationList() {
   const invalidate = useInvalidate();
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ id: string | null } | null>(null);
   const [testPopoverId, setTestPopoverId] = useState<string | null>(null);
+  const editingId = editing?.id ?? null;
 
   const { control, handleSubmit: rhfSubmit, reset, watch } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -152,7 +152,7 @@ export function NotificationList() {
     onSuccess: () => {
       invalidateChannels();
       toast.success(editingId ? "Channel updated" : "Channel created");
-      setDialogOpen(false);
+      setEditing(null);
     },
     onError: (err: any) => {
       toast.error(err?.message || `Failed to ${editingId ? "update" : "create"} channel`);
@@ -197,14 +197,12 @@ export function NotificationList() {
 
   const openAdd = () => {
     reset();
-    setEditingId(null);
-    setDialogOpen(true);
+    setEditing({ id: null });
   };
 
   const openEdit = (record: AlertChannelRecord) => {
     reset({ name: record.name, url: "", events: [...record.events], enabled: record.enabled });
-    setEditingId(record.id);
-    setDialogOpen(true);
+    setEditing({ id: record.id });
   };
 
   if (isLoading) {
@@ -404,7 +402,7 @@ export function NotificationList() {
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingId ? "Edit Notification Channel" : "Add Notification Channel"}</DialogTitle>
@@ -486,7 +484,7 @@ export function NotificationList() {
           <DialogFooter>
             <Button
               variant="ghost"
-              onClick={() => setDialogOpen(false)}
+              onClick={() => setEditing(null)}
               disabled={saveMutation.isPending}
             >
               Cancel

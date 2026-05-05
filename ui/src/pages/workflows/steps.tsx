@@ -52,17 +52,6 @@ type Layout = "split" | "graph-only" | "timeline-only";
 
 const LAYOUT_STORAGE_KEY = "workflows.steps.layout";
 
-function isLayout(v: unknown): v is Layout {
-    return v === "split" || v === "graph-only" || v === "timeline-only";
-}
-
-function readStoredLayout(): Layout {
-    if (typeof window === "undefined") return "split";
-    const v = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
-    return isLayout(v) ? v : "split";
-}
-
-
 interface LogRecord {
     id: string;
     level: number;
@@ -194,15 +183,18 @@ function StepFlowContent({ workflowId }: { workflowId: string }) {
         setSelection(value == null ? null : { kind: "product", id: value });
     }, []);
     const [activeTab, setActiveTab] = useState<"logs" | "products">("logs");
-    const [layout, setLayout] = useState<Layout>(readStoredLayout);
-
-    useEffect(() => {
-        window.localStorage.setItem(LAYOUT_STORAGE_KEY, layout);
-    }, [layout]);
+    const [layout, setLayout] = useState<Layout>(() => {
+        try {
+            return JSON.parse(window.localStorage.getItem(LAYOUT_STORAGE_KEY) || "split");
+        } catch {
+            return "split";
+        }
+    });
 
     const changeLayout = useCallback(
         (next: Layout) => {
             setLayout(next);
+            window.localStorage.setItem(LAYOUT_STORAGE_KEY, next);
             if (next === "timeline-only") return;
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
@@ -343,18 +335,6 @@ function StepFlowContent({ workflowId }: { workflowId: string }) {
         const raf = requestAnimationFrame(() => fitView({ padding: 0.2 }));
         return () => cancelAnimationFrame(raf);
     }, [showGraph, layoutDone, nodes.length, fitView]);
-
-    useEffect(() => {
-        setNodes((nds) =>
-            nds.map((n) => ({
-                ...n,
-                data: {
-                    ...n.data,
-                    selected: (n.data as Record<string, unknown>).functionId === selectedStepId,
-                },
-            }))
-        );
-    }, [selectedStepId, setNodes]);
 
     const createdAt = workflow?.created_at_epoch_ms as number | undefined;
     const updatedAt = workflow?.updated_at_epoch_ms as number | undefined;
@@ -906,14 +886,15 @@ function WorkflowLogs({
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const anchorLenRef = useRef(0);
+    const lastFetchRef = useRef(0);
     const [follow, setFollow] = useState(true);
 
     const loadOlder = useCallback(() => {
         const el = scrollRef.current;
         const prevHeight = el?.scrollHeight ?? 0;
         const prevTop = el?.scrollTop ?? 0;
+        lastFetchRef.current = Date.now();
         void fetchNextPage().then(() => {
-            // Wait two frames so React has committed prepended rows before reading scrollHeight.
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
                     const next = scrollRef.current;
@@ -925,12 +906,6 @@ function WorkflowLogs({
         });
     }, [fetchNextPage]);
     const newCount = follow ? 0 : Math.max(0, logs.length - anchorLenRef.current);
-
-    useEffect(() => {
-        if (!follow) return;
-        const el = scrollRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
-    }, [logs.length, follow]);
 
     const handleScroll = () => {
         const el = scrollRef.current;
