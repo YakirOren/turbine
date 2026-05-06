@@ -17,6 +17,13 @@ import (
 
 // --- Step functions ---
 
+func SendSMS(ctx context.Context) (string, error) {
+	logger := turbine.LoggerFrom(ctx)
+	logger.Info("sending SMS")
+	time.Sleep(time.Duration(500+rand.IntN(1000)) * time.Millisecond)
+	return fmt.Sprintf("sms_%d", rand.IntN(10000)), nil
+}
+
 func SendEmail(ctx context.Context) (string, error) {
 	logger := turbine.LoggerFrom(ctx)
 	logger.Info("sending email")
@@ -111,6 +118,19 @@ type NotifyInput struct {
 }
 
 // --- Workflows ---
+
+// SMSWorkflow sends an SMS. Enqueued via the "sms" partition queue.
+func SMSWorkflow(ctx turbine.Context, phone string) (string, error) {
+	ctx.SetAppStatus("sending", "blue")
+
+	msgID, err := turbine.Do(ctx, SendSMS, turbine.WithStepName("send"))
+	if err != nil {
+		return "", err
+	}
+
+	ctx.SetAppStatus("sent", "green")
+	return fmt.Sprintf("to=%s msg_id=%s", phone, msgID), nil
+}
 
 // EmailWorkflow sends an email to a recipient. Enqueued via the "emails" queue.
 func EmailWorkflow(ctx turbine.Context, to string) (string, error) {
@@ -413,11 +433,20 @@ func main() {
 
 	// Queue-based
 	turbine.Register(rt, EmailWorkflow, turbine.WithTags("email", "queue"))
+	turbine.Register(rt, SMSWorkflow, turbine.WithTags("sms", "queue"))
 
-	rt.Queue("emails",
+	emailsQueue := rt.Queue("emails",
 		turbine.WithWorkerConcurrency(3),
 		turbine.WithRateLimiter(turbine.RateLimiter{Limit: 10, Period: time.Minute}),
 	)
+
+	smsQueue := rt.Queue("sms",
+		turbine.WithWorkerConcurrency(5),
+		turbine.WithPartitionQueue(),
+		turbine.WithRateLimiter(turbine.RateLimiter{Limit: 50, Period: time.Minute}),
+	)
+
+	rt.Listen(emailsQueue, smsQueue)
 
 	// Scheduled
 	turbine.Register(rt, MetricsSync, turbine.WithSchedule("*/5 * * * *"), turbine.WithTags("metrics", "scheduled"))
@@ -458,6 +487,25 @@ func main() {
 			return re.JSON(202, map[string]string{
 				"workflow_id": handle.GetWorkflowID(),
 				"status":      "enqueued",
+			})
+		})
+
+		e.Router.POST("/send-sms/{phone}", func(re *core.RequestEvent) error {
+			phone := re.Request.PathValue("phone")
+
+			partitionKey := phone[:3]
+			handle, err := turbine.Run(rt, SMSWorkflow, phone,
+				turbine.WithQueue("sms"),
+				turbine.WithQueuePartitionKey(partitionKey),
+			)
+			if err != nil {
+				return re.JSON(500, map[string]string{"error": err.Error()})
+			}
+
+			return re.JSON(202, map[string]string{
+				"workflow_id": handle.GetWorkflowID(),
+				"status":      "enqueued",
+				"partition":   partitionKey,
 			})
 		})
 		return e.Next()

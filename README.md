@@ -1,5 +1,7 @@
 # turbine
 
+![Dashboard screenshot](docs/screenshots/steps-page-logs.png)
+
 Durable workflow engine for [PocketBase](https://pocketbase.io). Runs entirely on SQLite — no external dependencies.
 
 ## Features

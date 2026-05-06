@@ -398,11 +398,13 @@ func (s *sqliteSysDB) listWorkflows(ctx context.Context, input listWorkflowsDBIn
 }
 
 func (s *sqliteSysDB) updateWorkflowOutcome(ctx context.Context, input updateWorkflowOutcomeDBInput) error {
-	_, err := s.app.DB().NewQuery(`UPDATE pt_workflow_status
+	var queueName string
+	err := s.app.DB().NewQuery(`UPDATE pt_workflow_status
 		SET status = {:status}, output = {:output}, error = {:error},
 		    updated_at_epoch_ms = {:updated_at}, deduplication_id = ''
 		WHERE id = {:id}
-		  AND NOT (status = {:cancelled} AND {:status} IN ({:success}, {:err_status}))`).Bind(dbx.Params{
+		  AND NOT (status = {:cancelled} AND {:status} IN ({:success}, {:err_status}))
+		RETURNING COALESCE(queue_name, '')`).Bind(dbx.Params{
 		"status":     string(input.status),
 		"output":     derefStr(input.output),
 		"error":      derefStr(input.errorMsg),
@@ -411,12 +413,21 @@ func (s *sqliteSysDB) updateWorkflowOutcome(ctx context.Context, input updateWor
 		"cancelled":  string(StatusCancelled),
 		"success":    string(StatusSuccess),
 		"err_status": string(StatusError),
-	}).Execute()
+	}).Row(&queueName)
 
 	if err != nil {
+		// No row matched (e.g. already cancelled) — not an error, just nothing to notify.
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
 		return fmt.Errorf("failed to update workflow status: %w", err)
 	}
 	s.eventBus.Notify("workflow::" + input.workflowID)
+	// Wake the queue runner so it re-evaluates concurrency/rate limits and can
+	// dequeue more work that was held back while this slot was occupied.
+	if queueName != "" {
+		s.eventBus.Notify("queue::" + queueName)
+	}
 	return nil
 }
 
@@ -481,6 +492,12 @@ func (s *sqliteSysDB) awaitWorkflowResult(ctx context.Context, workflowID string
 }
 
 func (s *sqliteSysDB) cancelWorkflow(ctx context.Context, input cancelWorkflowDBInput) (bool, error) {
+	// Read queue_name before clearing it so we can wake the queue runner if the
+	// cancellation frees a concurrency/rate slot.
+	var priorQueueName string
+	_ = s.app.DB().NewQuery(`SELECT COALESCE(queue_name, '') FROM pt_workflow_status WHERE id = {:id}`).
+		Bind(dbx.Params{"id": input.workflowID}).Row(&priorQueueName)
+
 	result, err := s.app.DB().NewQuery(`UPDATE pt_workflow_status
 		SET status = {:status}, updated_at_epoch_ms = {:updated_at},
 		    deduplication_id = '', queue_name = ''
@@ -506,6 +523,9 @@ func (s *sqliteSysDB) cancelWorkflow(ctx context.Context, input cancelWorkflowDB
 		return false, nil
 	}
 	s.eventBus.Notify("workflow::" + input.workflowID)
+	if priorQueueName != "" {
+		s.eventBus.Notify("queue::" + priorQueueName)
+	}
 	return true, nil
 }
 
