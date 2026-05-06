@@ -7,6 +7,7 @@ import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue,} from "@/
 import {AppStatusBadge, StatusBadge} from "@/components/status-badge";
 import {TableSkeleton} from "@/components/table-skeleton";
 import {formatDuration, formatTimestamp} from "@/lib/format";
+import {cn} from "@/lib/utils";
 import type {PtWorkflowStatusResponse} from "@/types/pocketbase-types";
 
 export type WorkflowRecord = PtWorkflowStatusResponse;
@@ -15,6 +16,7 @@ interface Props {
     filters: CrudFilters;
     sorters: CrudSort[];
     onRowClick: (record: WorkflowRecord) => void;
+    selectedId?: string | null;
 }
 
 const tableColumns = [
@@ -26,7 +28,7 @@ const tableColumns = [
     {key: "app_status", header: "App Status"},
 ];
 
-export function WorkflowTable({filters, sorters, onRowClick}: Props) {
+export function WorkflowTable({filters, sorters, onRowClick, selectedId}: Props) {
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(10);
 
@@ -63,8 +65,22 @@ export function WorkflowTable({filters, sorters, onRowClick}: Props) {
                             rows.map((row) => (
                                 <TableRow
                                     key={row.id}
-                                    className="cursor-pointer"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-pressed={selectedId === row.id}
+                                    aria-label={`Open workflow ${row.name}`}
+                                    data-state={selectedId === row.id ? "selected" : undefined}
+                                    className={cn(
+                                        "cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+                                        selectedId === row.id && "bg-accent/60 hover:bg-accent/60"
+                                    )}
                                     onClick={() => onRowClick(row)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter" || e.key === " ") {
+                                            e.preventDefault();
+                                            onRowClick(row);
+                                        }
+                                    }}
                                 >
                                     <TableCell>
                                         {row.created_at_epoch_ms
@@ -97,9 +113,14 @@ export function WorkflowTable({filters, sorters, onRowClick}: Props) {
                             <TableRow>
                                 <TableCell
                                     colSpan={tableColumns.length}
-                                    className="h-24 text-center"
+                                    className="h-32 text-center"
                                 >
-                                    No workflows found.
+                                    <div className="flex flex-col items-center gap-1.5 text-sm">
+                                        <span className="font-medium text-foreground">No workflows in this range</span>
+                                        <span className="text-muted-foreground">
+                                            Trigger a run or widen the time range.
+                                        </span>
+                                    </div>
                                 </TableCell>
                             </TableRow>
                         )}

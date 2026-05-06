@@ -1,15 +1,17 @@
-import { useState, useId } from "react";
-import { Play } from "lucide-react";
+import { useState, useId, useMemo, useRef, useCallback } from "react";
+import { Play, Loader2, Clock, Repeat } from "lucide-react";
 import { toast } from "sonner";
 import { useInvalidate } from "@refinedev/core";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import cronstrue from "cronstrue";
 import { pbClient } from "@/providers/pocketbase";
+import { formatScheduledAt } from "@/lib/format";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -20,24 +22,51 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Field, FieldLabel, FieldDescription, FieldError } from "@/components/ui/field";
 import { SchemaFormField, getFieldDefaults, type InputSchema } from "@/components/schema-form";
+import { CodeMirrorEditor } from "@/components/codemirror";
 import type { PtWorkflowsResponse } from "@/types/pocketbase-types";
 
 type RegisteredWorkflow = PtWorkflowsResponse<InputSchema>;
 
 type TimingMode = "now" | "schedule" | "cron";
 
-const TIMING_OPTIONS: { value: TimingMode; label: string }[] = [
-  { value: "now", label: "Now" },
-  { value: "schedule", label: "Schedule" },
-  { value: "cron", label: "Cron" },
+const TIMING_OPTIONS: {
+  value: TimingMode;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  activeClass: string;
+}[] = [
+  {
+    value: "now",
+    label: "Run now",
+    icon: Play,
+    activeClass: "bg-info-soft text-info-foreground shadow-sm",
+  },
+  {
+    value: "schedule",
+    label: "Run once later",
+    icon: Clock,
+    activeClass: "bg-warning-soft text-warning-foreground shadow-sm",
+  },
+  {
+    value: "cron",
+    label: "Run on schedule",
+    icon: Repeat,
+    activeClass: "bg-success-soft text-success-foreground shadow-sm",
+  },
 ];
+
+const SUBMIT_LABELS: Record<TimingMode, { idle: string; pending: string }> = {
+  now: { idle: "Run now", pending: "Starting…" },
+  schedule: { idle: "Schedule run", pending: "Scheduling…" },
+  cron: { idle: "Create cron schedule", pending: "Creating…" },
+};
 
 const triggerFormSchema = z.object({
   selectedFqn: z.string().min(1),
@@ -72,6 +101,52 @@ export function TriggerRunButton() {
   const timing = watch("timing");
   const selectedFqn = watch("selectedFqn");
   const formValues = watch("formValues");
+  const cronExpression = watch("cronExpression");
+  const scheduledAt = watch("scheduledAt");
+
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [edges, setEdges] = useState({ top: false, bottom: false });
+
+  const scrollRefCallback = useCallback((node: HTMLDivElement | null) => {
+    scrollRef.current = node;
+    if (!node) return;
+
+    const update = () => {
+      const { scrollTop, scrollHeight, clientHeight } = node;
+      const top = scrollTop > 2;
+      const bottom = scrollHeight - scrollTop - clientHeight > 2;
+      setEdges((prev) => (prev.top === top && prev.bottom === bottom ? prev : { top, bottom }));
+    };
+
+    update();
+    node.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(node);
+    if (node.firstElementChild) ro.observe(node.firstElementChild);
+
+    return () => {
+      node.removeEventListener("scroll", update);
+      ro.disconnect();
+      scrollRef.current = null;
+    };
+  }, []);
+
+  const scrollFirstErrorIntoView = () => {
+    requestAnimationFrame(() => {
+      const container = scrollRef.current;
+      if (!container) return;
+      const target = container.querySelector<HTMLElement>(
+        '[data-invalid="true"]',
+      );
+      if (!target) return;
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      const focusable = target.querySelector<HTMLElement>(
+        'input, textarea, select, button, [tabindex]:not([tabindex="-1"])',
+      );
+      focusable?.focus();
+    });
+  };
+
   const { data: workflows = [], isLoading } = useQuery<RegisteredWorkflow[]>({
     queryKey: ["registered-workflows-triggerable"],
     queryFn: () =>
@@ -86,6 +161,21 @@ export function TriggerRunButton() {
   const selectedWorkflow = workflows.find((w) => w.fqn === selectedFqn);
   const schema = selectedWorkflow?.input_schema;
   const hasSchema = schema?.fields && schema.fields.length > 0;
+  const workflowTags = (selectedWorkflow?.tags ?? []) as string[];
+
+  const cronPreview = useMemo(() => {
+    if (!cronExpression.trim()) return null;
+    try {
+      return { ok: true, text: cronstrue.toString(cronExpression, { verbose: false }) };
+    } catch (e) {
+      return { ok: false, text: (e as Error).message || "Invalid cron expression" };
+    }
+  }, [cronExpression]);
+
+  const schedulePreview = useMemo(
+    () => (scheduledAt ? formatScheduledAt(scheduledAt) : null),
+    [scheduledAt],
+  );
 
   const handleWorkflowChange = (fqn: string) => {
     const wf = workflows.find((w) => w.fqn === fqn);
@@ -179,24 +269,39 @@ export function TriggerRunButton() {
           hasValidationError = true;
         }
       }
-      if (hasValidationError) return;
+      if (hasValidationError) {
+        scrollFirstErrorIntoView();
+        return;
+      }
       parsedInput = values.formValues;
     } else {
       try {
         parsedInput = JSON.parse(values.input);
-      } catch {
-        setFieldError("input", { message: "Invalid JSON input" });
+      } catch (e) {
+        setFieldError("input", {
+          message: (e as Error).message || "Invalid JSON",
+        });
+        scrollFirstErrorIntoView();
         return;
       }
     }
 
     if (values.timing === "schedule" && !values.scheduledAt) {
       setFieldError("scheduledAt", { message: "Scheduled time is required" });
+      scrollFirstErrorIntoView();
       return;
     }
-    if (values.timing === "cron" && !values.cronExpression) {
-      setFieldError("cronExpression", { message: "Cron expression is required" });
-      return;
+    if (values.timing === "cron") {
+      if (!values.cronExpression) {
+        setFieldError("cronExpression", { message: "Cron expression is required" });
+        scrollFirstErrorIntoView();
+        return;
+      }
+      if (cronPreview && !cronPreview.ok) {
+        setFieldError("cronExpression", { message: cronPreview.text });
+        scrollFirstErrorIntoView();
+        return;
+      }
     }
 
     submitMutation.mutate(parsedInput);
@@ -216,6 +321,8 @@ export function TriggerRunButton() {
     }
   };
 
+  const submitLabels = SUBMIT_LABELS[timing];
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
@@ -224,16 +331,55 @@ export function TriggerRunButton() {
           Trigger Run
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Trigger Run</DialogTitle>
-          <DialogDescription>
-            Trigger a workflow to run now, at a scheduled time, or on a cron
-            schedule.
-          </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div
+          ref={scrollRefCallback}
+          className="-mx-6 min-h-0 flex-1 overflow-y-auto px-6"
+        >
+          {edges.top && (
+            <div
+              aria-hidden
+              className="pointer-events-none sticky top-0 z-10 -mx-6 -mb-4 h-4 bg-gradient-to-b from-background to-transparent"
+            />
+          )}
+          <div className="space-y-4 pb-4">
+          <Field>
+            <FieldLabel id={`${id}-timing-label`}>When</FieldLabel>
+            <div
+              role="radiogroup"
+              aria-labelledby={`${id}-timing-label`}
+              className="grid grid-cols-3 gap-1 rounded-md border bg-muted p-1"
+            >
+              {TIMING_OPTIONS.map((opt) => {
+                const active = timing === opt.value;
+                const Icon = opt.icon;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    tabIndex={active ? 0 : -1}
+                    className={`inline-flex items-center justify-center gap-1.5 rounded px-3 py-1.5 text-sm transition-colors ${
+                      active
+                        ? `font-medium ${opt.activeClass}`
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    onClick={() => setValue("timing", opt.value)}
+                    onKeyDown={(e) => handleTimingKeyDown(e, opt.value)}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+
           <Field>
             <FieldLabel htmlFor={`${id}-workflow`}>Workflow</FieldLabel>
             <Select
@@ -244,7 +390,7 @@ export function TriggerRunButton() {
               <SelectTrigger id={`${id}-workflow`}>
                 <SelectValue
                   placeholder={
-                    loadingWorkflows ? "Loading workflows..." : "Select Workflow"
+                    loadingWorkflows ? "Loading workflows..." : "Select a workflow"
                   }
                 />
               </SelectTrigger>
@@ -262,77 +408,20 @@ export function TriggerRunButton() {
                 )}
               </SelectContent>
             </Select>
-          </Field>
-
-          {hasSchema ? (
-            <div className="space-y-3">
-              <FieldLabel>Input</FieldLabel>
-              {schema!.fields.map((field) => (
-                <SchemaFormField
-                  key={field.name}
-                  field={field}
-                  value={formValues[field.name]}
-                  onChange={(v) => {
-                    const current = getValues("formValues");
-                    setValue("formValues", { ...current, [field.name]: v });
-                  }}
-                  id={id}
-                  error={(fieldErrors.formValues as any)?.[field.name]}
-                />
-              ))}
-            </div>
-          ) : (
-            <Field data-invalid={!!fieldErrors.input}>
-              <FieldLabel htmlFor={`${id}-input`}>Input</FieldLabel>
-              <Controller
-                control={control}
-                name="input"
-                render={({ field, fieldState }) => (
-                  <>
-                    <Textarea
-                      {...field}
-                      id={`${id}-input`}
-                      aria-invalid={!!fieldState.error}
-                      className="min-h-[120px] font-mono"
-                      placeholder="{}"
-                    />
-                    <FieldError errors={[fieldState.error]} />
-                  </>
-                )}
-              />
-            </Field>
-          )}
-
-          <Field>
-            <FieldLabel id={`${id}-timing-label`}>Timing</FieldLabel>
-            <div
-              role="radiogroup"
-              aria-labelledby={`${id}-timing-label`}
-              className="flex gap-1 rounded-md border bg-muted p-1 w-fit"
-            >
-              {TIMING_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  role="radio"
-                  aria-checked={timing === opt.value}
-                  tabIndex={timing === opt.value ? 0 : -1}
-                  className={`rounded px-3 py-1 text-sm ${
-                    timing === opt.value
-                      ? "bg-background font-medium shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                  onClick={() => setValue("timing", opt.value)}
-                  onKeyDown={(e) => handleTimingKeyDown(e, opt.value)}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+            {selectedWorkflow && workflowTags.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {workflowTags.map((tag) => (
+                  <Badge key={tag} variant="secondary" className="text-xs">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            )}
           </Field>
 
           {timing === "schedule" && (
             <Field data-invalid={!!fieldErrors.scheduledAt}>
-              <FieldLabel htmlFor={`${id}-scheduled-at`}>Scheduled Time</FieldLabel>
+              <FieldLabel htmlFor={`${id}-scheduled-at`}>Scheduled time</FieldLabel>
               <Controller
                 control={control}
                 name="scheduledAt"
@@ -348,13 +437,16 @@ export function TriggerRunButton() {
                   </>
                 )}
               />
+              {schedulePreview && !fieldErrors.scheduledAt && (
+                <FieldDescription>{schedulePreview}</FieldDescription>
+              )}
             </Field>
           )}
 
           {timing === "cron" && (
             <>
               <Field data-invalid={!!fieldErrors.cronExpression}>
-                <FieldLabel htmlFor={`${id}-cron`}>Cron Expression</FieldLabel>
+                <FieldLabel htmlFor={`${id}-cron`}>Cron expression</FieldLabel>
                 <Controller
                   control={control}
                   name="cronExpression"
@@ -371,6 +463,17 @@ export function TriggerRunButton() {
                     </>
                   )}
                 />
+                {cronPreview && !fieldErrors.cronExpression && (
+                  <FieldDescription
+                    className={
+                      cronPreview.ok
+                        ? "text-success-foreground"
+                        : "text-danger-foreground"
+                    }
+                  >
+                    {cronPreview.text}
+                  </FieldDescription>
+                )}
               </Field>
               <Field>
                 <FieldLabel htmlFor={`${id}-jitter`}>Jitter (optional)</FieldLabel>
@@ -393,6 +496,45 @@ export function TriggerRunButton() {
             </>
           )}
 
+          {hasSchema ? (
+            <div className="space-y-3">
+              <FieldLabel>Input</FieldLabel>
+              {schema!.fields.map((field) => (
+                <SchemaFormField
+                  key={field.name}
+                  field={field}
+                  value={formValues[field.name]}
+                  onChange={(v) => {
+                    const current = getValues("formValues");
+                    setValue("formValues", { ...current, [field.name]: v });
+                  }}
+                  id={id}
+                  error={(fieldErrors.formValues as any)?.[field.name]}
+                />
+              ))}
+            </div>
+          ) : (
+            <Field data-invalid={!!fieldErrors.input}>
+              <FieldLabel htmlFor={`${id}-input`}>Input (JSON)</FieldLabel>
+              <Controller
+                control={control}
+                name="input"
+                render={({ field, fieldState }) => (
+                  <>
+                    <CodeMirrorEditor
+                      value={field.value}
+                      onChange={field.onChange}
+                      placeholder="{}"
+                      minHeight="120px"
+                      maxHeight="240px"
+                    />
+                    <FieldError errors={[fieldState.error]} />
+                  </>
+                )}
+              />
+            </Field>
+          )}
+
           {error && (
             <div
               role="alert"
@@ -401,16 +543,38 @@ export function TriggerRunButton() {
               {error}
             </div>
           )}
-
-          <div className="flex justify-end">
-            <Button
-              onClick={handleSubmit}
-              disabled={!selectedFqn || submitMutation.isPending}
-            >
-              {submitMutation.isPending ? "Submitting..." : "Submit"}
-            </Button>
           </div>
+          {edges.bottom && (
+            <div
+              aria-hidden
+              className="pointer-events-none sticky bottom-0 z-10 -mx-6 -mt-4 h-4 bg-gradient-to-t from-foreground/15 to-transparent"
+            />
+          )}
         </div>
+
+        <DialogFooter className="-mx-6 -mb-6 -mt-4 rounded-b-lg border-t bg-muted/40 px-6 py-4">
+          <Button
+            variant="ghost"
+            onClick={() => handleOpenChange(false)}
+            disabled={submitMutation.isPending}
+            className="hover:bg-foreground/10 dark:hover:bg-foreground/10"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={
+              !selectedFqn ||
+              submitMutation.isPending ||
+              (timing === "cron" && cronPreview?.ok === false)
+            }
+          >
+            {submitMutation.isPending && (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            )}
+            {submitMutation.isPending ? submitLabels.pending : submitLabels.idle}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

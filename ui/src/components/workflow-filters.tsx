@@ -26,12 +26,12 @@ const TIME_RANGES = [
 ];
 
 const STATUSES = [
-  { value: "PENDING", label: "Pending", dot: "bg-yellow-400" },
-  { value: "ENQUEUED", label: "Enqueued", dot: "bg-blue-400" },
-  { value: "SUCCESS", label: "Success", dot: "bg-green-400" },
-  { value: "ERROR", label: "Error", dot: "bg-red-400" },
-  { value: "CANCELLED", label: "Cancelled", dot: "bg-gray-400" },
-  { value: "MAX_RECOVERY_ATTEMPTS_EXCEEDED", label: "Max Retries", dot: "bg-red-400" },
+  { value: "PENDING", label: "Pending", dot: "bg-warning" },
+  { value: "ENQUEUED", label: "Enqueued", dot: "bg-info" },
+  { value: "SUCCESS", label: "Success", dot: "bg-success" },
+  { value: "ERROR", label: "Error", dot: "bg-danger" },
+  { value: "CANCELLED", label: "Cancelled", dot: "bg-muted-foreground" },
+  { value: "MAX_RECOVERY_ATTEMPTS_EXCEEDED", label: "Max Retries", dot: "bg-danger" },
 ];
 
 export interface WorkflowFilters {

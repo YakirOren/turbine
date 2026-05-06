@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"log"
 
 	"github.com/YakirOren/turbine"
@@ -15,17 +16,21 @@ import (
 // ProductSender delivers product files to external systems.
 // In production, this would upload to S3, GCS, Azure Blob Storage,
 // or forward to a data pipeline (Snowflake, BigQuery, Kafka, etc.).
+//
+// The data parameter carries the full file bytes. The concrete value is
+// *bytes.Reader, so senders that need to retry can type-assert to io.Seeker
+// and rewind between attempts.
 type ProductSender struct{}
 
-func (s *ProductSender) Send(_ context.Context, product turbine.ProductRecord) error {
+func (s *ProductSender) Send(_ context.Context, product turbine.ProductRecord, data io.Reader) error {
 	fmt.Printf("delivering %s (%d bytes) — metadata: %v\n", product.FileName, product.Size, product.Metadata)
 
 	// Examples of what you'd do here:
-	// - Upload to S3:          s3Client.PutObject(bucket, product.FileName, product.FileURL, ...)
-	// - Send to GCS:           gcsClient.Bucket(bucket).Object(product.FileName).NewWriter(...)
-	// - Push to Kafka:         producer.Send(topic, product.FileName, product.FileURL)
-	// - Email as attachment:   smtpClient.SendWithAttachment(to, product.FileName, ...)
-	// - POST to a webhook:     http.Post(webhookURL, "application/octet-stream", ...)
+	// - Upload to S3:        s3Client.PutObject(ctx, &s3.PutObjectInput{Bucket: ..., Key: &product.FileName, Body: data})
+	// - Send to GCS:         w := gcsClient.Bucket(b).Object(product.FileName).NewWriter(ctx); io.Copy(w, data); w.Close()
+	// - Push to Kafka:       buf, _ := io.ReadAll(data); producer.Send(&kafka.Message{Key: []byte(product.FileName), Value: buf})
+	// - Email attachment:    smtpClient.SendWithAttachment(to, product.FileName, data)
+	// - POST to a webhook:   http.Post(webhookURL, "application/octet-stream", data)
 
 	return nil
 }

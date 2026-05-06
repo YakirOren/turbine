@@ -22,6 +22,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -38,7 +39,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Field, FieldLabel, FieldDescription } from "@/components/ui/field";
 import { TableSkeleton } from "@/components/table-skeleton";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { DocLink } from "@/components/doc-link";
+import { EventChips, WORKFLOW_EVENT_OPTIONS } from "@/components/event-chips";
 import type { PtWebhooksResponse } from "@/types/pocketbase-types";
 
 type WebhookRecord = PtWebhooksResponse<string[]> & { events: string[] };
@@ -51,15 +53,6 @@ const webhookFormSchema = z.object({
 });
 type WebhookFormValues = z.infer<typeof webhookFormSchema>;
 
-const EVENT_OPTIONS = [
-  "workflow.SUCCESS",
-  "workflow.ERROR",
-  "workflow.CANCELLED",
-  "workflow.WAITING_FOR_APPROVAL",
-  "workflow.MAX_RECOVERY_ATTEMPTS_EXCEEDED",
-  "workflow.*",
-];
-
 function timeAgo(dateStr: string): string {
   if (!dateStr) return "\u2014";
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -69,15 +62,10 @@ function timeAgo(dateStr: string): string {
   return `${Math.round(diff / 86400000)}d ago`;
 }
 
-function truncateUrl(url: string, maxLen = 40): string {
-  if (url.length <= maxLen) return url;
-  return url.slice(0, maxLen) + "\u2026";
-}
-
 export function WebhookList() {
   const invalidate = useInvalidate();
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ id: string | null } | null>(null);
+  const editingId = editing?.id ?? null;
 
   const { control, handleSubmit: rhfSubmit, reset, watch } = useForm<WebhookFormValues>({
     resolver: zodResolver(webhookFormSchema),
@@ -121,7 +109,7 @@ export function WebhookList() {
     onSuccess: () => {
       invalidateWebhooks();
       toast.success(editingId ? "Webhook updated" : "Webhook created");
-      setDialogOpen(false);
+      setEditing(null);
     },
     onError: (err: any) => {
       toast.error(err?.message || `Failed to ${editingId ? "update" : "create"} webhook`);
@@ -153,21 +141,19 @@ export function WebhookList() {
 
   const openAdd = () => {
     reset();
-    setEditingId(null);
-    setDialogOpen(true);
+    setEditing({ id: null });
   };
 
   const openEdit = (record: WebhookRecord) => {
     reset({ url: record.url, events: [...record.events], secret: "", enabled: record.enabled });
-    setEditingId(record.id);
-    setDialogOpen(true);
+    setEditing({ id: record.id });
   };
 
   if (isLoading) {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">Webhooks</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Webhooks</h1>
         </div>
         <TableSkeleton columns={6} headers={["URL", "Events", "Enabled", "Secret", "Created", ""]} />
       </div>
@@ -177,7 +163,7 @@ export function WebhookList() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Webhooks</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Webhooks</h1>
         <Button size="sm" onClick={openAdd}>
           <Plus className="mr-1.5 h-3.5 w-3.5" />
           Add Webhook
@@ -200,6 +186,9 @@ export function WebhookList() {
               Add a webhook to receive notifications when workflows complete.
             </p>
           </div>
+          <DocLink path="concepts/webhooks" className="text-xs">
+            Learn more
+          </DocLink>
         </div>
       ) : (
         <div className="rounded-md border">
@@ -217,8 +206,10 @@ export function WebhookList() {
             <TableBody>
               {records.map((record) => (
                 <TableRow key={record.id}>
-                  <TableCell className="font-mono text-sm">
-                    {truncateUrl(record.url)}
+                  <TableCell className="w-full max-w-0">
+                    <div className="truncate font-mono text-sm" title={record.url}>
+                      {record.url}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
@@ -246,7 +237,7 @@ export function WebhookList() {
                   <TableCell className="text-sm text-muted-foreground">
                     {timeAgo(record.created)}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="w-20">
                     <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
@@ -272,9 +263,7 @@ export function WebhookList() {
                           <AlertDialogHeader>
                             <AlertDialogTitle>Delete webhook?</AlertDialogTitle>
                             <AlertDialogDescription>
-                              This will permanently delete the webhook for{" "}
-                              <span className="font-mono">{truncateUrl(record.url)}</span>.
-                              This cannot be undone.
+                              This will permanently delete the webhook. This cannot be undone.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
@@ -297,7 +286,7 @@ export function WebhookList() {
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingId ? "Edit Webhook" : "Add Webhook"}</DialogTitle>
@@ -319,23 +308,17 @@ export function WebhookList() {
               />
             </Field>
             <Field>
-              <FieldLabel>Events</FieldLabel>
+              <FieldLabel id="webhook-events-label">Events</FieldLabel>
               <Controller
                 control={control}
                 name="events"
                 render={({ field }) => (
-                  <ToggleGroup
-                    type="multiple"
+                  <EventChips
                     value={field.value}
-                    onValueChange={field.onChange}
-                    className="flex flex-wrap justify-start gap-1.5"
-                  >
-                    {EVENT_OPTIONS.map((opt) => (
-                      <ToggleGroupItem key={opt} value={opt} size="sm" className="text-xs">
-                        {opt}
-                      </ToggleGroupItem>
-                    ))}
-                  </ToggleGroup>
+                    onChange={field.onChange}
+                    options={WORKFLOW_EVENT_OPTIONS}
+                    aria-labelledby="webhook-events-label"
+                  />
                 )}
               />
               {events.length === 0 && (
@@ -370,15 +353,22 @@ export function WebhookList() {
                 )}
               />
             </Field>
-            <div className="flex justify-end">
-              <Button
-                onClick={rhfSubmit((data) => saveMutation.mutate(data))}
-                disabled={saveMutation.isPending || events.length === 0}
-              >
-                {saveMutation.isPending ? (editingId ? "Saving..." : "Creating...") : (editingId ? "Save" : "Create")}
-              </Button>
-            </div>
           </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setEditing(null)}
+              disabled={saveMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={rhfSubmit((data) => saveMutation.mutate(data))}
+              disabled={saveMutation.isPending || events.length === 0}
+            >
+              {saveMutation.isPending ? (editingId ? "Saving..." : "Creating...") : (editingId ? "Save" : "Create")}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

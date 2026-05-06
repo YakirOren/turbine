@@ -118,6 +118,8 @@ export function WorkflowCalendar({ onDayClick }: WorkflowCalendarProps) {
     <div className="space-y-3">
       <button
         onClick={toggleCollapsed}
+        aria-expanded={!collapsed}
+        aria-controls="activity-calendar-grid"
         className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
         <ChevronRight
@@ -133,18 +135,23 @@ export function WorkflowCalendar({ onDayClick }: WorkflowCalendarProps) {
             <span className="font-mono">{summary.total.toLocaleString()} runs</span>
             <span className={cn(
               "font-mono",
-              summary.successRate >= 90 ? "text-green-500" : summary.successRate >= 70 ? "text-yellow-500" : "text-red-500"
+              summary.successRate >= 90
+                ? "text-success-foreground"
+                : summary.successRate >= 70
+                  ? "text-warning-foreground"
+                  : "text-danger-foreground"
             )}>
               {summary.successRate}%
             </span>
             {summary.errors > 0 && (
-              <span className="font-mono text-red-400">{summary.errors} failed</span>
+              <span className="font-mono text-danger-foreground">{summary.errors} failed</span>
             )}
           </span>
         )}
       </button>
 
       <div
+        id="activity-calendar-grid"
         className="grid transition-[grid-template-rows] duration-200 ease-out"
         style={{ gridTemplateRows: collapsed ? "0fr" : "1fr" }}
       >
@@ -185,7 +192,7 @@ export function WorkflowCalendar({ onDayClick }: WorkflowCalendarProps) {
                   ? Array.from({ length: 26 }, (_, wi) => (
                       <div key={wi} className="flex flex-col gap-0.5">
                         {Array.from({ length: 7 }, (_, di) => (
-                          <div key={di} className="h-[12px] w-[12px] rounded-[2px] bg-muted animate-pulse" />
+                          <div key={di} className="h-[12px] w-[12px] rounded-[2px] bg-muted-foreground/15 animate-pulse" />
                         ))}
                       </div>
                     ))
@@ -220,9 +227,9 @@ export function WorkflowCalendar({ onDayClick }: WorkflowCalendarProps) {
                                 {count > 0 ? (
                                   <div className="space-y-0.5 text-muted-foreground">
                                     <div>{count} workflow{count !== 1 ? "s" : ""}</div>
-                                    {stat!.success > 0 && <div className="text-green-400">{stat!.success} passed</div>}
-                                    {stat!.error > 0 && <div className="text-red-400">{stat!.error} failed</div>}
-                                    {stat!.cancelled > 0 && <div className="text-gray-400">{stat!.cancelled} cancelled</div>}
+                                    {stat!.success > 0 && <div className="text-success-foreground">{stat!.success} passed</div>}
+                                    {stat!.error > 0 && <div className="text-danger-foreground">{stat!.error} failed</div>}
+                                    {stat!.cancelled > 0 && <div className="text-muted-foreground">{stat!.cancelled} cancelled</div>}
                                   </div>
                                 ) : (
                                   <div className="text-muted-foreground">No workflows</div>
@@ -241,19 +248,20 @@ export function WorkflowCalendar({ onDayClick }: WorkflowCalendarProps) {
             <div className="flex items-center gap-1.5">
               <span>Less</span>
               <div className="flex gap-0.5">
-                <div className="h-[12px] w-[12px] rounded-[2px] bg-muted" />
-                <div className="h-[12px] w-[12px] rounded-[2px] bg-green-200 dark:bg-green-900" />
-                <div className="h-[12px] w-[12px] rounded-[2px] bg-green-400 dark:bg-green-700" />
-                <div className="h-[12px] w-[12px] rounded-[2px] bg-green-600 dark:bg-green-400" />
+                <div className="h-[12px] w-[12px] rounded-[2px] bg-[var(--heat-empty)]" />
+                <div className="h-[12px] w-[12px] rounded-[2px] bg-[var(--heat-success-1)]" />
+                <div className="h-[12px] w-[12px] rounded-[2px] bg-[var(--heat-success-2)]" />
+                <div className="h-[12px] w-[12px] rounded-[2px] bg-[var(--heat-success-3)]" />
+                <div className="h-[12px] w-[12px] rounded-[2px] bg-[var(--heat-success-4)]" />
               </div>
               <span>More</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="h-[12px] w-[12px] rounded-[2px] bg-yellow-300 dark:bg-yellow-800" />
+              <div className="h-[12px] w-[12px] rounded-[2px] bg-[var(--heat-warning-3)]" />
               <span>Mixed</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="h-[12px] w-[12px] rounded-[2px] bg-red-400 dark:bg-red-700" />
+              <div className="h-[12px] w-[12px] rounded-[2px] bg-[var(--heat-danger-3)]" />
               <span>Errors</span>
             </div>
           </div>

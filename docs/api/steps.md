@@ -73,3 +73,11 @@ func SendProduct(ctx context.Context, fileName string, data io.Reader, metadata 
 ```
 
 Store a [product file](/concepts/products) from within a step.
+
+## `turbine.SendNotification`
+
+```go
+func SendNotification(ctx context.Context, name, message string) error
+```
+
+Send an ad-hoc message to a configured [notification channel](/concepts/notifications) by name. Disabled channels are a silent no-op. Also available as `rt.SendNotification(name, message)` from host code.

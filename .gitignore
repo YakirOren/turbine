@@ -5,3 +5,5 @@ node_modules/
 .agents
 dashboard/dist/*
 !dashboard/dist/.gitkeep
+*.tsbuildinfo
+ui/.vite

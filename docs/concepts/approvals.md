@@ -1,5 +1,7 @@
 # Approvals
 
+![Steps waiting for approval](../screenshots/steps-waiting-for-approval.png)
+
 You can pause a workflow and wait for a human decision. The gate is durable — it survives crashes and restarts.
 
 ## Waiting for Approval
@@ -73,8 +75,6 @@ turbine.Send(ctx, targetWorkflowID,
 
 The Turbine dashboard shows an approve/reject UI for workflows that are waiting for approval.
 
-![Steps waiting for approval](../screenshots/steps-waiting-for-approval.png)
-
-![Sidebar with approval actions](../screenshots/side-bar-waiting-for-approval.png)
+<img src='../screenshots/side-bar-waiting-for-approval.png' width='250'/>
 
 See the [dashboard example](/examples/dashboard) for a deploy workflow with an approval gate (`DeployWorkflow`).

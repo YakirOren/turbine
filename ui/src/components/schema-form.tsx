@@ -101,12 +101,19 @@ export function SchemaFormField({
         )}
         <ToggleGroup
           type="multiple"
+          variant="outline"
+          spacing={1}
           value={selected}
           onValueChange={(vals) => onChange(vals)}
-          className="flex flex-wrap justify-start gap-1.5"
+          className="grid w-full grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] gap-1.5"
         >
           {field.options.map((opt) => (
-            <ToggleGroupItem key={opt} value={opt} size="sm">
+            <ToggleGroupItem
+              key={opt}
+              value={opt}
+              size="sm"
+              className="w-full data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:shadow-sm data-[state=on]:hover:bg-primary/90 data-[state=on]:hover:text-primary-foreground"
+            >
               {opt}
             </ToggleGroupItem>
           ))}

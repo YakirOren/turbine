@@ -3,7 +3,7 @@ import { useList, useInvalidate } from "@refinedev/core";
 import { useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { pbClient } from "@/providers/pocketbase";
-import { Database, Plus, Trash2 } from "lucide-react";
+import { Database, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +29,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -37,15 +38,14 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { SchemaFormField, jsonSchemaToFields, getFieldDefaults, type SchemaField } from "@/components/schema-form";
 import { CodeMirrorEditor } from "@/components/codemirror";
 import { TableSkeleton } from "@/components/table-skeleton";
+import { DocLink } from "@/components/doc-link";
 import { timeAgo } from "@/lib/format";
 import type { PtKvResponse } from "@/types/pocketbase-types";
 
 type KVRecord = PtKvResponse;
 
-function truncateValue(value: unknown, maxLen = 60): string {
-  const str = JSON.stringify(value) ?? "undefined";
-  if (str.length <= maxLen) return str;
-  return str.slice(0, maxLen) + "\u2026";
+function stringifyValue(value: unknown): string {
+  return JSON.stringify(value) ?? "undefined";
 }
 
 interface KVFormValues {
@@ -59,8 +59,8 @@ interface KVFormValues {
 export function KVList() {
   const id = useId();
   const invalidate = useInvalidate();
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editRecord, setEditRecord] = useState<KVRecord | null>(null);
+  const [editing, setEditing] = useState<{ record: KVRecord | null } | null>(null);
+  const editRecord = editing?.record ?? null;
 
   const { reset, watch, setValue, getValues } = useForm<KVFormValues>({
     defaultValues: {
@@ -100,12 +100,10 @@ export function KVList() {
 
   const openAdd = () => {
     reset();
-    setEditRecord(null);
-    setDialogOpen(true);
+    setEditing({ record: null });
   };
 
   const openEdit = (record: KVRecord) => {
-    setEditRecord(record);
     const schemaStr = record.schema ? JSON.stringify(record.schema, null, 2) : "";
     const fields = record.schema ? jsonSchemaToFields(record.schema) : [];
     reset({
@@ -115,7 +113,7 @@ export function KVList() {
       fieldValues: fields.length > 0 ? getFieldDefaults(fields, record.value) : {},
       activeTab: "value",
     });
-    setDialogOpen(true);
+    setEditing({ record });
   };
 
   const handleSchemaChange = (newSchema: string) => {
@@ -179,7 +177,7 @@ export function KVList() {
     onSuccess: () => {
       invalidateKV();
       toast.success(editRecord ? "Key updated" : "Key created");
-      setDialogOpen(false);
+      setEditing(null);
     },
     onError: (err: any) => {
       toast.error(err?.message || "Failed to save");
@@ -214,7 +212,7 @@ export function KVList() {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">KV Store</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">KV Store</h1>
         </div>
         <TableSkeleton columns={4} headers={["Key", "Value", "Updated", ""]} />
       </div>
@@ -224,7 +222,7 @@ export function KVList() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">KV Store</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">KV Store</h1>
         <Button size="sm" onClick={openAdd}>
           <Plus className="mr-1.5 h-3.5 w-3.5" />
           Add Key
@@ -250,6 +248,9 @@ export function KVList() {
               </code>
             </p>
           </div>
+          <DocLink path="concepts/kv-store" className="text-xs">
+            Learn more
+          </DocLink>
         </div>
       ) : (
         <div className="rounded-md border">
@@ -259,57 +260,66 @@ export function KVList() {
                 <TableHead>Key</TableHead>
                 <TableHead>Value</TableHead>
                 <TableHead>Updated</TableHead>
-                <TableHead className="w-10" />
+                <TableHead className="w-20" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {records.map((record) => (
-                <TableRow
-                  key={record.id}
-                  className="cursor-pointer"
-                  onClick={() => openEdit(record)}
-                >
+                <TableRow key={record.id}>
                   <TableCell className="font-mono text-sm font-medium">
                     {record.key}
                   </TableCell>
-                  <TableCell className="max-w-xs font-mono text-xs text-muted-foreground">
-                    {truncateValue(record.value)}
+                  <TableCell className="w-full max-w-0">
+                    <div className="truncate font-mono text-xs text-muted-foreground">
+                      {stringifyValue(record.value)}
+                    </div>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {timeAgo(record.updated_at_epoch_ms)}
                   </TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                          aria-label={`Delete key ${record.key}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Delete key?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This will permanently delete{" "}
-                            <span className="font-mono">{record.key}</span>.
-                            This cannot be undone.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            variant="destructive"
-                            onClick={() => deleteMutation.mutate(record.id)}
+                  <TableCell className="w-20">
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                        onClick={() => openEdit(record)}
+                        aria-label={`Edit key ${record.key}`}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                            aria-label={`Delete key ${record.key}`}
                           >
-                            Delete
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete key?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete{" "}
+                              <span className="font-mono">{record.key}</span>.
+                              This cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              variant="destructive"
+                              onClick={() => deleteMutation.mutate(record.id)}
+                            >
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -318,7 +328,7 @@ export function KVList() {
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>{editRecord ? "Edit Key" : "Add Key"}</DialogTitle>
@@ -338,7 +348,7 @@ export function KVList() {
             </Field>
 
             <Tabs value={activeTab} onValueChange={(v) => setValue("activeTab", v)} className="overflow-hidden min-h-0 flex flex-col">
-              <TabsList className="shrink-0">
+              <TabsList variant="line" className="shrink-0 border-b w-full justify-start rounded-none">
                 <TabsTrigger value="value">Value</TabsTrigger>
                 <TabsTrigger value="schema">Schema</TabsTrigger>
               </TabsList>
@@ -389,15 +399,22 @@ export function KVList() {
               </TabsContent>
             </Tabs>
 
-            <div className="flex justify-end shrink-0">
-              <Button
-                onClick={() => onSubmit()}
-                disabled={!formKey.trim() || saveMutation.isPending}
-              >
-                {saveMutation.isPending ? "Saving..." : "Save"}
-              </Button>
-            </div>
           </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setEditing(null)}
+              disabled={saveMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => onSubmit()}
+              disabled={!formKey.trim() || saveMutation.isPending}
+            >
+              {saveMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

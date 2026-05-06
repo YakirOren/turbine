@@ -4,9 +4,9 @@ Turbine can send human-readable notifications to services like Slack, Discord, T
 
 For programmatic integrations with structured JSON payloads, see [Webhooks](./webhooks.md).
 
-## Creating a Channel
+## Schema
 
-Create a record in `pt_alert_channels` with:
+Channels live in the `pt_alert_channels` collection:
 
 | Field | Type | Description |
 |---|---|---|
@@ -56,6 +56,38 @@ Notifications are plain-text messages:
 [Turbine] Workflow "orderProcessing" (abc123) is waiting for approval
 [Turbine] Workflow "orderProcessing" (abc123) exceeded max recovery attempts
 ```
+
+## Sending Custom Messages
+
+You can send an ad-hoc message to a configured channel from Go code, in addition to the automatic event-driven dispatch.
+
+From a step (or any code that has the step's `context.Context`):
+
+```go
+turbine.Register(rt, "nightlyImport", func(ctx turbine.Context) (any, error) {
+    rows, err := turbine.Do(ctx, func(ctx context.Context) (int, error) {
+        rows := importRows(ctx)
+        if rows < 100 {
+            if err := turbine.SendNotification(ctx, "ops-alerts",
+                fmt.Sprintf("Unusual row count in nightly import: %d", rows)); err != nil {
+                turbine.LoggerFrom(ctx).Warn("notification failed", "error", err)
+            }
+        }
+        return rows, nil
+    })
+    return rows, err
+})
+```
+
+Or directly on the runtime, from host code (HTTP handlers, cron jobs, etc.):
+
+```go
+if err := rt.SendNotification("ops-alerts", "Backfill finished"); err != nil {
+    log.Printf("notification failed: %v", err)
+}
+```
+
+Channels are looked up by their `name` field. **Disabled channels are a silent no-op** — calling `SendNotification` against a disabled channel returns `nil` without sending, matching the event-driven dispatch behavior. Toggling a channel off mutes both manual and automatic sends. If multiple channels share the same name, the first match is used — keep names unique. Unlike event-driven dispatch, this call is synchronous and returns the underlying delivery error, so the caller can decide whether to log, retry, or surface it.
 
 ## Testing
 

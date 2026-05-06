@@ -177,6 +177,28 @@ func (h *handlers) testAlertChannel(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (h *handlers) resendProduct(e *core.RequestEvent) error {
+	id := e.Request.PathValue("id")
+	if id == "" {
+		return e.BadRequestError("missing product id", nil)
+	}
+
+	record, err := h.app.FindRecordById("pt_products", id)
+	if err != nil {
+		return e.NotFoundError("product not found", nil)
+	}
+
+	if record.GetString("status") != "failed" {
+		return e.BadRequestError("only failed products can be resent", nil)
+	}
+
+	if err := turbine.ResendProduct(h.app, h.rt, record); err != nil {
+		return e.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
+	}
+
+	return e.JSON(http.StatusOK, map[string]string{"status": "sent"})
+}
+
 func (h *handlers) calendarStats(e *core.RequestEvent) error {
 	q := e.Request.URL.Query()
 

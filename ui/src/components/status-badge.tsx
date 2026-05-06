@@ -1,82 +1,113 @@
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-const statusConfig: Record<string, { label: string; className: string }> = {
-  PENDING: {
-    label: "Pending",
-    className: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+type Tone = "success" | "info" | "warning" | "danger" | "neutral";
+
+const toneClasses: Record<Tone, { bg: string; fg: string; dot: string }> = {
+  success: {
+    bg: "bg-success-soft",
+    fg: "text-success-foreground",
+    dot: "bg-success",
   },
-  ENQUEUED: {
-    label: "Enqueued",
-    className: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  info: {
+    bg: "bg-info-soft",
+    fg: "text-info-foreground",
+    dot: "bg-info",
   },
-  SUCCESS: {
-    label: "Success",
-    className: "bg-green-500/20 text-green-400 border-green-500/30",
+  warning: {
+    bg: "bg-warning-soft",
+    fg: "text-warning-foreground",
+    dot: "bg-warning",
   },
-  ERROR: {
-    label: "Error",
-    className: "bg-red-500/20 text-red-400 border-red-500/30",
+  danger: {
+    bg: "bg-danger-soft",
+    fg: "text-danger-foreground",
+    dot: "bg-danger",
   },
-  CANCELLED: {
-    label: "Cancelled",
-    className: "bg-gray-500/20 text-gray-400 border-gray-500/30",
-  },
-  MAX_RECOVERY_ATTEMPTS_EXCEEDED: {
-    label: "Max Retries",
-    className: "bg-red-500/20 text-red-400 border-red-500/30",
+  neutral: {
+    bg: "bg-secondary",
+    fg: "text-secondary-foreground",
+    dot: "bg-muted-foreground",
   },
 };
 
-const appStatusColorConfig: Record<string, string> = {
-  green: "bg-green-500/20 text-green-400 border-green-500/30",
-  red: "bg-red-500/20 text-red-400 border-red-500/30",
-  yellow: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-  blue: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-  gray: "bg-gray-500/20 text-gray-400 border-gray-500/30",
-  lime: "bg-lime-500/20 text-lime-400 border-lime-500/30",
-  orange: "bg-orange-500/20 text-orange-400 border-orange-500/30",
-  purple: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-  pink: "bg-pink-500/20 text-pink-400 border-pink-500/30",
-  cyan: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
+const statusConfig: Record<string, { label: string; tone: Tone }> = {
+  PENDING: { label: "Pending", tone: "warning" },
+  ENQUEUED: { label: "Enqueued", tone: "info" },
+  RUNNING: { label: "Running", tone: "info" },
+  SUCCESS: { label: "Success", tone: "success" },
+  ERROR: { label: "Failed", tone: "danger" },
+  CANCELLED: { label: "Cancelled", tone: "neutral" },
+  MAX_RECOVERY_ATTEMPTS_EXCEEDED: { label: "Max Retries", tone: "danger" },
 };
 
-export function AppStatusBadge({ label, color }: { label?: string; color?: string }) {
-  if (!label) return <span className="text-muted-foreground">&mdash;</span>;
-  const colorClass = appStatusColorConfig[color ?? ""] ?? appStatusColorConfig.gray;
+const stepStatusConfig: Record<string, { label: string; tone: Tone }> = {
+  success: { label: "Success", tone: "success" },
+  error: { label: "Failed", tone: "danger" },
+  running: { label: "Running", tone: "info" },
+};
+
+const appStatusColorTone: Record<string, Tone> = {
+  green: "success",
+  lime: "success",
+  red: "danger",
+  yellow: "warning",
+  orange: "warning",
+  blue: "info",
+  cyan: "info",
+  purple: "info",
+  pink: "danger",
+  gray: "neutral",
+};
+
+export function Pill({
+  tone = "neutral",
+  children,
+  dot = true,
+  className,
+}: {
+  tone?: Tone;
+  children: React.ReactNode;
+  dot?: boolean;
+  className?: string;
+}) {
+  const c = toneClasses[tone];
   return (
-    <Badge variant="outline" className={cn("font-medium", colorClass)}>
-      {label}
-    </Badge>
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium",
+        c.bg,
+        c.fg,
+        className,
+      )}
+    >
+      {dot && <span className={cn("h-1.5 w-1.5 rounded-full", c.dot)} />}
+      {children}
+    </span>
   );
 }
 
 export function StatusBadge({ status }: { status: string }) {
-  const config = statusConfig[status] ?? {
-    label: status,
-    className: "bg-gray-500/20 text-gray-400 border-gray-500/30",
-  };
-
-  return (
-    <Badge variant="outline" className={cn("font-medium", config.className)}>
-      {config.label}
-    </Badge>
-  );
+  const config = statusConfig[status] ?? { label: status, tone: "neutral" as Tone };
+  return <Pill tone={config.tone}>{config.label}</Pill>;
 }
 
-const productStatusConfig: Record<string, { label: string; className: string }> = {
-  sent: { label: "Sent", className: "bg-green-500/20 text-green-400 border-green-500/30" },
-  failed: { label: "Failed", className: "bg-red-500/20 text-red-400 border-red-500/30" },
+export function StepStatusBadge({ status }: { status: string }) {
+  const config = stepStatusConfig[status] ?? { label: status, tone: "neutral" as Tone };
+  return <Pill tone={config.tone}>{config.label}</Pill>;
+}
+
+export function AppStatusBadge({ label, color }: { label?: string; color?: string }) {
+  if (!label) return <span className="text-muted-foreground">&mdash;</span>;
+  const tone = appStatusColorTone[color ?? ""] ?? "neutral";
+  return <Pill tone={tone}>{label}</Pill>;
+}
+
+const productStatusConfig: Record<string, { label: string; tone: Tone }> = {
+  sent: { label: "Sent", tone: "success" },
+  failed: { label: "Failed", tone: "danger" },
 };
 
 export function ProductStatusBadge({ status }: { status: string }) {
-  const config = productStatusConfig[status] ?? {
-    label: status,
-    className: "bg-gray-500/20 text-gray-400 border-gray-500/30",
-  };
-  return (
-    <Badge variant="outline" className={cn("font-medium", config.className)}>
-      {config.label}
-    </Badge>
-  );
+  const config = productStatusConfig[status] ?? { label: status, tone: "neutral" as Tone };
+  return <Pill tone={config.tone}>{config.label}</Pill>;
 }

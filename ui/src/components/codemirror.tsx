@@ -3,6 +3,7 @@ import { EditorView, placeholder as cmPlaceholder, keymap } from "@codemirror/vi
 import { EditorState } from "@codemirror/state";
 import { json } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
@@ -16,7 +17,7 @@ const baseTheme = EditorView.theme({
     outline: "none",
   },
   ".cm-scroller": {
-    fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace",
+    fontFamily: "var(--font-mono)",
   },
   ".cm-content": {
     padding: "8px 0",
@@ -85,6 +86,8 @@ export function CodeMirrorEditor({
     }
     if (isDark) {
       extensions.push(oneDark);
+    } else {
+      extensions.push(syntaxHighlighting(defaultHighlightStyle));
     }
 
     const state = EditorState.create({

@@ -1,6 +1,7 @@
 package turbine
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -21,7 +22,7 @@ func NewWorkflowSender[R any](rt *Runtime, workflow Workflow[ProductRecord, R]) 
 	return &WorkflowSender[R]{rt: rt, workflow: workflow}
 }
 
-func (ws *WorkflowSender[R]) Send(ctx context.Context, product ProductRecord) error {
+func (ws *WorkflowSender[R]) Send(ctx context.Context, product ProductRecord, _ io.Reader) error {
 	_, err := Run(ws.rt, ws.workflow, product)
 	return err
 }
@@ -94,19 +95,28 @@ func SendProduct(ctx context.Context, fileName string, data io.Reader, metadata 
 		return fmt.Errorf("turbine: failed to save product: %w", err)
 	}
 
-	// Send if sender configured
+	return dispatchToSender(ctx, rt, record, bytes.NewReader(fileBytes))
+}
+
+func dispatchToSender(ctx context.Context, rt *Runtime, record *core.Record, data io.Reader) error {
 	if rt.productSender == nil {
 		return nil
 	}
 
 	productRecord := ProductRecord{
 		ID:       record.Id,
-		FileName: fileName,
-		Metadata: metadata,
-		FileURL:  fmt.Sprintf("/api/files/%s/%s/%s", collectionProducts, record.Id, record.GetString("file")),
+		FileName: record.GetString("file_name"),
+		Size:     record.GetInt("size"),
+		Metadata: func() map[string]any {
+			raw := record.GetRaw("metadata")
+			if m, ok := raw.(map[string]any); ok {
+				return m
+			}
+			return nil
+		}(),
 	}
 
-	sendErr := rt.productSender.Send(ctx, productRecord)
+	sendErr := rt.productSender.Send(ctx, productRecord, data)
 	if sendErr != nil {
 		record.Set("status", "failed")
 		record.Set("error", sendErr.Error())
@@ -117,8 +127,32 @@ func SendProduct(ctx context.Context, fileName string, data io.Reader, metadata 
 	}
 
 	record.Set("status", "sent")
+	record.Set("error", "")
 	if saveErr := rt.app.Save(record); saveErr != nil {
 		rt.app.Logger().Error("failed to update product status to sent", "product_id", record.Id, "error", saveErr, "source", "system")
 	}
 	return nil
+}
+
+// ResendProduct re-sends a stored product to the configured ProductSender.
+// Only valid for products with status "failed". Returns an error if no sender is configured.
+func ResendProduct(app core.App, rt *Runtime, record *core.Record) error {
+	if rt.productSender == nil {
+		return fmt.Errorf("turbine: no product sender configured")
+	}
+
+	fileSys, err := app.NewFilesystem()
+	if err != nil {
+		return fmt.Errorf("turbine: failed to open filesystem: %w", err)
+	}
+
+	fileKey := record.BaseFilesPath() + "/" + record.GetString("file")
+	reader, err := fileSys.GetReader(fileKey)
+	if err != nil {
+		return fmt.Errorf("turbine: failed to read product file: %w", err)
+	}
+
+	_ = fileSys.Close()
+
+	return dispatchToSender(context.Background(), rt, record, reader)
 }

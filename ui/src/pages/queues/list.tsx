@@ -2,7 +2,6 @@ import { useState, useMemo } from "react";
 import type { CrudFilters, CrudSort } from "@refinedev/core";
 import { useQuery } from "@tanstack/react-query";
 import { LayoutList } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -11,8 +10,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Pill } from "@/components/status-badge";
 import { WorkflowTable } from "@/components/workflow-table";
 import { WorkflowSidebar } from "@/components/workflow-sidebar";
+import { DocLink } from "@/components/doc-link";
+import { TableSkeleton } from "@/components/table-skeleton";
 import { pbClient } from "@/providers/pocketbase";
 
 interface QueueInfo {
@@ -81,8 +83,16 @@ export function QueueList() {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        Loading...
+      <div className="flex h-full min-h-0 flex-1 bg-card">
+        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto p-6">
+          <div className="space-y-4">
+            <h1 className="text-2xl font-semibold tracking-tight">Queues</h1>
+            <TableSkeleton
+              columns={6}
+              headers={["Created At", "Workflow Name", "Summary", "Status", "Duration", "App Status"]}
+            />
+          </div>
+        </div>
       </div>
     );
   }
@@ -100,82 +110,90 @@ export function QueueList() {
             </code>
           </p>
         </div>
+        <DocLink path="concepts/queues" className="text-xs">
+          Learn more
+        </DocLink>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Queues</h1>
+    <div className="flex h-full min-h-0 flex-1 bg-card">
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto p-6">
+        <div className="space-y-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Queues</h1>
+          </div>
 
-      <div className="flex items-center gap-3">
-        <Select value={selectedQueue} onValueChange={setSelectedQueue}>
-          <SelectTrigger className="w-52">
-            <SelectValue placeholder="Select queue" />
-          </SelectTrigger>
-          <SelectContent>
-            {queues.map((q) => (
-              <SelectItem key={q.name} value={q.name}>
-                {q.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          <div className="flex items-center gap-3">
+            <Select value={selectedQueue} onValueChange={setSelectedQueue}>
+              <SelectTrigger className="w-52">
+                <SelectValue placeholder="Select queue" />
+              </SelectTrigger>
+              <SelectContent>
+                {queues.map((q) => (
+                  <SelectItem key={q.name} value={q.name}>
+                    {q.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-        <Input
-          placeholder="Workflow name"
-          value={nameFilter}
-          onChange={(e) => setNameFilter(e.target.value)}
-          className="w-44"
-        />
+            <Input
+              placeholder="Workflow name"
+              value={nameFilter}
+              onChange={(e) => setNameFilter(e.target.value)}
+              className="w-44"
+            />
 
-        {stats && (
-          <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="font-mono text-xs">
-              {stats.enqueued} enqueued
-            </Badge>
-            <Badge variant="secondary" className="font-mono text-xs text-blue-400">
-              {stats.running} running
-            </Badge>
-            <Badge variant="secondary" className="font-mono text-xs text-green-400">
-              {stats.completed} completed
-            </Badge>
-            {stats.failed > 0 && (
-              <Badge variant="secondary" className="font-mono text-xs text-red-400">
-                {stats.failed} failed
-              </Badge>
+            {stats && (
+              <div className="flex shrink-0 items-center gap-2">
+                <Pill tone="neutral" className="font-mono">
+                  {stats.enqueued} enqueued
+                </Pill>
+                <Pill tone="info" className="font-mono">
+                  {stats.running} running
+                </Pill>
+                <Pill tone="success" className="font-mono">
+                  {stats.completed} completed
+                </Pill>
+                {stats.failed > 0 && (
+                  <Pill tone="danger" className="font-mono">
+                    {stats.failed} failed
+                  </Pill>
+                )}
+              </div>
             )}
           </div>
-        )}
-      </div>
 
-      {selectedQueueInfo && (
-        <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
-          {selectedQueueInfo.workerConcurrency != null && (
-            <span>Worker Concurrency: {selectedQueueInfo.workerConcurrency}</span>
+          {selectedQueueInfo && (
+            <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+              {selectedQueueInfo.workerConcurrency != null && (
+                <span>Worker Concurrency: {selectedQueueInfo.workerConcurrency}</span>
+              )}
+              {selectedQueueInfo.globalConcurrency != null && (
+                <span>Global Concurrency: {selectedQueueInfo.globalConcurrency}</span>
+              )}
+              {selectedQueueInfo.priorityEnabled && <span>Priority: enabled</span>}
+              {selectedQueueInfo.partitioned && <span>Partitioned</span>}
+              {selectedQueueInfo.rateLimit && (
+                <span>
+                  Rate Limit: {selectedQueueInfo.rateLimit.limit}/
+                  {selectedQueueInfo.rateLimit.period}
+                </span>
+              )}
+            </div>
           )}
-          {selectedQueueInfo.globalConcurrency != null && (
-            <span>Global Concurrency: {selectedQueueInfo.globalConcurrency}</span>
-          )}
-          {selectedQueueInfo.priorityEnabled && <span>Priority: enabled</span>}
-          {selectedQueueInfo.partitioned && <span>Partitioned</span>}
-          {selectedQueueInfo.rateLimit && (
-            <span>
-              Rate Limit: {selectedQueueInfo.rateLimit.limit}/
-              {selectedQueueInfo.rateLimit.period}
-            </span>
+
+          {selectedQueue && (
+            <WorkflowTable
+              filters={crudFilters}
+              sorters={sorters}
+              onRowClick={(record) => setSelectedId(record.id)}
+            />
           )}
         </div>
-      )}
-
-      {selectedQueue && (
-        <WorkflowTable
-          filters={crudFilters}
-          sorters={sorters}
-          onRowClick={(record) => setSelectedId(record.id)}
-        />
-      )}
-
+      </div>
       <WorkflowSidebar
         workflowId={selectedId}
         onClose={() => setSelectedId(null)}

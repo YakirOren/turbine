@@ -5,7 +5,7 @@ import { z } from "zod";
 import { useList, useInvalidate } from "@refinedev/core";
 import { useMutation } from "@tanstack/react-query";
 import { pbClient } from "@/providers/pocketbase";
-import { Bell, Plus, Trash2, Pencil, Play } from "lucide-react";
+import { Bell, Plus, Trash2, Pencil, Play, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -36,9 +37,21 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Field, FieldLabel, FieldDescription } from "@/components/ui/field";
 import { TableSkeleton } from "@/components/table-skeleton";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { DocLink } from "@/components/doc-link";
+import { EventChips, WORKFLOW_EVENT_OPTIONS } from "@/components/event-chips";
 import type { PtAlertChannelsResponse } from "@/types/pocketbase-types";
 
 type AlertChannelRecord = PtAlertChannelsResponse<string[]> & { events: string[] };
@@ -50,15 +63,6 @@ const formSchema = z.object({
   enabled: z.boolean(),
 });
 type FormValues = z.infer<typeof formSchema>;
-
-const EVENT_OPTIONS = [
-  "workflow.SUCCESS",
-  "workflow.ERROR",
-  "workflow.CANCELLED",
-  "workflow.WAITING_FOR_APPROVAL",
-  "workflow.MAX_RECOVERY_ATTEMPTS_EXCEEDED",
-  "workflow.*",
-];
 
 const SERVICE_NAMES: Record<string, string> = {
   slack: "Slack",
@@ -99,8 +103,9 @@ function timeAgo(dateStr: string): string {
 
 export function NotificationList() {
   const invalidate = useInvalidate();
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ id: string | null } | null>(null);
+  const [testPopoverId, setTestPopoverId] = useState<string | null>(null);
+  const editingId = editing?.id ?? null;
 
   const { control, handleSubmit: rhfSubmit, reset, watch } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -147,7 +152,7 @@ export function NotificationList() {
     onSuccess: () => {
       invalidateChannels();
       toast.success(editingId ? "Channel updated" : "Channel created");
-      setDialogOpen(false);
+      setEditing(null);
     },
     onError: (err: any) => {
       toast.error(err?.message || `Failed to ${editingId ? "update" : "create"} channel`);
@@ -182,29 +187,29 @@ export function NotificationList() {
       pbClient.send(`/api/pt/alert-channels/${id}/test`, { method: "POST" }),
     onSuccess: () => {
       toast.success("Test notification sent");
+      setTestPopoverId(null);
     },
     onError: (err: any) => {
       toast.error(err?.message || "Test notification failed");
+      setTestPopoverId(null);
     },
   });
 
   const openAdd = () => {
     reset();
-    setEditingId(null);
-    setDialogOpen(true);
+    setEditing({ id: null });
   };
 
   const openEdit = (record: AlertChannelRecord) => {
     reset({ name: record.name, url: "", events: [...record.events], enabled: record.enabled });
-    setEditingId(record.id);
-    setDialogOpen(true);
+    setEditing({ id: record.id });
   };
 
   if (isLoading) {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">Notifications</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Notifications</h1>
         </div>
         <TableSkeleton columns={6} headers={["Name", "Service", "Events", "Enabled", "Created", ""]} />
       </div>
@@ -214,7 +219,7 @@ export function NotificationList() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Notifications</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Notifications</h1>
         <Button size="sm" onClick={openAdd}>
           <Plus className="mr-1.5 h-3.5 w-3.5" />
           Add Channel
@@ -237,6 +242,9 @@ export function NotificationList() {
               Add a channel to receive alerts when workflows complete.
             </p>
           </div>
+          <DocLink path="concepts/notifications" className="text-xs">
+            Learn more
+          </DocLink>
         </div>
       ) : (
         <div className="rounded-md border">
@@ -254,8 +262,10 @@ export function NotificationList() {
             <TableBody>
               {records.map((record) => (
                 <TableRow key={record.id}>
-                  <TableCell className="font-medium">
-                    {record.name}
+                  <TableCell className="w-full max-w-0">
+                    <div className="truncate font-medium" title={record.name}>
+                      {record.name}
+                    </div>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {extractServiceName(record.url)}
@@ -283,18 +293,66 @@ export function NotificationList() {
                   <TableCell className="text-sm text-muted-foreground">
                     {timeAgo(record.created)}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="w-28">
                     <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                        onClick={() => testMutation.mutate(record.id)}
-                        disabled={testMutation.isPending}
-                        aria-label={`Test channel ${record.name}`}
-                      >
-                        <Play className="h-4 w-4" />
-                      </Button>
+                      {(() => {
+                        const isTesting =
+                          testMutation.isPending &&
+                          testMutation.variables === record.id;
+                        const isOpen = testPopoverId === record.id;
+                        return (
+                          <Popover
+                            open={isOpen}
+                            onOpenChange={(open) =>
+                              setTestPopoverId(open ? record.id : null)
+                            }
+                          >
+                            <TooltipProvider delayDuration={200}>
+                              <Tooltip open={isOpen ? false : undefined}>
+                                <PopoverTrigger asChild>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                      disabled={isTesting}
+                                      aria-label={`Test channel ${record.name}`}
+                                    >
+                                      {isTesting ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <Play className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                  </TooltipTrigger>
+                                </PopoverTrigger>
+                                <TooltipContent side="top">
+                                  Test channel
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                            <PopoverContent align="end" className="w-auto p-3">
+                              <div className="flex items-center gap-3">
+                                <p className="text-sm">Send test notification?</p>
+                                <Button
+                                  size="sm"
+                                  onClick={() => testMutation.mutate(record.id)}
+                                  disabled={isTesting}
+                                >
+                                  {isTesting ? (
+                                    <>
+                                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                      Sending
+                                    </>
+                                  ) : (
+                                    "Send"
+                                  )}
+                                </Button>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        );
+                      })()}
                       <Button
                         variant="ghost"
                         size="icon"
@@ -344,7 +402,7 @@ export function NotificationList() {
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingId ? "Edit Notification Channel" : "Add Notification Channel"}</DialogTitle>
@@ -379,27 +437,29 @@ export function NotificationList() {
                 )}
               />
               <FieldDescription>
-                Shoutrrr URL — supports Slack, Discord, Telegram, Email, and more
+                <a
+                  href="https://shoutrrr.nickfedor.com/v0.14.3/services/overview/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline-offset-2 hover:text-foreground hover:underline"
+                >
+                  Shoutrrr
+                </a>
+                {" "}URL — supports Slack, Discord, Telegram, Email, and more
               </FieldDescription>
             </Field>
             <Field>
-              <FieldLabel>Events</FieldLabel>
+              <FieldLabel id="channel-events-label">Events</FieldLabel>
               <Controller
                 control={control}
                 name="events"
                 render={({ field }) => (
-                  <ToggleGroup
-                    type="multiple"
+                  <EventChips
                     value={field.value}
-                    onValueChange={field.onChange}
-                    className="flex flex-wrap justify-start gap-1.5"
-                  >
-                    {EVENT_OPTIONS.map((opt) => (
-                      <ToggleGroupItem key={opt} value={opt} size="sm" className="text-xs">
-                        {opt}
-                      </ToggleGroupItem>
-                    ))}
-                  </ToggleGroup>
+                    onChange={field.onChange}
+                    options={WORKFLOW_EVENT_OPTIONS}
+                    aria-labelledby="channel-events-label"
+                  />
                 )}
               />
               {events.length === 0 && (
@@ -420,15 +480,22 @@ export function NotificationList() {
                 )}
               />
             </Field>
-            <div className="flex justify-end">
-              <Button
-                onClick={rhfSubmit((data) => saveMutation.mutate(data))}
-                disabled={saveMutation.isPending || events.length === 0}
-              >
-                {saveMutation.isPending ? (editingId ? "Saving..." : "Creating...") : (editingId ? "Save" : "Create")}
-              </Button>
-            </div>
           </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setEditing(null)}
+              disabled={saveMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={rhfSubmit((data) => saveMutation.mutate(data))}
+              disabled={saveMutation.isPending || events.length === 0}
+            >
+              {saveMutation.isPending ? (editingId ? "Saving..." : "Creating...") : (editingId ? "Save" : "Create")}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

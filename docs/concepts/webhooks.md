@@ -4,9 +4,9 @@ Turbine sends HTTP POST requests when workflows complete. Configured via the `pt
 
 For human-readable notifications to Slack, Discord, email, etc., see [Notifications](./notifications.md).
 
-## Creating a Webhook
+## Schema
 
-Create a record in `pt_webhooks` with:
+Webhooks live in the `pt_webhooks` collection:
 
 | Field | Type | Description |
 |---|---|---|

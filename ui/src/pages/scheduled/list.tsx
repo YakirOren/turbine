@@ -6,7 +6,8 @@ import { formatTimestampPrecise } from "@/lib/format";
 
 dayjs.extend(relativeTime);
 import cronstrue from "cronstrue";
-import { Clock, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { Clock, Code2, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -36,12 +37,15 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { TableSkeleton } from "@/components/table-skeleton";
+import { DocLink } from "@/components/doc-link";
+import { EditScheduleDialog } from "./edit-dialog";
 import type { PtSchedulesResponse } from "@/types/pocketbase-types";
 
 type Schedule = PtSchedulesResponse;
 
 export function ScheduledList() {
   const queryClient = useQueryClient();
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const { data: schedules = [], isLoading: schedulesLoading } = useQuery<Schedule[]>({
     queryKey: ["schedules"],
@@ -77,7 +81,7 @@ export function ScheduledList() {
   if (loading) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-bold">Scheduled Workflows</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Scheduled Workflows</h1>
         <TableSkeleton columns={5} headers={["Workflow", "Schedule", "Enabled", "Created", ""]} />
       </div>
     );
@@ -96,13 +100,16 @@ export function ScheduledList() {
             </code>
           </p>
         </div>
+        <DocLink path="concepts/scheduling" className="text-xs">
+          Learn more
+        </DocLink>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Scheduled Workflows</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Scheduled Workflows</h1>
 
       <div className="rounded-md border">
         <Table>
@@ -112,16 +119,30 @@ export function ScheduledList() {
               <TableHead>Schedule</TableHead>
               <TableHead>Enabled</TableHead>
               <TableHead>Created</TableHead>
-              <TableHead className="w-10" />
+              <TableHead className="w-20" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {schedules.map((s) => (
               <TableRow key={s.id}>
                 <TableCell className="font-mono text-xs">
-                  <span title={s.workflow_fqn}>
-                    {s.workflow_fqn.split(/[./]/).at(-1)}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span title={s.workflow_fqn}>
+                      {s.workflow_fqn.split(/[./]/).at(-1)}
+                    </span>
+                    {s.type === "compile" && (
+                      <TooltipProvider delayDuration={100}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Code2 className="h-3 w-3 text-muted-foreground" />
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            Registered from code. Edit the source to change or remove.
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell>
                   {s.cron_expression ? (
@@ -173,8 +194,18 @@ export function ScheduledList() {
                     </Tooltip>
                   </TooltipProvider>
                 </TableCell>
-                <TableCell>
+                <TableCell className="w-20">
                   {s.type !== "compile" && (
+                    <div className="flex items-center justify-end">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                        aria-label={`Edit schedule for ${s.workflow_fqn}`}
+                        onClick={() => setEditingId(s.id)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button
@@ -206,6 +237,7 @@ export function ScheduledList() {
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
+                    </div>
                   )}
                 </TableCell>
               </TableRow>
@@ -213,6 +245,20 @@ export function ScheduledList() {
           </TableBody>
         </Table>
       </div>
+
+      {(() => {
+        const current = schedules.find((s) => s.id === editingId);
+        if (!current) return null;
+        return (
+          <EditScheduleDialog
+            schedule={current}
+            open={editingId !== null}
+            onOpenChange={(open) => {
+              if (!open) setEditingId(null);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }

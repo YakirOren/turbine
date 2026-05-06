@@ -64,7 +64,7 @@ func TestScheduledWorkflowExecution(t *testing.T) {
 	wfID := "sched-test-" + now.UTC().Format(time.RFC3339)
 	_, err := registered.wrappedFunction(rt, now,
 		WithID(wfID),
-		WithQueue(_PT_INTERNAL_QUEUE_NAME),
+		WithQueue(ptInternalQueueName),
 	)
 	if err != nil {
 		t.Fatalf("failed to enqueue scheduled workflow: %v", err)

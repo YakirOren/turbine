@@ -13,10 +13,6 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-/*******************************/
-/******* FUNCTION TYPES *******/
-/*******************************/
-
 type workflowStateKeyType struct{}
 
 var workflowStateKey = workflowStateKeyType{}
@@ -125,10 +121,6 @@ func withTags(tags []string) WorkflowOption {
 	return func(o *workflowOptions) { o.Tags = tags }
 }
 
-/*******************************/
-/******* WORKFLOW HANDLES *****/
-/*******************************/
-
 type workflowOutcome[R any] struct {
 	result R
 	err    error
@@ -165,7 +157,7 @@ type workflowHandle[R any] struct {
 }
 
 func (h *workflowHandle[R]) GetResult(opts ...GetResultOption) (R, error) {
-	options := &getResultOptions{pollInterval: _DB_RETRY_INTERVAL}
+	options := &getResultOptions{pollInterval: dbRetryInterval}
 	for _, opt := range opts {
 		opt(options)
 	}
@@ -187,7 +179,7 @@ type workflowPollingHandle[R any] struct {
 }
 
 func (h *workflowPollingHandle[R]) GetResult(opts ...GetResultOption) (R, error) {
-	options := &getResultOptions{pollInterval: _DB_RETRY_INTERVAL}
+	options := &getResultOptions{pollInterval: dbRetryInterval}
 	for _, opt := range opts {
 		opt(options)
 	}
@@ -217,7 +209,7 @@ func WithHandlePollingInterval(interval time.Duration) GetResultOption {
 /******* WORKFLOW REGISTRATION ********/
 /***************************************/
 
-const _DEFAULT_MAX_RECOVERY_ATTEMPTS = 100
+const defaultMaxRecoveryAttempts = 100
 
 type wrappedWorkflowFunc func(rt *Runtime, input any, opts ...WorkflowOption) (Handle[any], error)
 
@@ -337,7 +329,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 		panic("cannot register workflow after runtime has launched")
 	}
 
-	regOpts := workflowRegistrationOptions{maxRetries: _DEFAULT_MAX_RECOVERY_ATTEMPTS}
+	regOpts := workflowRegistrationOptions{maxRetries: defaultMaxRecoveryAttempts}
 	for _, opt := range opts {
 		opt(&regOpts)
 	}
@@ -411,7 +403,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 			wfID := fmt.Sprintf("sched-%s-%s", customName, scheduledTime.UTC().Format(time.RFC3339))
 			_, err := wrapped(rt, scheduledTime,
 				WithID(wfID),
-				WithQueue(_PT_INTERNAL_QUEUE_NAME),
+				WithQueue(ptInternalQueueName),
 			)
 			if err != nil {
 				rt.app.Logger().Error("failed to run scheduled workflow", "name", customName, "error", err)
@@ -624,7 +616,7 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		if errors.Is(fnErr, &Error{Code: ErrConflictingID}) {
 			rt.app.Logger().Warn("workflow ID conflict, waiting for existing workflow", "workflow_id", workflowID)
 			encoded, awaitErr := retryWithResult(rt.ctx, func() (*string, error) {
-				return rt.systemDB.awaitWorkflowResult(rt.ctx, workflowID, _DB_RETRY_INTERVAL)
+				return rt.systemDB.awaitWorkflowResult(rt.ctx, workflowID, dbRetryInterval)
 			}, withRetrierLogger(rt.app.Logger()))
 			outcomeChan <- workflowOutcome[any]{result: encoded, err: awaitErr}
 			close(outcomeChan)
