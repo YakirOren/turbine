@@ -141,23 +141,18 @@ func ResendProduct(app core.App, rt *Runtime, record *core.Record) error {
 		return fmt.Errorf("turbine: no product sender configured")
 	}
 
-	fsys, err := app.NewFilesystem()
+	fileSys, err := app.NewFilesystem()
 	if err != nil {
 		return fmt.Errorf("turbine: failed to open filesystem: %w", err)
 	}
-	defer fsys.Close()
 
 	fileKey := record.BaseFilesPath() + "/" + record.GetString("file")
-	reader, err := fsys.GetReader(fileKey)
-	if err != nil {
-		return fmt.Errorf("turbine: failed to read product file: %w", err)
-	}
-	defer reader.Close()
-
-	fileBytes, err := io.ReadAll(reader)
+	reader, err := fileSys.GetReader(fileKey)
 	if err != nil {
 		return fmt.Errorf("turbine: failed to read product file: %w", err)
 	}
 
-	return dispatchToSender(context.Background(), rt, record, bytes.NewReader(fileBytes))
+	_ = fileSys.Close()
+
+	return dispatchToSender(context.Background(), rt, record, reader)
 }
