@@ -1,5 +1,8 @@
 # Workflows
 
+![workflows-page.png](../screenshots/workflows-page.png)
+
+
 A workflow is a function with the signature `func(ctx turbine.Context, input P) (R, error)`.
 
 ```go

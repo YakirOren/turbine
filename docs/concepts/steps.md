@@ -2,6 +2,8 @@
 
 Steps are the unit of durable execution. Each step's result is recorded in SQLite. On recovery, recorded steps replay their saved result instead of re-executing.
 
+![Workflow steps with logs](../screenshots/steps-page-logs.png)
+
 ```go
 result, err := turbine.Do(ctx, func(ctx context.Context) (int, error) {
     return callExternalAPI()  // only called once, even across crashes
@@ -75,7 +77,3 @@ By default, every step result is saved to SQLite for replay on recovery. For ste
 ## Dashboard
 
 The workflow detail view renders a visual DAG of your steps, showing execution order, duration per step, and current status. Tabs below the graph let you switch between **Logs** and **Products**.
-
-![Workflow steps with logs](../screenshots/steps-page-logs.png)
-
-![Workflow steps with products](../screenshots/steps-page-products.png)
