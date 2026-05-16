@@ -145,7 +145,7 @@ export function StepTimeline({
 
   if (ordered.length === 0) {
     return (
-      <div className="rounded-lg border bg-card p-6 text-center text-[12.5px] text-muted-foreground animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
+      <div className="flex h-96 items-center justify-center rounded-lg border bg-card p-6 text-center text-[12.5px] text-muted-foreground animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
         No steps yet.
       </div>
     );
@@ -153,7 +153,7 @@ export function StepTimeline({
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="rounded-lg border bg-card p-3 animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
+      <div className="flex h-96 flex-col rounded-lg border bg-card p-3 animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
         <div className="flex items-center justify-between px-1 pb-2.5 pt-0.5">
           <div className="text-[12px] font-semibold tracking-tight text-foreground">Step timeline</div>
           {isRunning && (
@@ -164,7 +164,7 @@ export function StepTimeline({
           )}
         </div>
 
-        <div className="relative">
+        <div className="relative min-h-0 flex-1 overflow-y-auto">
           <div className={cn(ROW_COLS, "items-center")}>
             <div />
             <div className="relative h-4 border-b border-border-soft">
@@ -444,7 +444,7 @@ export function TimelineSkeleton() {
   const ticks = [0, 2, 4, 6, 8, 10, 12, 14];
   const rows = 5;
   return (
-    <div className="rounded-lg border bg-card p-3">
+    <div className="h-96 rounded-lg border bg-card p-3">
       <div className="flex items-center justify-between px-1 pb-2.5 pt-0.5">
         <div className="text-[12px] font-semibold tracking-tight text-foreground">Step timeline</div>
         <div className="text-[11px] text-muted-foreground">Loading…</div>

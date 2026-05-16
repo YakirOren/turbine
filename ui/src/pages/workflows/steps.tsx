@@ -383,7 +383,7 @@ function StepFlowContent({ workflowId }: { workflowId: string }) {
                                 )}
                             >
                                 {(layout === "split" || layout === "graph-only") && (
-                                    <div className="relative h-[380px] overflow-hidden rounded-lg border bg-background animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
+                                    <div className="relative h-96 overflow-hidden rounded-lg border bg-background animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
                                         {stepsQuery.isLoading ? (
                                             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                                                 Loading graph…
