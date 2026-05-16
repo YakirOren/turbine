@@ -11,8 +11,6 @@ import (
 
 	"github.com/YakirOren/turbine"
 	"github.com/YakirOren/turbine/dashboard"
-	"github.com/pocketbase/pocketbase"
-	"github.com/pocketbase/pocketbase/core"
 )
 
 // --- Step functions ---
@@ -171,9 +169,7 @@ func (s *LogSender) Send(_ context.Context, product turbine.ProductRecord, _ io.
 }
 
 func main() {
-	app := pocketbase.New()
-
-	rt := turbine.Setup(app, turbine.Config{
+	app, rt := turbine.NewApp(turbine.Config{
 		ProductSender: &LogSender{},
 	})
 
@@ -193,9 +189,9 @@ func main() {
 	// Mount the dashboard at /_/turbine/
 	dashboard.Mount(app, rt)
 
-	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+	app.OnServe().BindFunc(func(e *turbine.ServeEvent) error {
 		// POST /order/:id — start an order workflow
-		e.Router.POST("/order/{id}", func(re *core.RequestEvent) error {
+		e.Router.POST("/order/{id}", func(re *turbine.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
 			handle, err := turbine.Run(rt, OrderWorkflow, OrderInput{

@@ -1,12 +1,56 @@
 # Workflows API
 
+## Constructors
+
+Turbine has five entry points. They differ in who owns the PocketBase app and whether HTTP serving is involved. See [Lifecycle](../concepts/lifecycle.md) for the construct -> register -> launch flow and a decision matrix.
+
+## `turbine.NewRuntime`
+
+```go
+func NewRuntime(app core.App, cfg Config) *Runtime
+```
+
+The primitive. The caller owns the app and manually invokes `rt.Launch()` and `rt.Shutdown()`. Use when you need fine-grained control over lifecycle, or for tests.
+
 ## `turbine.Setup`
 
 ```go
-func Setup(app core.App, config Config) *Runtime
+func Setup(app core.App, cfg Config) *Runtime
 ```
 
-Initialize Turbine with a PocketBase app and configuration. Creates required SQLite collections automatically.
+HTTP path, bring-your-own app. Binds `rt.Launch` to `app.OnServe()` and `rt.Shutdown` to `app.OnTerminate()`, so calling `app.Start()` drives the runtime. Use when writing a PocketBase plugin that ships alongside an existing app.
+
+## `turbine.NewApp`
+
+```go
+func NewApp(cfg Config) (App, *Runtime)
+```
+
+HTTP path, owned app. Creates a fresh PocketBase via `pocketbase.New()` and wires it through `Setup`. Returns both the app and the runtime. Use when you want HTTP serving without writing the app-construction boilerplate.
+
+## `turbine.NewStandalone`
+
+```go
+func NewStandalone(cfg Config) *Runtime
+```
+
+Standalone path, owned app. Creates a fresh PocketBase, but the runtime owns its lifecycle (no HTTP, no `app.Start()`). Defaults `cfg.Logger` to a stdout `slog` handler. The caller is responsible for `rt.Launch()` and `rt.Shutdown()`. Use for scripts, cron jobs, and background workers that need to run workflows without serving HTTP.
+
+## `turbine.SetupStandalone`
+
+```go
+func SetupStandalone(app core.App, cfg Config) *Runtime
+```
+
+Standalone path, bring-your-own app. Like `NewStandalone` but the caller supplies the PocketBase app. Does NOT default `cfg.Logger`, so caller-configured `app.Logger()` is preserved. Use when you have a PocketBase app you constructed yourself, and you want to run workflows without serving HTTP.
+
+## Type Aliases
+
+| Type | Description |
+|---|---|
+| `turbine.App` | The underlying app type. Provides HTTP routing, persistence, lifecycle, and more. |
+| `turbine.ServeEvent` | Event fired when the HTTP server is starting. |
+| `turbine.RequestEvent` | Represents an HTTP request received by the server. |
 
 ## `turbine.Register`
 
@@ -84,8 +128,8 @@ Get a handle to an existing workflow by ID.
 | `IsDraining()` | Check if runtime is shutting down |
 | `GetExecutorID()` | Get instance identifier |
 | `GetApplicationVersion()` | Get app version |
-| `GetApplicationID()` | Get PocketBase app name |
-| `App()` | Get the PocketBase `core.App` |
+| `GetApplicationID()` | Get app name |
+| `App()` | Get the `core.App` |
 
 ## `GetResultOption`
 

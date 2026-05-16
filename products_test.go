@@ -6,7 +6,6 @@ import (
 	"io"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/pocketbase/pocketbase/tests"
 )
@@ -37,7 +36,7 @@ func setupRuntimeWithSender(t *testing.T, sender ProductSender) (*Runtime, func(
 	if sender != nil {
 		cfg.ProductSender = sender
 	}
-	rt := New(app, cfg)
+	rt := NewRuntime(app, cfg)
 	return rt, app.Cleanup
 }
 
@@ -59,7 +58,7 @@ func TestSendProduct_Store(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "test")
 	if err != nil {
@@ -113,7 +112,7 @@ func TestSendProduct_WithSender(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "test")
 	if err != nil {
@@ -165,7 +164,7 @@ func TestSendProduct_SenderFails(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "test")
 	if err != nil {
@@ -200,7 +199,7 @@ func TestWorkflowSender(t *testing.T) {
 	}
 	defer app.Cleanup()
 
-	rt := New(app, Config{})
+	rt := NewRuntime(app, Config{})
 
 	targetWF := func(ctx Context, input ProductRecord) (string, error) {
 		return "received:" + input.FileName, nil
@@ -211,7 +210,7 @@ func TestWorkflowSender(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	sender := NewWorkflowSender(rt, targetWF)
 
@@ -262,7 +261,7 @@ func TestSendProduct_Dedup(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "test")
 	if err != nil {

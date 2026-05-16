@@ -30,7 +30,7 @@ func (d *Deployer) Deploy(ctx context.Context) (string, error) {
 func DeployWorkflow(ctx turbine.Context, host string) (string, error) {
     d := &Deployer{}
 
-    // Always re-runs on recovery — connection can't be serialized
+    // Always re-runs on recovery, connection can't be serialized
     _, err := turbine.Do(ctx, d.Connect,
         turbine.WithoutCheckpoint(),
         turbine.WithStepName("connect"),
@@ -40,7 +40,7 @@ func DeployWorkflow(ctx turbine.Context, host string) (string, error) {
     }
     defer d.ssh.Close()
 
-    // Checkpointed normally — replays from DB on recovery
+    // Checkpointed normally, replays from DB on recovery
     result, err := turbine.Do(ctx, d.Deploy,
         turbine.WithStepName("deploy"),
     )
@@ -65,5 +65,5 @@ A non-checkpointed step still consumes a step ID. Steps after it are checkpointe
 :::
 
 ::: warning
-Non-checkpointed steps should be idempotent or side-effect-free, since they will re-execute on every recovery. Establishing a connection is fine — sending an email is not.
+Non-checkpointed steps should be idempotent or side-effect-free, since they will re-execute on every recovery. Establishing a connection is fine, sending an email is not.
 :::

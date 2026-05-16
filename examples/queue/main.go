@@ -2,16 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
 	"github.com/YakirOren/turbine"
-	"github.com/pocketbase/pocketbase"
-	"github.com/pocketbase/pocketbase/core"
 )
 
 func Send(ctx context.Context) (bool, error) {
-	// send the email
 	return true, nil
 }
 
@@ -24,9 +22,8 @@ func SendEmail(ctx turbine.Context, to string) (string, error) {
 }
 
 func main() {
-	app := pocketbase.New()
-
-	rt := turbine.Setup(app, turbine.Config{})
+	rt := turbine.NewStandalone(turbine.Config{})
+	defer rt.Shutdown()
 
 	turbine.Register(rt, SendEmail)
 
@@ -35,26 +32,26 @@ func main() {
 		turbine.WithRateLimiter(turbine.RateLimiter{Limit: 10, Period: time.Minute}),
 	)
 
-	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
-		e.Router.POST("/send-email/{to}", func(re *core.RequestEvent) error {
-			to := re.Request.PathValue("to")
-
-			handle, err := turbine.Run(rt, SendEmail, to,
-				turbine.WithQueue("emails"),
-			)
-			if err != nil {
-				return re.JSON(500, map[string]string{"error": err.Error()})
-			}
-
-			return re.JSON(202, map[string]string{
-				"workflow_id": handle.GetWorkflowID(),
-				"status":      "enqueued",
-			})
-		})
-		return e.Next()
-	})
-
-	if err := app.Start(); err != nil {
+	if err := rt.Launch(); err != nil {
 		log.Fatal(err)
+	}
+
+	recipients := []string{"alice@example.com", "bob@example.com", "carol@example.com"}
+	handles := make([]turbine.Handle[string], 0, len(recipients))
+
+	for _, to := range recipients {
+		handle, err := turbine.Run(rt, SendEmail, to, turbine.WithQueue("emails"))
+		if err != nil {
+			log.Fatal(err)
+		}
+		handles = append(handles, handle)
+	}
+
+	for _, h := range handles {
+		result, err := h.GetResult()
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(result)
 	}
 }

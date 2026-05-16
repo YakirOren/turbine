@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,8 +17,9 @@ import (
 // ErrShuttingDown is returned when a workflow is rejected because the runtime is draining.
 var ErrShuttingDown = errors.New("turbine: runtime is shutting down")
 
-// Runtime is the core durable execution runtime for PocketBase.
-// Create with New(), register workflows before Launch(), then Shutdown() when done.
+// Runtime is the core durable execution runtime.
+// Create with NewRuntime, register workflows before Launch, then Shutdown when done.
+// For higher-level entry points see New (standalone) and NewApp (HTTP-serving).
 type Runtime struct {
 	ctx           context.Context
 	ctxCancelFunc context.CancelCauseFunc
@@ -28,9 +30,14 @@ type Runtime struct {
 
 	launched atomic.Bool
 
-	app      core.App
+	app core.App
+	// ownedApp is non-nil when a constructor owns the PocketBase app lifecycle
+	// (currently: NewStandalone). When set, Launch calls Bootstrap and Shutdown
+	// calls ResetBootstrapState.
+	ownedApp core.App
 	systemDB systemDatabase
 	config   *Config
+	logger   *slog.Logger // overrides app.Logger() for workflow + step logs when non-nil
 
 	// Queue runner
 	queueRunner *queueRunner
@@ -62,8 +69,8 @@ type Runtime struct {
 	productSender ProductSender
 }
 
-// New creates a new Runtime. Must be called before Launch().
-func New(app core.App, config Config) *Runtime {
+// NewRuntime creates a new Runtime. Must be called before Launch().
+func NewRuntime(app core.App, config Config) *Runtime {
 	if config.ExecutorID == "" {
 		config.ExecutorID = "local"
 	}
@@ -82,6 +89,9 @@ func New(app core.App, config Config) *Runtime {
 	if config.WebhookTimeout == 0 {
 		config.WebhookTimeout = 10 * time.Second
 	}
+	if config.ShutdownTimeout == 0 {
+		config.ShutdownTimeout = 30 * time.Second
+	}
 
 	baseCtx, cancelFunc := context.WithCancelCause(context.Background())
 	drainCtx, drainCancel := context.WithCancel(baseCtx)
@@ -97,6 +107,7 @@ func New(app core.App, config Config) *Runtime {
 		app:                     app,
 		systemDB:                sysDB,
 		config:                  &config,
+		logger:                  config.Logger,
 		applicationVersion:      config.ApplicationVersion,
 		executorID:              config.ExecutorID,
 		workflowsWg:             &sync.WaitGroup{},
@@ -118,6 +129,21 @@ func New(app core.App, config Config) *Runtime {
 func (rt *Runtime) Launch() error {
 	if rt.launched.Load() {
 		return fmt.Errorf("turbine: runtime is already launched")
+	}
+
+	// Standalone runtimes (created by a constructor that owns the PocketBase
+	// app, like NewStandalone) must bootstrap the app before any DB access.
+	if rt.ownedApp != nil {
+		if err := rt.ownedApp.Bootstrap(); err != nil {
+			return fmt.Errorf("turbine: bootstrap failed: %w", err)
+		}
+	}
+
+	// Always run app migrations. For standalone runtimes this materializes
+	// the pt_* tables; for HTTP runtimes app.Start() has already run them
+	// and the runner is a no-op via PocketBase's _migrations table.
+	if err := rt.app.RunAppMigrations(); err != nil {
+		return fmt.Errorf("turbine: migrations failed: %w", err)
 	}
 
 	rt.applicationID = rt.app.Settings().Meta.AppName
@@ -187,21 +213,24 @@ func (rt *Runtime) Launch() error {
 func (rt *Runtime) IsDraining() bool { return rt.draining.Load() }
 
 // Shutdown gracefully stops the runtime with a two-phase approach:
-// 1. Drain — stop accepting new work, let running workflows finish naturally
-// 2. Force — if timeout expires, cancel root context to kill remaining workflows
-func (rt *Runtime) Shutdown(timeout time.Duration) {
+// 1. Drain, stop accepting new work, let running workflows finish naturally
+// 2. Force, if cfg.ShutdownTimeout expires, cancel root context to kill remaining workflows
+// Returns nil if the runtime was never launched. Idempotent.
+func (rt *Runtime) Shutdown() error {
 	if !rt.launched.Load() {
-		return
+		if rt.ownedApp != nil {
+			_ = rt.ownedApp.ResetBootstrapState()
+		}
+		return nil
 	}
 
+	timeout := rt.config.ShutdownTimeout
 	rt.app.Logger().Info("turbine shutting down")
 
-	// Phase 1: Drain — stop accepting new work
 	rt.draining.Store(true)
 	rt.launched.Store(false)
-	rt.drainCancelFunc() // unblock queue runners and schedule timers
+	rt.drainCancelFunc()
 
-	// Wait for queue runners to exit
 	if rt.queueRunner != nil {
 		select {
 		case <-rt.queueRunner.completionChan:
@@ -210,19 +239,18 @@ func (rt *Runtime) Shutdown(timeout time.Duration) {
 		}
 	}
 
-	// Wait for in-flight workflows
 	done := make(chan struct{})
 	go func() {
 		rt.workflowsWg.Wait()
 		close(done)
 	}()
+	var drainErr error
 	select {
 	case <-done:
-		// all workflows completed gracefully
 	case <-time.After(timeout):
-		// Phase 2: Force cancel
 		rt.app.Logger().Warn("timeout waiting for workflows, force-cancelling")
 		rt.ctxCancelFunc(errors.New("turbine shutdown timeout"))
+		drainErr = errors.New("turbine: shutdown drained with timeout")
 		select {
 		case <-done:
 		case <-time.After(5 * time.Second):
@@ -232,12 +260,26 @@ func (rt *Runtime) Shutdown(timeout time.Duration) {
 	if rt.systemDB != nil {
 		rt.systemDB.shutdown(rt.ctx, timeout)
 	}
+
+	if rt.ownedApp != nil {
+		_ = rt.ownedApp.ResetBootstrapState()
+	}
+
+	return drainErr
 }
 
 // GarbageCollect removes completed workflows older than the configured retention period.
 func (rt *Runtime) GarbageCollect() error {
 	cutoff := time.Now().Add(-rt.config.GCRetention)
 	return rt.systemDB.garbageCollectWorkflows(rt.ctx, garbageCollectWorkflowsInput{cutoffTime: cutoff})
+}
+
+// baseLogger returns the runtime's configured logger, falling back to the app logger.
+func (rt *Runtime) baseLogger() *slog.Logger {
+	if rt.logger != nil {
+		return rt.logger
+	}
+	return rt.app.Logger()
 }
 
 // Accessors

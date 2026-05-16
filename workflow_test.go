@@ -15,7 +15,7 @@ func setupRuntime(t *testing.T) (*Runtime, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt := New(app, Config{})
+	rt := NewRuntime(app, Config{})
 	return rt, app.Cleanup
 }
 
@@ -32,7 +32,7 @@ func TestRunSimple(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "world")
 	if err != nil {
@@ -67,7 +67,7 @@ func TestRunWithStep(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, 21)
 	if err != nil {
@@ -96,7 +96,7 @@ func TestRunWithError(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "test")
 	if err != nil {
@@ -122,7 +122,7 @@ func TestRunGetStatus(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "test")
 	if err != nil {
@@ -168,7 +168,7 @@ func TestRunMultipleSteps(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, 10)
 	if err != nil {
@@ -211,7 +211,7 @@ func TestRunWithTimeout(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "test", WithTimeout(100*time.Millisecond))
 	if err != nil {
@@ -251,7 +251,7 @@ func TestRunWithDeadline(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	deadline := time.Now().Add(100 * time.Millisecond)
 	handle, err := Run(rt, myWF, "test", WithDeadline(deadline))
@@ -287,7 +287,7 @@ func TestGarbageCollect(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	// Run a workflow to completion
 	handle, err := Run(rt, myWF, "gc-test", WithID("gc-test-1"))
@@ -335,7 +335,7 @@ func TestGarbageCollectPreservesPending(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "pending-test", WithID("gc-pending-1"))
 	if err != nil {
@@ -374,7 +374,7 @@ func TestRetrieve(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "test", WithID("retrieve-test-1"))
 	if err != nil {

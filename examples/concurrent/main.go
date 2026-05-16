@@ -6,8 +6,6 @@ import (
 	"log"
 
 	"github.com/YakirOren/turbine"
-	"github.com/pocketbase/pocketbase"
-	"github.com/pocketbase/pocketbase/core"
 )
 
 func FetchPricing(ctx context.Context) (string, error) {
@@ -23,7 +21,7 @@ func FetchReviews(ctx context.Context) (string, error) {
 }
 
 // ProductWorkflow fetches pricing, inventory, and reviews concurrently.
-// Each step is durable — on recovery, completed steps replay from the DB.
+// Each step is durable. On recovery, completed steps replay from the DB.
 func ProductWorkflow(ctx turbine.Context, productID string) (string, error) {
 	priceCh, err := turbine.DoAsync(ctx, FetchPricing, turbine.WithStepName("pricing"))
 	if err != nil {
@@ -52,32 +50,22 @@ func ProductWorkflow(ctx turbine.Context, productID string) (string, error) {
 }
 
 func main() {
-	app := pocketbase.New()
-
-	rt := turbine.Setup(app, turbine.Config{})
+	rt := turbine.NewStandalone(turbine.Config{})
+	defer rt.Shutdown()
 
 	turbine.Register(rt, ProductWorkflow)
 
-	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
-		e.Router.GET("/product/{id}", func(re *core.RequestEvent) error {
-			id := re.Request.PathValue("id")
-
-			handle, err := turbine.Run(rt, ProductWorkflow, id)
-			if err != nil {
-				return re.JSON(500, map[string]string{"error": err.Error()})
-			}
-
-			result, err := handle.GetResult()
-			if err != nil {
-				return re.JSON(500, map[string]string{"error": err.Error()})
-			}
-
-			return re.JSON(200, map[string]string{"result": result})
-		})
-		return e.Next()
-	})
-
-	if err := app.Start(); err != nil {
+	if err := rt.Launch(); err != nil {
 		log.Fatal(err)
 	}
+
+	handle, err := turbine.Run(rt, ProductWorkflow, "prod-123")
+	if err != nil {
+		log.Fatal(err)
+	}
+	result, err := handle.GetResult()
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println(result)
 }

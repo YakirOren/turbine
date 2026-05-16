@@ -6,11 +6,10 @@ import (
 	"log"
 
 	"github.com/YakirOren/turbine"
-	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 )
 
-// CreateUserNote demonstrates accessing the PocketBase app from within a workflow.
+// CreateUserNote demonstrates accessing the underlying app from within a workflow.
 // The workflow creates a record in a "notes" collection as a durable step.
 func CreateUserNote(ctx turbine.Context, input NoteInput) (string, error) {
 	noteID, err := turbine.Do(ctx, func(stepCtx context.Context) (string, error) {
@@ -45,14 +44,12 @@ type NoteInput struct {
 }
 
 func main() {
-	app := pocketbase.New()
-
-	rt := turbine.Setup(app, turbine.Config{})
+	app, rt := turbine.NewApp(turbine.Config{})
 
 	turbine.Register(rt, CreateUserNote)
 
-	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
-		e.Router.POST("/notes", func(re *core.RequestEvent) error {
+	app.OnServe().BindFunc(func(e *turbine.ServeEvent) error {
+		e.Router.POST("/notes", func(re *turbine.RequestEvent) error {
 			input := NoteInput{
 				UserID: re.Request.FormValue("user"),
 				Title:  re.Request.FormValue("title"),

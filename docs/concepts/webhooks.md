@@ -1,6 +1,6 @@
 # Webhooks
 
-Turbine sends HTTP POST requests when workflows complete. Configured via the `pt_webhooks` collection — manageable from the dashboard or the PocketBase API.
+Turbine sends HTTP POST requests when workflows complete. Configured via the `pt_webhooks` collection, manageable from the dashboard or the app's API.
 
 For human-readable notifications to Slack, Discord, email, etc., see [Notifications](./notifications.md).
 
@@ -67,7 +67,7 @@ func verifySignature(body []byte, secret, signature string) bool {
 ## Delivery
 
 ::: warning
-Webhooks are fire-and-forget. Each delivery has a **10-second timeout** and **failed deliveries are not retried** — they are only logged. For critical notifications, consider implementing retry logic on the receiving end.
+Webhooks are fire-and-forget. Each delivery has a **10-second timeout** and **failed deliveries are not retried**, they are only logged. For critical notifications, consider implementing retry logic on the receiving end.
 :::
 
 Webhooks are dispatched asynchronously and don't block workflow completion.

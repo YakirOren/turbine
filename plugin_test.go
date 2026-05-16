@@ -21,7 +21,7 @@ func TestSetup(t *testing.T) {
 	if rt.App() == nil {
 		t.Fatal("expected runtime to have app set")
 	}
-	// Launch so the OnTerminate hook's Shutdown(30s) completes quickly.
+	// Launch so the OnTerminate hook's Shutdown() call has a live runtime to drain.
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
@@ -34,11 +34,11 @@ func TestValidateWebhookRecord(t *testing.T) {
 	}
 	defer app.Cleanup()
 
-	rt := New(app, Config{})
+	rt := NewRuntime(app, Config{})
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(0)
+	defer rt.Shutdown()
 
 	col, err := app.FindCollectionByNameOrId(collectionWebhooks)
 	if err != nil {
@@ -88,11 +88,11 @@ func TestKVHookValidation(t *testing.T) {
 	}
 	defer app.Cleanup()
 
-	rt := New(app, Config{})
+	rt := NewRuntime(app, Config{})
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(0)
+	defer rt.Shutdown()
 
 	col, err := app.FindCollectionByNameOrId(collectionKV)
 	if err != nil {
@@ -128,11 +128,11 @@ func TestWebhookSecretMasking(t *testing.T) {
 	}
 	defer app.Cleanup()
 
-	rt := New(app, Config{})
+	rt := NewRuntime(app, Config{})
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(0)
+	defer rt.Shutdown()
 
 	col, err := app.FindCollectionByNameOrId(collectionWebhooks)
 	if err != nil {
