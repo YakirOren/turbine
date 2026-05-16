@@ -1,3 +1,4 @@
+import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Tone = "success" | "info" | "warning" | "danger" | "neutral";
@@ -63,11 +64,13 @@ export function Pill({
   tone = "neutral",
   children,
   dot = true,
+  spinner = false,
   className,
 }: {
   tone?: Tone;
   children: React.ReactNode;
   dot?: boolean;
+  spinner?: boolean;
   className?: string;
 }) {
   const c = toneClasses[tone];
@@ -80,7 +83,11 @@ export function Pill({
         className,
       )}
     >
-      {dot && <span className={cn("h-1.5 w-1.5 rounded-full", c.dot)} />}
+      {spinner ? (
+        <Loader2 className={cn("h-3 w-3 animate-spin", c.fg)} />
+      ) : (
+        dot && <span className={cn("h-1.5 w-1.5 rounded-full", c.dot)} />
+      )}
       {children}
     </span>
   );
@@ -88,12 +95,12 @@ export function Pill({
 
 export function StatusBadge({ status }: { status: string }) {
   const config = statusConfig[status] ?? { label: status, tone: "neutral" as Tone };
-  return <Pill tone={config.tone}>{config.label}</Pill>;
+  return <Pill tone={config.tone} spinner={status === "RUNNING"}>{config.label}</Pill>;
 }
 
 export function StepStatusBadge({ status }: { status: string }) {
   const config = stepStatusConfig[status] ?? { label: status, tone: "neutral" as Tone };
-  return <Pill tone={config.tone}>{config.label}</Pill>;
+  return <Pill tone={config.tone} spinner={status === "running"}>{config.label}</Pill>;
 }
 
 export function AppStatusBadge({ label, color }: { label?: string; color?: string }) {
