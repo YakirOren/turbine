@@ -11,7 +11,7 @@ import {
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { StepNodeRecord } from "@/pages/workflows/steps";
-import { buildTimelineParts, mapTicksToPiecewise } from "./step-timeline-parts";
+import { buildTimelineParts, effectiveEndMs, mapTicksToPiecewise } from "./step-timeline-parts";
 import type { BreakReason, PiecewiseTick, TimelinePart } from "./step-timeline-parts";
 
 const ROW_COLS = "grid grid-cols-[110px_1fr_54px] gap-x-3";
@@ -228,8 +228,7 @@ export function StepTimeline({
             const isChild = step.type === "child-workflow";
             const isSelected = step.functionId === selectedStepId;
             const isRunningStep = !step.endedAtMs;
-            const effectiveEnd = isRunningStep ? (isRunning ? now : step.startedAtMs) : step.endedAtMs;
-            const rawWidth = effectiveEnd - step.startedAtMs;
+            const effectiveEnd = effectiveEndMs(step, now, isRunning);
             const duration = !isRunningStep ? step.endedAtMs - step.startedAtMs : null;
             const label = `${step.name}, ${step.status}${duration != null ? `, ${formatDuration(duration)}` : ", running"}`;
 
@@ -253,7 +252,9 @@ export function StepTimeline({
                     if (!segment.steps.some((st) => st.functionId === step.functionId)) return null;
                     const segDur = Math.max(segment.endMs - segment.startMs, 0) || 1;
                     const left = ((step.startedAtMs - segment.startMs) / segDur) * 100;
-                    const width = (Math.max(rawWidth, 0) / segDur) * 100;
+                    // Clamp to the segment boundary so the running bar can't overrun the now-line.
+                    const cappedEnd = Math.min(effectiveEnd, segment.endMs);
+                    const width = (Math.max(cappedEnd - step.startedAtMs, 0) / segDur) * 100;
                     return (
                       <div className="relative h-[18px]">
                         <Tooltip>
