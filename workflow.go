@@ -828,6 +828,18 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn StepFunc, opts ...St
 	stepCtx := context.WithValue(ctx, workflowStateKey, stepState)
 	startTime := time.Now()
 
+	startErr := retry(ctx, func() error {
+		return rt.systemDB.recordOperationStart(ctx, recordOperationStartDBInput{
+			workflowUUID: wfState.workflowID,
+			functionID:   stepID,
+			functionName: stepOpts.stepName,
+			startedAt:    startTime.UnixMilli(),
+		})
+	}, withRetrierLogger(rt.app.Logger()))
+	if startErr != nil {
+		return nil, fmt.Errorf("recording step start: %w", startErr)
+	}
+
 	stepOutput, stepErr := executeStepWithRetry(ctx, rt, stepOpts, func() (any, error) { return fn(stepCtx) })
 
 	endTime := time.Now()
@@ -838,33 +850,35 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn StepFunc, opts ...St
 		rt.app.Logger().Info("step completed", "workflow_id", wfState.workflowID, "step", stepOpts.stepName, "step_id", stepID, "duration", dur, "source", "system")
 	}
 
+	var encodedOutput *string
 	if !stepOpts.skipCheckpoint {
-		// Serialize and record
-		encodedOutput, serErr := encodeJSON[any](stepOutput)
+		// WithoutCheckpoint steps may return non-serializable values (connections, handles).
+		var serErr error
+		encodedOutput, serErr = encodeJSON[any](stepOutput)
 		if serErr != nil {
 			return nil, fmt.Errorf("failed to serialize step output: %w", serErr)
 		}
+	}
 
-		var errorMsg *string
-		if stepErr != nil {
-			s := stepErr.Error()
-			errorMsg = &s
-		}
+	var errorMsg *string
+	if stepErr != nil {
+		s := stepErr.Error()
+		errorMsg = &s
+	}
 
-		recErr := retry(ctx, func() error {
-			return rt.systemDB.recordOperationResult(ctx, recordOperationResultDBInput{
-				workflowUUID: wfState.workflowID,
-				functionID:   stepID,
-				functionName: stepOpts.stepName,
-				output:       encodedOutput,
-				errorMsg:     errorMsg,
-				startedAt:    startTime.UnixMilli(),
-				endedAt:      endTime.UnixMilli(),
-			})
-		}, withRetrierLogger(rt.app.Logger()))
-		if recErr != nil {
-			return nil, fmt.Errorf("recording step result: %w", recErr)
-		}
+	recErr := retry(ctx, func() error {
+		return rt.systemDB.recordOperationResult(ctx, recordOperationResultDBInput{
+			workflowUUID: wfState.workflowID,
+			functionID:   stepID,
+			functionName: stepOpts.stepName,
+			output:       encodedOutput,
+			errorMsg:     errorMsg,
+			startedAt:    startTime.UnixMilli(),
+			endedAt:      endTime.UnixMilli(),
+		})
+	}, withRetrierLogger(rt.app.Logger()))
+	if recErr != nil {
+		return nil, fmt.Errorf("recording step result: %w", recErr)
 	}
 
 	return stepOutput, stepErr

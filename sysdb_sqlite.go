@@ -665,25 +665,45 @@ func (s *sqliteSysDB) forkWorkflow(ctx context.Context, input forkWorkflowDBInpu
 	return newID, nil
 }
 
-func (s *sqliteSysDB) recordOperationResult(ctx context.Context, input recordOperationResultDBInput) error {
-	_, err := s.app.DB().Insert("pt_operation_outputs", dbx.Params{
-		"id":                  fmt.Sprintf("%s_%d", input.workflowUUID, input.functionID),
-		"workflow_id":         input.workflowUUID,
-		"function_id":         input.functionID,
-		"output":              derefStr(input.output),
-		"error":               derefStr(input.errorMsg),
-		"function_name":       input.functionName,
-		"started_at_epoch_ms": input.startedAt,
-		"ended_at_epoch_ms":   input.endedAt,
+func (s *sqliteSysDB) recordOperationStart(ctx context.Context, input recordOperationStartDBInput) error {
+	_, err := s.app.DB().NewQuery(`INSERT INTO pt_operation_outputs
+		(id, workflow_id, function_id, function_name, output, error, started_at_epoch_ms, ended_at_epoch_ms)
+		VALUES ({:id}, {:wf_id}, {:func_id}, {:fn_name}, '', '', {:started_at}, 0)
+		ON CONFLICT(workflow_id, function_id) DO UPDATE SET
+			function_name = excluded.function_name,
+			output = '',
+			error = '',
+			started_at_epoch_ms = excluded.started_at_epoch_ms,
+			ended_at_epoch_ms = 0`).Bind(dbx.Params{
+		"id":         fmt.Sprintf("%s_%d", input.workflowUUID, input.functionID),
+		"wf_id":      input.workflowUUID,
+		"func_id":    input.functionID,
+		"fn_name":    input.functionName,
+		"started_at": input.startedAt,
 	}).Execute()
-
 	if err != nil {
-		if isSQLiteUniqueViolation(err) {
-			return newErrConflictingID(input.workflowUUID)
-		}
-		return err
+		return fmt.Errorf("failed to record step start: %w", err)
 	}
 	return nil
+}
+
+func (s *sqliteSysDB) recordOperationResult(ctx context.Context, input recordOperationResultDBInput) error {
+	_, err := s.app.DB().NewQuery(`UPDATE pt_operation_outputs SET
+			output = {:output},
+			error = {:error},
+			function_name = {:fn_name},
+			started_at_epoch_ms = {:started_at},
+			ended_at_epoch_ms = {:ended_at}
+		WHERE workflow_id = {:wf_id} AND function_id = {:func_id}`).Bind(dbx.Params{
+		"output":     derefStr(input.output),
+		"error":      derefStr(input.errorMsg),
+		"fn_name":    input.functionName,
+		"started_at": input.startedAt,
+		"ended_at":   input.endedAt,
+		"wf_id":      input.workflowUUID,
+		"func_id":    input.functionID,
+	}).Execute()
+	return err
 }
 
 func (s *sqliteSysDB) checkOperationExecution(ctx context.Context, input checkOperationExecutionDBInput) (*recordedResult, error) {
@@ -704,18 +724,25 @@ func (s *sqliteSysDB) checkOperationExecution(ctx context.Context, input checkOp
 		return nil, newErrCancelled(input.workflowUUID)
 	}
 
-	// Check operation outputs
+	// Check operation outputs — only completed rows (ended_at_epoch_ms != 0) are
+	// treated as checkpoints. A row with ended_at_epoch_ms == 0 means a previous
+	// run started the step but crashed before saving the result, so we re-execute.
 	var outputString, errorStr, functionName sql.NullString
-	err = s.app.DB().Select("output", "error", "function_name").
+	var endedAt sql.NullInt64
+	err = s.app.DB().Select("output", "error", "function_name", "ended_at_epoch_ms").
 		From("pt_operation_outputs").
 		Where(dbx.HashExp{"workflow_id": input.workflowUUID, "function_id": input.functionID}).
-		Row(&outputString, &errorStr, &functionName)
+		Row(&outputString, &errorStr, &functionName, &endedAt)
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get operation outputs: %w", err)
+	}
+
+	if !endedAt.Valid || endedAt.Int64 == 0 {
+		return nil, nil
 	}
 
 	result := &recordedResult{}

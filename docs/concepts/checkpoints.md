@@ -58,6 +58,7 @@ func DeployWorkflow(ctx turbine.Context, host string) (string, error) {
 |---|---|---|
 | First run | Executes, saves result to SQLite | Executes, result is not saved |
 | Recovery | Replays saved result, skips execution | Re-executes the step |
+| Crash mid-step | Re-executes on recovery (start was recorded but no result) | Re-executes on recovery |
 | Use case | API calls, computations, side effects | Connections, handles, runtime resources |
 
 ::: tip

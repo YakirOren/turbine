@@ -95,6 +95,8 @@ for _, s := range steps {
 }
 ```
 
+In-progress steps are included in the result with `EndedAt == 0`. They become complete once the step returns and its result is recorded.
+
 ## Workflow Status Types
 
 | Status | Meaning |
