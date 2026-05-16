@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRefetchOnTerminal } from "@/hooks/use-refetch-on-terminal";
 import { useNavigate, useParams } from "react-router";
 import { useList, useShow } from "@refinedev/core";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
@@ -224,6 +225,10 @@ function StepFlowContent({ workflowId }: { workflowId: string }) {
             ),
         refetchInterval: isTerminal ? false : 2000,
     });
+
+    // Polling stops the moment the workflow goes terminal — refetch once more
+    // in case the final step's completion landed between polls.
+    useRefetchOnTerminal(stepsQuery.refetch, isTerminal);
 
     const stepsData = stepsQuery.data;
 
@@ -858,6 +863,11 @@ function WorkflowLogs({
             return 2000;
         },
     });
+
+    // PocketBase batches log writes with a 3s flush interval, so do a delayed
+    // follow-up refetch to capture entries still buffered when the workflow
+    // transitioned to terminal.
+    useRefetchOnTerminal(logsQuery.refetch, TERMINAL_STATUSES.has(status), 4000);
 
     const rawLogs = useMemo(() => {
         const pages = logsQuery.data?.pages ?? [];
