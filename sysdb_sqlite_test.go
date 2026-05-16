@@ -156,6 +156,39 @@ func TestRecordAndCheckOperationResult(t *testing.T) {
 	}
 }
 
+func TestCheckOperationExecutionRecoversCrashedStep(t *testing.T) {
+	sysDB, cleanup := setupSysDB(t)
+	defer cleanup()
+
+	wfID := "wf-op-crash-1"
+	if _, err := sysDB.insertStatus(context.Background(), insertStatusDBInput{
+		status: makeStatus(wfID),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a crash: start was recorded, result never arrived.
+	if err := sysDB.recordOperationStart(context.Background(), recordOperationStartDBInput{
+		workflowUUID: wfID,
+		functionID:   1,
+		functionName: "myStep",
+		startedAt:    time.Now().UnixMilli(),
+	}); err != nil {
+		t.Fatalf("recordOperationStart failed: %v", err)
+	}
+
+	result, err := sysDB.checkOperationExecution(context.Background(), checkOperationExecutionDBInput{
+		workflowUUID: wfID,
+		functionID:   1,
+	})
+	if err != nil {
+		t.Fatalf("checkOperationExecution failed: %v", err)
+	}
+	if result != nil {
+		t.Fatalf("expected nil result (step should re-execute), got %+v", result)
+	}
+}
+
 func TestCheckOperationExecutionNotFound(t *testing.T) {
 	sysDB, cleanup := setupSysDB(t)
 	defer cleanup()

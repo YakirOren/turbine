@@ -666,6 +666,10 @@ func (s *sqliteSysDB) forkWorkflow(ctx context.Context, input forkWorkflowDBInpu
 }
 
 func (s *sqliteSysDB) recordOperationStart(ctx context.Context, input recordOperationStartDBInput) error {
+	// ON CONFLICT path: a row already exists for this (workflow, function) — the
+	// previous run crashed mid-step or this is a recovery retry. Clear the
+	// prior partial state so checkOperationExecution returns (nil, nil) and
+	// the step re-executes.
 	_, err := s.app.DB().NewQuery(`INSERT INTO pt_operation_outputs
 		(id, workflow_id, function_id, function_name, output, error, started_at_epoch_ms, ended_at_epoch_ms)
 		VALUES ({:id}, {:wf_id}, {:func_id}, {:fn_name}, '', '', {:started_at}, 0)
@@ -703,7 +707,10 @@ func (s *sqliteSysDB) recordOperationResult(ctx context.Context, input recordOpe
 		"wf_id":      input.workflowUUID,
 		"func_id":    input.functionID,
 	}).Execute()
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to record step result: %w", err)
+	}
+	return nil
 }
 
 func (s *sqliteSysDB) checkOperationExecution(ctx context.Context, input checkOperationExecutionDBInput) (*recordedResult, error) {
