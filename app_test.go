@@ -10,7 +10,7 @@ import (
 	"github.com/pocketbase/pocketbase/tests"
 )
 
-func TestShutdownReturnsError(t *testing.T) {
+func TestShutdownAfterLaunch(t *testing.T) {
 	app, err := tests.NewTestApp()
 	if err != nil {
 		t.Fatal(err)
@@ -21,11 +21,7 @@ func TestShutdownReturnsError(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-
-	// Shutdown() must take no arguments and return error.
-	if err := rt.Shutdown(); err != nil {
-		t.Fatalf("unexpected drain error: %v", err)
-	}
+	rt.Shutdown()
 }
 
 func TestShutdownBeforeLaunchIsSafe(t *testing.T) {
@@ -36,10 +32,8 @@ func TestShutdownBeforeLaunchIsSafe(t *testing.T) {
 	defer app.Cleanup()
 
 	rt := NewRuntime(app, Config{})
-	// No Launch. Shutdown must not panic and must return nil.
-	if err := rt.Shutdown(); err != nil {
-		t.Fatalf("Shutdown before Launch should be nil, got: %v", err)
-	}
+	// No Launch. Shutdown must not panic.
+	rt.Shutdown()
 }
 
 func TestLaunchRunsMigrationsForOwnedApp(t *testing.T) {
@@ -55,9 +49,7 @@ func TestLaunchRunsMigrationsForOwnedApp(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatalf("first Launch failed: %v", err)
 	}
-	if err := rt.Shutdown(); err != nil {
-		t.Fatalf("first Shutdown failed: %v", err)
-	}
+	rt.Shutdown()
 }
 
 func TestLaunchMigrationsAreIdempotent(t *testing.T) {
@@ -71,22 +63,18 @@ func TestLaunchMigrationsAreIdempotent(t *testing.T) {
 	if err := rt1.Launch(); err != nil {
 		t.Fatalf("first Launch failed: %v", err)
 	}
-	if err := rt1.Shutdown(); err != nil {
-		t.Fatalf("first Shutdown failed: %v", err)
-	}
+	rt1.Shutdown()
 
 	rt2 := NewRuntime(app, Config{})
 	if err := rt2.Launch(); err != nil {
 		t.Fatalf("second Launch failed (migration not idempotent?): %v", err)
 	}
-	if err := rt2.Shutdown(); err != nil {
-		t.Fatalf("second Shutdown failed: %v", err)
-	}
+	rt2.Shutdown()
 }
 
 func TestNewStandaloneLifecycle(t *testing.T) {
 	rt := NewStandalone(Config{})
-	t.Cleanup(func() { _ = rt.Shutdown() })
+	t.Cleanup(rt.Shutdown)
 
 	if rt == nil {
 		t.Fatal("NewStandalone returned nil")
@@ -109,7 +97,7 @@ func TestNewStandaloneLifecycle(t *testing.T) {
 
 func TestNewStandaloneDefaultsLoggerToStdout(t *testing.T) {
 	rt := NewStandalone(Config{})
-	t.Cleanup(func() { _ = rt.Shutdown() })
+	t.Cleanup(rt.Shutdown)
 
 	if rt.logger == nil {
 		t.Fatal("NewStandalone should default cfg.Logger when nil")
@@ -121,7 +109,7 @@ func TestNewStandaloneRespectsCustomLogger(t *testing.T) {
 	custom := slog.New(slog.NewTextHandler(&buf, nil))
 
 	rt := NewStandalone(Config{Logger: custom})
-	t.Cleanup(func() { _ = rt.Shutdown() })
+	t.Cleanup(rt.Shutdown)
 
 	if rt.logger != custom {
 		t.Fatal("NewStandalone should preserve caller-supplied Logger")
@@ -136,7 +124,7 @@ func TestSetupStandaloneDoesNotDefaultLogger(t *testing.T) {
 	defer app.Cleanup()
 
 	rt := SetupStandalone(app, Config{})
-	t.Cleanup(func() { _ = rt.Shutdown() })
+	t.Cleanup(rt.Shutdown)
 
 	if rt.ownedApp != nil {
 		t.Fatal("SetupStandalone must not set ownedApp")
@@ -149,7 +137,7 @@ func TestSetupStandaloneDoesNotDefaultLogger(t *testing.T) {
 func TestLoggerMatrix(t *testing.T) {
 	t.Run("NewStandalone defaults to stdout", func(t *testing.T) {
 		rt := NewStandalone(Config{})
-		t.Cleanup(func() { _ = rt.Shutdown() })
+		t.Cleanup(rt.Shutdown)
 		if rt.logger == nil {
 			t.Fatal("expected stdout logger, got nil")
 		}
@@ -159,7 +147,7 @@ func TestLoggerMatrix(t *testing.T) {
 		var buf bytes.Buffer
 		custom := slog.New(slog.NewTextHandler(&buf, nil))
 		rt := NewStandalone(Config{Logger: custom})
-		t.Cleanup(func() { _ = rt.Shutdown() })
+		t.Cleanup(rt.Shutdown)
 
 		rt.baseLogger().Info("from-runtime")
 		if !strings.Contains(buf.String(), "from-runtime") {
@@ -169,7 +157,7 @@ func TestLoggerMatrix(t *testing.T) {
 
 	t.Run("NewApp falls back to app.Logger when Config.Logger nil", func(t *testing.T) {
 		app, rt := NewApp(Config{})
-		t.Cleanup(func() { _ = rt.Shutdown() })
+		t.Cleanup(rt.Shutdown)
 		if rt.logger != nil {
 			t.Fatal("NewApp must not default Config.Logger")
 		}
@@ -182,7 +170,7 @@ func TestLoggerMatrix(t *testing.T) {
 		var buf bytes.Buffer
 		custom := slog.New(slog.NewTextHandler(&buf, nil))
 		_, rt := NewApp(Config{Logger: custom})
-		t.Cleanup(func() { _ = rt.Shutdown() })
+		t.Cleanup(rt.Shutdown)
 		rt.baseLogger().Info("captured")
 		if !strings.Contains(buf.String(), "captured") {
 			t.Fatalf("expected custom logger output, got: %q", buf.String())

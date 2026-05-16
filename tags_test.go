@@ -39,7 +39,7 @@ func TestWithTags_StoredOnWorkflowStatus(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, wf, "test")
 	if err != nil {

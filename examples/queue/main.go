@@ -23,7 +23,7 @@ func SendEmail(ctx turbine.Context, to string) (string, error) {
 
 func main() {
 	rt := turbine.NewStandalone(turbine.Config{})
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	turbine.Register(rt, SendEmail)
 

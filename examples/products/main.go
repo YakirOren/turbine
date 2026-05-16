@@ -67,7 +67,7 @@ func main() {
 	rt := turbine.NewStandalone(turbine.Config{
 		ProductSender: &ProductSender{},
 	})
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	turbine.Register(rt, ReportWorkflow)
 

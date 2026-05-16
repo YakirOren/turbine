@@ -21,7 +21,7 @@ func TestScheduleManagerOnceFiresAndCleansUp(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	fqn := resolveWorkflowFunctionName(myWF)
 	scheduledAt := time.Now().Add(1 * time.Second)
@@ -64,7 +64,7 @@ func TestScheduleManagerOncePastFiresImmediately(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	fqn := resolveWorkflowFunctionName(myWF)
 	pastTime := time.Now().Add(-1 * time.Hour)

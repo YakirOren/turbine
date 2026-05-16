@@ -215,13 +215,13 @@ func (rt *Runtime) IsDraining() bool { return rt.draining.Load() }
 // Shutdown gracefully stops the runtime with a two-phase approach:
 // 1. Drain, stop accepting new work, let running workflows finish naturally
 // 2. Force, if cfg.ShutdownTimeout expires, cancel root context to kill remaining workflows
-// Returns nil if the runtime was never launched. Idempotent.
-func (rt *Runtime) Shutdown() error {
+// Idempotent. Drain timeouts are logged at Warn level.
+func (rt *Runtime) Shutdown() {
 	if !rt.launched.Load() {
 		if rt.ownedApp != nil {
 			_ = rt.ownedApp.ResetBootstrapState()
 		}
-		return nil
+		return
 	}
 
 	timeout := rt.config.ShutdownTimeout
@@ -244,13 +244,11 @@ func (rt *Runtime) Shutdown() error {
 		rt.workflowsWg.Wait()
 		close(done)
 	}()
-	var drainErr error
 	select {
 	case <-done:
 	case <-time.After(timeout):
 		rt.app.Logger().Warn("timeout waiting for workflows, force-cancelling")
 		rt.ctxCancelFunc(errors.New("turbine shutdown timeout"))
-		drainErr = errors.New("turbine: shutdown drained with timeout")
 		select {
 		case <-done:
 		case <-time.After(5 * time.Second):
@@ -264,8 +262,6 @@ func (rt *Runtime) Shutdown() error {
 	if rt.ownedApp != nil {
 		_ = rt.ownedApp.ResetBootstrapState()
 	}
-
-	return drainErr
 }
 
 // GarbageCollect removes completed workflows older than the configured retention period.

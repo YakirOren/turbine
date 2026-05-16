@@ -104,7 +104,7 @@ func TestContextWorkflowID(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "", WithID("wf-id-test"))
 	if err != nil {
@@ -143,7 +143,7 @@ func TestSetAppStatus(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "", WithID("status-test"))
 	if err != nil {

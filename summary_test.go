@@ -25,7 +25,7 @@ func TestWithSummaryFunc_StoredOnWorkflowStatus(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, wf, orderInput{ID: "123", Customer: "Alice"})
 	if err != nil {
@@ -60,7 +60,7 @@ func TestWithSummaryFunc_NotSet(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, wf, "test")
 	if err != nil {
@@ -96,7 +96,7 @@ func TestWithSummaryFunc_Truncation(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, wf, "test")
 	if err != nil {
@@ -132,7 +132,7 @@ func TestWithSummaryFunc_PanicRecovery(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, wf, "test")
 	if err != nil {

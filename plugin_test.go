@@ -38,7 +38,7 @@ func TestValidateWebhookRecord(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	col, err := app.FindCollectionByNameOrId(collectionWebhooks)
 	if err != nil {
@@ -92,7 +92,7 @@ func TestKVHookValidation(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	col, err := app.FindCollectionByNameOrId(collectionKV)
 	if err != nil {
@@ -132,7 +132,7 @@ func TestWebhookSecretMasking(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	col, err := app.FindCollectionByNameOrId(collectionWebhooks)
 	if err != nil {

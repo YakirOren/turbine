@@ -36,7 +36,7 @@ Two-phase process:
 2. **Force**, if `Config.ShutdownTimeout` expires, cancel all remaining workflows
 
 ```go
-err := rt.Shutdown()
+rt.Shutdown()
 ```
 
 During shutdown:
@@ -45,7 +45,7 @@ During shutdown:
 - New `Run` calls return `turbine.ErrShuttingDown`
 - Running workflows get their context cancelled after the timeout
 
-`Shutdown` returns an error if the drain phase timed out and workflows were force-cancelled. Calling `Shutdown` before `Launch` is safe and returns `nil`.
+If the drain phase times out and workflows are force-cancelled, `Shutdown` logs a `Warn` and returns. Calling `Shutdown` before `Launch` is safe.
 
 ::: info
 `Shutdown` always uses `Config.ShutdownTimeout` (default 30s). Set it on the `Config` passed to `NewRuntime` / `Setup` to tune the deadline.

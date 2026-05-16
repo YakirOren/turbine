@@ -35,7 +35,7 @@ func FetchWorkflow(ctx turbine.Context, url string) (string, error) {
 
 func main() {
 	rt := turbine.NewStandalone(turbine.Config{})
-	defer func() { _ = rt.Shutdown() }()
+	defer rt.Shutdown()
 
 	turbine.Register(rt, FetchWorkflow)
 
