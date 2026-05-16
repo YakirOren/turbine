@@ -2,7 +2,7 @@
 
 ![Steps waiting for approval](../screenshots/steps-waiting-for-approval.png)
 
-You can pause a workflow and wait for a human decision. The gate is durable — it survives crashes and restarts.
+You can pause a workflow and wait for a human decision. The gate is durable, it survives crashes and restarts.
 
 ## Waiting for Approval
 

@@ -1,6 +1,6 @@
 # What is Turbine?
 
-Turbine is a durable workflow engine for [PocketBase](https://pocketbase.io). It runs entirely on SQLite — no external dependencies.
+Turbine is a SQLite-based durable workflow engine for Go. No external dependencies, single binary.
 
 You define workflows as Go functions. Turbine handles persistence, retries, scheduling, and recovery.
 
@@ -46,7 +46,7 @@ func OrderWorkflow(ctx turbine.Context, orderID string) (string, error) {
 
 ### Scheduled Tasks
 
-Run workflows on a cron schedule using PocketBase's built-in scheduler.
+Run workflows on a cron schedule using the built-in scheduler.
 
 ```go
 turbine.Register(rt, DailyCleanup, turbine.WithSchedule("0 3 * * *"))
@@ -82,7 +82,7 @@ rt.Queue("api-calls",
 | [Durable Steps](/concepts/steps) | Step results recorded in SQLite, replayed on recovery |
 | [Step Retries](/concepts/steps#step-retries) | Automatic retries with exponential backoff |
 | [Queues](/concepts/queues) | Concurrency control, priority, rate limiting, partitioning |
-| [Scheduling](/concepts/scheduling) | Cron expressions via PocketBase's built-in scheduler |
+| [Scheduling](/concepts/scheduling) | Cron expressions via the built-in scheduler |
 | [Communication](/concepts/communication) | Inter-workflow messaging and key-value events |
 | [Approvals](/concepts/approvals) | Human-in-the-loop approval gates |
 | [Products](/concepts/products) | File outputs from workflows |

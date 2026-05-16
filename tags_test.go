@@ -2,7 +2,6 @@ package turbine
 
 import (
 	"testing"
-	"time"
 )
 
 func TestWithTags_IncludedInRegisteredWorkflows(t *testing.T) {
@@ -40,7 +39,7 @@ func TestWithTags_StoredOnWorkflowStatus(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, wf, "test")
 	if err != nil {

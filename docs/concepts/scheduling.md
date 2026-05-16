@@ -1,10 +1,10 @@
 # Scheduling
 
-Turbine uses PocketBase's built-in cron for scheduled workflows.
+Turbine uses the app's built-in cron for scheduled workflows.
 
 ## Compile-Time Schedules
 
-Register a cron schedule at compile time with `WithSchedule`. Scheduled workflows must accept `time.Time` as input — they receive the scheduled execution time.
+Register a cron schedule at compile time with `WithSchedule`. Scheduled workflows must accept `time.Time` as input, they receive the scheduled execution time.
 
 ```go
 cleanup := func(ctx turbine.Context, scheduledAt time.Time) (string, error) {
@@ -37,12 +37,12 @@ Standard five-field cron expressions:
 
 ## Runtime Schedules
 
-Turbine also supports schedules created at runtime via the `pt_schedules` collection. These can be managed from the dashboard or the PocketBase API.
+Turbine also supports schedules created at runtime via the `pt_schedules` collection. These can be managed from the dashboard or the app's API.
 
 Two types:
 
-- **Cron** — recurring schedule with a cron expression and optional jitter
-- **Once** — one-time execution at a specific time
+- **Cron**, recurring schedule with a cron expression and optional jitter
+- **Once**, one-time execution at a specific time
 
 Runtime schedules reference workflows by their fully-qualified name (FQN) and can be enabled/disabled without redeploying.
 
@@ -54,10 +54,10 @@ Each scheduled run gets a deterministic workflow ID based on the schedule name a
 
 ## Enable / Disable
 
-Compile-time schedules can be disabled at runtime through the `pt_schedules` collection. When disabled, the cron job still fires but the workflow is skipped. Re-enabling takes effect immediately — no restart needed.
+Compile-time schedules can be disabled at runtime through the `pt_schedules` collection. When disabled, the cron job still fires but the workflow is skipped. Re-enabling takes effect immediately, no restart needed.
 
 ::: tip
-The `scheduledAt` parameter is useful for idempotency — you can use it to derive deterministic IDs or to check whether a scheduled window was already processed.
+The `scheduledAt` parameter is useful for idempotency, you can use it to derive deterministic IDs or to check whether a scheduled window was already processed.
 :::
 
 ## Dashboard

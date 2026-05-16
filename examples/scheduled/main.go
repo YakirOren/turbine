@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/YakirOren/turbine"
-	"github.com/pocketbase/pocketbase"
 )
 
 func DoCleanup(ctx context.Context) (int, error) {
@@ -23,9 +22,7 @@ func Cleanup(ctx turbine.Context, scheduledAt time.Time) (string, error) {
 }
 
 func main() {
-	app := pocketbase.New()
-
-	rt := turbine.Setup(app, turbine.Config{})
+	app, rt := turbine.NewApp(turbine.Config{})
 
 	// Run cleanup every hour
 	turbine.Register(rt, Cleanup, turbine.WithSchedule("0 * * * *"))

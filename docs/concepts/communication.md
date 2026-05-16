@@ -16,7 +16,7 @@ msg, err := turbine.Recv[string](ctx, "my-topic", 30*time.Second)
 
 If the timeout expires before a message arrives, `Recv` returns the zero value.
 
-Messages are recorded as durable steps — on recovery, if the message was already received, the saved result is replayed.
+Messages are recorded as durable steps, on recovery, if the message was already received, the saved result is replayed.
 
 ### Sending from HTTP Handlers
 

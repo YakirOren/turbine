@@ -30,7 +30,7 @@ func TestSetValueAndGetValue(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	// Run producer first
 	ph, err := Run(rt, producer, "", WithID("producer-1"))
@@ -71,7 +71,7 @@ func TestGetValueTimeoutWorkflow(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "")
 	if err != nil {
@@ -101,7 +101,7 @@ func TestPause(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	start := time.Now()
 	handle, err := Run(rt, myWF, "", WithID("pause-test"))
@@ -153,7 +153,7 @@ func TestCancel(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "", WithID("cancel-test"), WithTimeout(5*time.Second))
 	if err != nil {
@@ -200,7 +200,7 @@ func TestCancelAndResume(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "", WithID("cancel-resume-test"))
 	if err != nil {
@@ -258,7 +258,7 @@ func TestList(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	// Run two workflows
 	h1, err := Run(rt, fastWF, "a", WithID("list-a"))
@@ -351,7 +351,7 @@ func TestDoAsync(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "")
 	if err != nil {

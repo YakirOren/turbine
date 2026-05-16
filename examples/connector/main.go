@@ -6,8 +6,6 @@ import (
 	"log"
 
 	"github.com/YakirOren/turbine"
-	"github.com/pocketbase/pocketbase"
-	"github.com/pocketbase/pocketbase/core"
 )
 
 // SSHClient wraps an SSH connection. In production this would use crypto/ssh.
@@ -31,7 +29,7 @@ func (c *SSHClient) Close(ctx context.Context) error {
 }
 
 // Deployer groups steps that share a live SSH connection.
-// The struct holds the connection; methods are steps passed to turbine.Do.
+// The struct holds the connection, methods are steps passed to turbine.Do.
 type Deployer struct {
 	host string
 	ssh  *SSHClient
@@ -59,19 +57,17 @@ func (d *Deployer) HealthCheck(ctx context.Context) (bool, error) {
 }
 
 // DeployWorkflow uses WithoutCheckpoint for the connect step.
-// The connection always re-establishes on recovery — it can't be serialized.
+// The connection always re-establishes on recovery, it can't be serialized.
 // Subsequent steps are checkpointed normally and replay from the database.
 func DeployWorkflow(ctx turbine.Context, host string) (string, error) {
 	d := &Deployer{host: host}
 
-	// Connect — not checkpointed, re-runs on recovery
 	_, err := turbine.Do(ctx, d.Connect, turbine.WithoutCheckpoint(), turbine.WithStepName("connect"))
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = d.ssh.Close(ctx) }()
 
-	// Durable steps — checkpointed as normal
 	_, err = turbine.Do(ctx, d.Deploy, turbine.WithStepName("deploy"))
 	if err != nil {
 		return "", err
@@ -86,32 +82,22 @@ func DeployWorkflow(ctx turbine.Context, host string) (string, error) {
 }
 
 func main() {
-	app := pocketbase.New()
-
-	rt := turbine.Setup(app, turbine.Config{})
+	rt := turbine.NewStandalone(turbine.Config{})
+	defer rt.Shutdown()
 
 	turbine.Register(rt, DeployWorkflow)
 
-	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
-		e.Router.POST("/deploy/{host}", func(re *core.RequestEvent) error {
-			host := re.Request.PathValue("host")
-
-			handle, err := turbine.Run(rt, DeployWorkflow, host)
-			if err != nil {
-				return re.JSON(500, map[string]string{"error": err.Error()})
-			}
-
-			result, err := handle.GetResult()
-			if err != nil {
-				return re.JSON(500, map[string]string{"error": err.Error()})
-			}
-
-			return re.JSON(200, map[string]string{"result": result})
-		})
-		return e.Next()
-	})
-
-	if err := app.Start(); err != nil {
+	if err := rt.Launch(); err != nil {
 		log.Fatal(err)
 	}
+
+	handle, err := turbine.Run(rt, DeployWorkflow, "prod-1")
+	if err != nil {
+		log.Fatal(err)
+	}
+	result, err := handle.GetResult()
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println(result)
 }

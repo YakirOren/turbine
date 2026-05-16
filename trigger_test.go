@@ -16,7 +16,7 @@ func TestRegisteredWorkflowsReturnsAllWorkflows(t *testing.T) {
 	}
 	defer app.Cleanup()
 
-	rt := New(app, Config{})
+	rt := NewRuntime(app, Config{})
 
 	triggerableWF := func(ctx Context, input string) (string, error) {
 		return input, nil
@@ -73,7 +73,7 @@ func TestTriggerByFQN(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	rawInput := json.RawMessage(`{"key":"value","num":42}`)
 	workflowID, err := rt.TriggerByFQN(fqn, rawInput)

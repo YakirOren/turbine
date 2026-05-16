@@ -1,9 +1,9 @@
 # Basic
 
-The simplest Turbine workflow — register a function and call it from an HTTP endpoint.
+The simplest Turbine workflow: register a function and run it.
 
 **What to notice:**
-- `turbine.Setup` hooks into PocketBase's lifecycle — no manual `Launch`/`Shutdown`
+- `turbine.NewStandalone` creates the runtime, `rt.Launch()` starts it, the deferred `rt.Shutdown()` tears it down on exit
 - Workflow signature: `func(ctx turbine.Context, input P) (R, error)`
 - `handle.GetResult()` blocks until the workflow completes
 

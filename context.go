@@ -13,7 +13,7 @@ var workflowIDLogKey = "workflow_id"
 type runtimeContextKey struct{}
 
 // Context is the unified context for turbine workflows.
-// It embeds context.Context and provides access to the PocketBase app, logger, and workflow ID.
+// It embeds context.Context and provides access to the app, logger, and workflow ID.
 type Context interface {
 	context.Context
 	App() core.App
@@ -33,7 +33,7 @@ func (c *ptContext) App() core.App {
 }
 
 func (c *ptContext) Logger() *slog.Logger {
-	logger := c.runtime.app.Logger()
+	logger := c.runtime.baseLogger()
 	wfState, ok := c.Context.Value(workflowStateKey).(*workflowState)
 	if ok && wfState != nil {
 		logger = logger.With(workflowIDLogKey, wfState.workflowID)
@@ -146,7 +146,7 @@ func LoggerFrom(ctx context.Context) *slog.Logger {
 	if rt == nil {
 		return slog.Default()
 	}
-	logger := rt.app.Logger()
+	logger := rt.baseLogger()
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if ok && wfState != nil {
 		logger = logger.With(workflowIDLogKey, wfState.workflowID)
@@ -157,7 +157,7 @@ func LoggerFrom(ctx context.Context) *slog.Logger {
 	return logger
 }
 
-// AppFrom returns the PocketBase app from a step's context.Context.
+// AppFrom returns the app from a step's context.Context.
 // Returns nil if called outside a turbine context.
 func AppFrom(ctx context.Context) core.App {
 	rt := runtimeFromContext(ctx)

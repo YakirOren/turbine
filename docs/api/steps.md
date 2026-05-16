@@ -17,7 +17,7 @@ Options:
 | `WithBackoffFactor(f)` | Exponential backoff multiplier |
 | `WithBaseInterval(d)` | Initial delay between retries |
 | `WithMaxInterval(d)` | Maximum delay between retries |
-| `WithoutCheckpoint()` | Skip persisting result — step re-executes on recovery ([details](/concepts/checkpoints)) |
+| `WithoutCheckpoint()` | Skip persisting result, step re-executes on recovery ([details](/concepts/checkpoints)) |
 
 ## `turbine.DoAsync`
 
@@ -33,7 +33,7 @@ Execute a step asynchronously. Returns a channel that receives the result.
 func Pause(ctx turbine.Context, duration time.Duration) error
 ```
 
-Durable pause. Survives crashes — on recovery, pauses only the remaining duration.
+Durable pause. Survives crashes, on recovery, pauses only the remaining duration.
 
 ## `turbine.WaitForApproval`
 
@@ -56,7 +56,7 @@ turbine.LoggerFrom(ctx context.Context) *slog.Logger
 turbine.AppFrom(ctx context.Context) core.App
 ```
 
-Access the logger and PocketBase app from within step functions.
+Access the logger and app from within step functions.
 
 ## `turbine.SetAppStatus`
 

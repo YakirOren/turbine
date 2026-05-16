@@ -47,7 +47,7 @@ result := <-ch
 
 ## Pause
 
-Durable pause that survives crashes and restarts. The wake-up time is recorded as a step — on recovery, if the time has passed, it returns immediately; otherwise it pauses only the remaining duration.
+Durable pause that survives crashes and restarts. The wake-up time is recorded as a step, on recovery, if the time has passed, it returns immediately; otherwise it pauses only the remaining duration.
 
 ```go
 if err := turbine.Pause(ctx, 24*time.Hour); err != nil {
@@ -57,7 +57,7 @@ if err := turbine.Pause(ctx, 24*time.Hour); err != nil {
 
 ## Accessing Context
 
-Use helper functions to access the logger and PocketBase app from within steps:
+Use helper functions to access the logger and app from within steps:
 
 ```go
 result, err := turbine.Do(ctx, func(ctx context.Context) (string, error) {
@@ -65,7 +65,6 @@ result, err := turbine.Do(ctx, func(ctx context.Context) (string, error) {
     app := turbine.AppFrom(ctx)
 
     logger.Info("doing work")
-    // use app for PocketBase operations
     return "done", nil
 }, turbine.WithStepName("work"))
 ```

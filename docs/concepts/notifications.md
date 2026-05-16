@@ -1,6 +1,6 @@
 # Notifications
 
-Turbine can send human-readable notifications to services like Slack, Discord, Telegram, and email when workflows complete. Powered by [Shoutrrr](https://github.com/nicholas-fedor/shoutrrr), configured via the `pt_alert_channels` collection — manageable from the dashboard under Settings > Notifications.
+Turbine can send human-readable notifications to services like Slack, Discord, Telegram, and email when workflows complete. Powered by [Shoutrrr](https://github.com/nicholas-fedor/shoutrrr), configured via the `pt_alert_channels` collection, manageable from the dashboard under Settings > Notifications.
 
 For programmatic integrations with structured JSON payloads, see [Webhooks](./webhooks.md).
 
@@ -87,7 +87,7 @@ if err := rt.SendNotification("ops-alerts", "Backfill finished"); err != nil {
 }
 ```
 
-Channels are looked up by their `name` field. **Disabled channels are a silent no-op** — calling `SendNotification` against a disabled channel returns `nil` without sending, matching the event-driven dispatch behavior. Toggling a channel off mutes both manual and automatic sends. If multiple channels share the same name, the first match is used — keep names unique. Unlike event-driven dispatch, this call is synchronous and returns the underlying delivery error, so the caller can decide whether to log, retry, or surface it.
+Channels are looked up by their `name` field. **Disabled channels are a silent no-op**, calling `SendNotification` against a disabled channel returns `nil` without sending, matching the event-driven dispatch behavior. Toggling a channel off mutes both manual and automatic sends. If multiple channels share the same name, the first match is used, keep names unique. Unlike event-driven dispatch, this call is synchronous and returns the underlying delivery error, so the caller can decide whether to log, retry, or surface it.
 
 ## Testing
 
@@ -107,4 +107,4 @@ Notifications are dispatched asynchronously and don't block workflow completion.
 
 ## Security
 
-Notification URLs contain embedded credentials (tokens, passwords). URLs are **masked** when read through the API — only the service scheme is visible (e.g. `slack://***`). The full URL is stored in the database and used only for dispatch.
+Notification URLs contain embedded credentials (tokens, passwords). URLs are **masked** when read through the API, only the service scheme is visible (e.g. `slack://***`). The full URL is stored in the database and used only for dispatch.

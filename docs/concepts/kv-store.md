@@ -1,6 +1,6 @@
 # KV Store
 
-Global key-value store backed by SQLite. Unlike [events](/concepts/communication) which are scoped to a workflow, the KV store is accessible from anywhere — workflows, steps, and HTTP handlers.
+Global key-value store backed by SQLite. Unlike [events](/concepts/communication) which are scoped to a workflow, the KV store is accessible from anywhere, workflows, steps, and HTTP handlers.
 
 ## Set a Value
 
@@ -70,11 +70,11 @@ You can update these values at runtime without restarting or re-enqueuing workfl
 | **Blocking** | No | `GetValue` blocks until set or timeout |
 
 ::: tip
-Keys are plain strings — Turbine does not namespace them. Use conventions like `"feature-flags/dark-mode"` or `"config/max-retries"` to organize your keys.
+Keys are plain strings, Turbine does not namespace them. Use conventions like `"feature-flags/dark-mode"` or `"config/max-retries"` to organize your keys.
 :::
 
 ::: info
-The KV store is persistent across restarts — it's backed by the same SQLite database as everything else. Values are JSON-serialized and stored in the `pt_kv` collection.
+The KV store is persistent across restarts, it's backed by the same SQLite database as everything else. Values are JSON-serialized and stored in the `pt_kv` collection.
 :::
 
 ## Dashboard

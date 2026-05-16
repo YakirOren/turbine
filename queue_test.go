@@ -23,7 +23,7 @@ func TestQueueEnqueueAndDequeue(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, "hello", WithQueue("test-queue"))
 	if err != nil {
@@ -68,7 +68,7 @@ func TestQueueWithCustomID(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	handle, err := Run(rt, myWF, 7,
 		WithQueue("id-queue"),
@@ -118,7 +118,7 @@ func TestQueueEventDrivenWakeUp(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(5 * time.Second)
+	defer rt.Shutdown()
 
 	enqueueTime := time.Now()
 	handle, err := Run(rt, myWF, "test", WithQueue("fast-queue"))
@@ -170,7 +170,7 @@ func TestQueueGlobalConcurrencyDrains(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown(10 * time.Second)
+	defer rt.Shutdown()
 
 	handles := make([]Handle[int], 0, total)
 	for i := 0; i < total; i++ {

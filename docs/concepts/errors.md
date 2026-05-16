@@ -64,7 +64,7 @@ handle, err := turbine.Run(rt, processOrder, orderID,
     turbine.WithID("order-" + orderID),
 )
 if errors.Is(err, &turbine.Error{Code: turbine.ErrConflictingID}) {
-    // already running — retrieve existing handle
+    // already running, retrieve existing handle
     handle = turbine.Retrieve[string](rt, "order-" + orderID)
 }
 ```

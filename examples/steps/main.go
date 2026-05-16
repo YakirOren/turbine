@@ -6,22 +6,18 @@ import (
 	"log"
 
 	"github.com/YakirOren/turbine"
-	"github.com/pocketbase/pocketbase"
-	"github.com/pocketbase/pocketbase/core"
 )
 
 func ChargePayment(ctx context.Context) (string, error) {
-	// call payment provider
 	return "charge_ok", nil
 }
 
 func FulfillOrder(ctx context.Context) (bool, error) {
-	// ship the order
 	return true, nil
 }
 
 // OrderWorkflow demonstrates durable steps.
-// Each step's result is saved — if the process crashes mid-workflow,
+// Each step's result is saved. If the process crashes mid-workflow,
 // it resumes from the last completed step without re-executing it.
 func OrderWorkflow(ctx turbine.Context, orderID string) (string, error) {
 	chargeID, err := turbine.Do(ctx, ChargePayment, turbine.WithStepName("charge"))
@@ -38,32 +34,22 @@ func OrderWorkflow(ctx turbine.Context, orderID string) (string, error) {
 }
 
 func main() {
-	app := pocketbase.New()
-
-	rt := turbine.Setup(app, turbine.Config{})
+	rt := turbine.NewStandalone(turbine.Config{})
+	defer rt.Shutdown()
 
 	turbine.Register(rt, OrderWorkflow)
 
-	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
-		e.Router.POST("/order/{id}", func(re *core.RequestEvent) error {
-			id := re.Request.PathValue("id")
-
-			handle, err := turbine.Run(rt, OrderWorkflow, id)
-			if err != nil {
-				return re.JSON(500, map[string]string{"error": err.Error()})
-			}
-
-			result, err := handle.GetResult()
-			if err != nil {
-				return re.JSON(500, map[string]string{"error": err.Error()})
-			}
-
-			return re.JSON(200, map[string]string{"result": result})
-		})
-		return e.Next()
-	})
-
-	if err := app.Start(); err != nil {
+	if err := rt.Launch(); err != nil {
 		log.Fatal(err)
 	}
+
+	handle, err := turbine.Run(rt, OrderWorkflow, "ord-42")
+	if err != nil {
+		log.Fatal(err)
+	}
+	result, err := handle.GetResult()
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println(result)
 }

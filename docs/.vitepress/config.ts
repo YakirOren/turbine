@@ -1,22 +1,52 @@
 import { defineConfig } from "vitepress";
 
+const SITE_URL = "https://turbine.yakir.io";
+const SITE_NAME = "Turbine";
+const SITE_DESCRIPTION = "SQLite-based durable workflow engine for Go";
+const OG_IMAGE = `${SITE_URL}/og.png`;
+
 export default defineConfig({
-  title: "Turbine",
-  description: "Durable workflow engine for PocketBase",
+  lang: "en-US",
+  title: SITE_NAME,
+  description: SITE_DESCRIPTION,
   cleanUrls: true,
+  lastUpdated: true,
   sitemap: {
-    hostname: "https://turbine.yakir.io",
+    hostname: SITE_URL,
   },
   head: [
     ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
     ["meta", { property: "og:type", content: "website" }],
-    ["meta", { property: "og:title", content: "Turbine" }],
-    ["meta", { property: "og:description", content: "Durable workflow engine for PocketBase" }],
-    ["meta", { property: "og:url", content: "https://turbine.yakir.io/" }],
-    ["meta", { name: "twitter:card", content: "summary" }],
-    ["meta", { name: "twitter:title", content: "Turbine" }],
-    ["meta", { name: "twitter:description", content: "Durable workflow engine for PocketBase" }],
+    ["meta", { property: "og:site_name", content: SITE_NAME }],
+    ["meta", { property: "og:image", content: OG_IMAGE }],
+    ["meta", { property: "og:image:width", content: "2994" }],
+    ["meta", { property: "og:image:height", content: "1642" }],
+    ["meta", { property: "og:image:alt", content: "Turbine dashboard showing workflow steps and logs" }],
+    ["meta", { name: "twitter:card", content: "summary_large_image" }],
+    ["meta", { name: "twitter:image", content: OG_IMAGE }],
   ],
+  transformPageData(pageData) {
+    const pageTitle = pageData.title || SITE_NAME;
+    const fullTitle = `${pageTitle} | ${SITE_NAME}`;
+    const description =
+      (pageData.frontmatter.description as string | undefined) ?? SITE_DESCRIPTION;
+
+    const path = pageData.relativePath
+      .replace(/(^|\/)index\.md$/, "$1")
+      .replace(/\.md$/, "");
+    const url = `${SITE_URL}/${path}`;
+
+    pageData.frontmatter.head ??= [];
+    pageData.frontmatter.head.push(
+      ["meta", { name: "description", content: description }],
+      ["meta", { property: "og:title", content: fullTitle }],
+      ["meta", { property: "og:description", content: description }],
+      ["meta", { property: "og:url", content: url }],
+      ["meta", { name: "twitter:title", content: fullTitle }],
+      ["meta", { name: "twitter:description", content: description }],
+      ["link", { rel: "canonical", href: url }],
+    );
+  },
   themeConfig: {
     logo: "/favicon.svg",
     nav: [

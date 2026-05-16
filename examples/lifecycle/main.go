@@ -6,11 +6,9 @@ import (
 	"time"
 
 	"github.com/YakirOren/turbine"
-	"github.com/pocketbase/pocketbase"
-	"github.com/pocketbase/pocketbase/core"
 )
 
-// LongRunningJob sleeps for a long time — can be cancelled and resumed.
+// LongRunningJob sleeps for a long time. Can be cancelled and resumed.
 func LongRunningJob(ctx turbine.Context, jobID string) (string, error) {
 	if err := turbine.Pause(ctx, 1*time.Hour); err != nil {
 		return "", err
@@ -27,15 +25,12 @@ func LongRunningJob(ctx turbine.Context, jobID string) (string, error) {
 }
 
 func main() {
-	app := pocketbase.New()
-
-	rt := turbine.Setup(app, turbine.Config{})
+	app, rt := turbine.NewApp(turbine.Config{})
 
 	turbine.Register(rt, LongRunningJob)
 
-	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
-		// Start a job with a deterministic ID
-		e.Router.POST("/job/{id}", func(re *core.RequestEvent) error {
+	app.OnServe().BindFunc(func(e *turbine.ServeEvent) error {
+		e.Router.POST("/job/{id}", func(re *turbine.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
 			handle, err := turbine.Run(rt, LongRunningJob, id,
@@ -50,8 +45,7 @@ func main() {
 			})
 		})
 
-		// Get job status and steps
-		e.Router.GET("/job/{id}", func(re *core.RequestEvent) error {
+		e.Router.GET("/job/{id}", func(re *turbine.RequestEvent) error {
 			id := re.Request.PathValue("id")
 			wfID := "job-" + id
 
@@ -79,8 +73,7 @@ func main() {
 			})
 		})
 
-		// Cancel a job
-		e.Router.POST("/job/{id}/cancel", func(re *core.RequestEvent) error {
+		e.Router.POST("/job/{id}/cancel", func(re *turbine.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
 			if err := rt.Cancel("job-" + id); err != nil {
@@ -90,8 +83,7 @@ func main() {
 			return re.JSON(200, map[string]string{"result": "cancelled"})
 		})
 
-		// Resume a cancelled job
-		e.Router.POST("/job/{id}/resume", func(re *core.RequestEvent) error {
+		e.Router.POST("/job/{id}/resume", func(re *turbine.RequestEvent) error {
 			id := re.Request.PathValue("id")
 
 			if err := rt.Resume("job-" + id); err != nil {

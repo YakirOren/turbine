@@ -16,7 +16,7 @@ type Context interface {
 
 ```go
 func MyWorkflow(ctx turbine.Context, input string) (string, error) {
-    app := ctx.App()           // PocketBase app
+    app := ctx.App()
     logger := ctx.Logger()     // logger with workflow_id and step_id attached
     wfID, _ := ctx.WorkflowID()
     ctx.SetAppStatus("working", "blue")
@@ -30,15 +30,15 @@ Use helper functions to access Turbine resources from within steps:
 ```go
 result, err := turbine.Do(ctx, func(stepCtx context.Context) (string, error) {
     logger := turbine.LoggerFrom(stepCtx)   // includes workflow_id + step_id
-    app := turbine.AppFrom(stepCtx)         // PocketBase app
+    app := turbine.AppFrom(stepCtx)
     turbine.SetAppStatus(stepCtx, "uploading", "blue")
     return "done", nil
 }, turbine.WithStepName("work"))
 ```
 
-## PocketBase App Access
+## App Access
 
-`turbine.AppFrom` (in steps) and `ctx.App()` (in workflows) return the PocketBase `core.App` instance — full access to records, files, the store, and everything else.
+`turbine.AppFrom` (in steps) and `ctx.App()` (in workflows) return the `core.App` instance, full access to records, files, the store, and everything else.
 
 ```go
 result, err := turbine.Do(ctx, func(stepCtx context.Context) (string, error) {
@@ -53,7 +53,7 @@ result, err := turbine.Do(ctx, func(stepCtx context.Context) (string, error) {
     // Query records
     records, _ := app.FindRecordsByFilter("orders", "status = 'pending'", "", 100, 0)
 
-    // In-memory store (not persistent — lost on restart)
+    // In-memory store (not persistent, lost on restart)
     app.Store().Set("last_sync", time.Now())
 
     // Access the filesystem
@@ -65,14 +65,14 @@ result, err := turbine.Do(ctx, func(stepCtx context.Context) (string, error) {
 ```
 
 ::: tip
-`app.Store()` is an in-memory cache — it's lost on restart. For persistent key-value data, use the [KV Store](/concepts/kv-store) instead.
+`app.Store()` is an in-memory cache, it's lost on restart. For persistent key-value data, use the [KV Store](/concepts/kv-store) instead.
 :::
 
 See the [app-access example](/examples/app-access) for a complete working demo.
 
 ## Logging
 
-Turbine uses PocketBase's structured logger (`slog`). All logs are stored in PocketBase's `_logs` table.
+Turbine uses the app's structured logger (`slog`). All logs are stored in the app's `_logs` table.
 
 ### From a workflow:
 
@@ -92,7 +92,7 @@ Both automatically attach `workflow_id` and `step_id` fields to every log entry,
 
 ### Querying Logs
 
-Since logs live in PocketBase's `_logs` collection, you can query them with `data` filters:
+Since logs live in the app's `_logs` collection, you can query them with `data` filters:
 
 ```
 data.workflow_id = "abc123"
@@ -108,8 +108,8 @@ Turbine's internal logs (recovery, queue runner, GC) use a `data.source = "syste
 Use `rt.NewContext()` to call Turbine APIs from HTTP handlers:
 
 ```go
-app.OnServe().BindFunc(func(e *core.ServeEvent) error {
-    e.Router.POST("/approve/{id}", func(re *core.RequestEvent) error {
+app.OnServe().BindFunc(func(e *turbine.ServeEvent) error {
+    e.Router.POST("/approve/{id}", func(re *turbine.RequestEvent) error {
         tCtx := rt.NewContext(re.Request.Context())
         return turbine.Send(tCtx, re.Request.PathValue("id"),
             &turbine.ApprovalResult{Approved: true}, "pt.approval")

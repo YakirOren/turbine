@@ -44,7 +44,7 @@ Returns all registered queues.
 
 ## Partitioned Queues
 
-When `WithPartitionQueue()` is enabled, workflows with the same `QueuePartitionKey` are processed sequentially — only one workflow per partition key runs at a time. Different partition keys run concurrently.
+When `WithPartitionQueue()` is enabled, workflows with the same `QueuePartitionKey` are processed sequentially, only one workflow per partition key runs at a time. Different partition keys run concurrently.
 
 This is useful for per-tenant or per-resource ordering:
 

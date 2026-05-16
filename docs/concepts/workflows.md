@@ -61,7 +61,7 @@ The summary is:
 - Computed once when the workflow starts, from the decoded input
 - Stored in the database and shown in the dashboard list, detail sidebar, and steps page
 - Limited to 200 characters (silently truncated)
-- Safe — if the function panics, the workflow still runs with an empty summary
+- Safe, if the function panics, the workflow still runs with an empty summary
 
 ```go
 // Access it programmatically
@@ -114,7 +114,7 @@ turbine.Register(rt, DeployWorkflow,
 | `description` | `string` | Help text shown below the field |
 
 ::: info
-The schema is purely for the dashboard UI — the workflow still receives the same JSON input regardless of whether a schema is provided.
+The schema is purely for the dashboard UI, the workflow still receives the same JSON input regardless of whether a schema is provided.
 :::
 
 ## Run Options
@@ -133,7 +133,7 @@ turbine.Run(rt, myWorkflow, input,
 
 ## Timeout / Deadline
 
-Set a timeout or absolute deadline on a workflow. The workflow's context is cancelled when the time expires. Both values are persisted — on recovery, the original deadline is restored.
+Set a timeout or absolute deadline on a workflow. The workflow's context is cancelled when the time expires. Both values are persisted, on recovery, the original deadline is restored.
 
 ```go
 // Timeout: relative duration from when the workflow starts executing

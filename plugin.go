@@ -2,7 +2,6 @@ package turbine
 
 import (
 	"net/url"
-	"time"
 
 	"github.com/nicholas-fedor/shoutrrr"
 	"github.com/pocketbase/pocketbase/core"
@@ -18,10 +17,10 @@ var validDispatchEvents = map[string]bool{
 	"workflow.*":                              true,
 }
 
-// Setup hooks turbine into PocketBase's lifecycle as a plugin.
+// Setup wires turbine into an existing app's lifecycle.
 // Returns the Runtime so you can register workflows before app.Start().
 func Setup(app core.App, config Config) *Runtime {
-	rt := New(app, config)
+	rt := NewRuntime(app, config)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		if err := rt.Launch(); err != nil {
@@ -31,7 +30,7 @@ func Setup(app core.App, config Config) *Runtime {
 	})
 
 	app.OnTerminate().BindFunc(func(e *core.TerminateEvent) error {
-		rt.Shutdown(30 * time.Second)
+		_ = rt.Shutdown()
 		return e.Next()
 	})
 

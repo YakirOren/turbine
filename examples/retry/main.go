@@ -8,12 +8,10 @@ import (
 	"time"
 
 	"github.com/YakirOren/turbine"
-	"github.com/pocketbase/pocketbase"
-	"github.com/pocketbase/pocketbase/core"
 )
 
 func CallUnreliableAPI(ctx context.Context) (string, error) {
-	if rand.Intn(3) == 0 { // fails ~66% of the time
+	if rand.Intn(3) == 0 {
 		return "", fmt.Errorf("service unavailable")
 	}
 	return "ok", nil
@@ -36,32 +34,22 @@ func FetchWorkflow(ctx turbine.Context, url string) (string, error) {
 }
 
 func main() {
-	app := pocketbase.New()
-
-	rt := turbine.Setup(app, turbine.Config{})
+	rt := turbine.NewStandalone(turbine.Config{})
+	defer rt.Shutdown()
 
 	turbine.Register(rt, FetchWorkflow)
 
-	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
-		e.Router.POST("/fetch/{url}", func(re *core.RequestEvent) error {
-			url := re.Request.PathValue("url")
-
-			handle, err := turbine.Run(rt, FetchWorkflow, url)
-			if err != nil {
-				return re.JSON(500, map[string]string{"error": err.Error()})
-			}
-
-			result, err := handle.GetResult()
-			if err != nil {
-				return re.JSON(500, map[string]string{"error": err.Error()})
-			}
-
-			return re.JSON(200, map[string]string{"result": result})
-		})
-		return e.Next()
-	})
-
-	if err := app.Start(); err != nil {
+	if err := rt.Launch(); err != nil {
 		log.Fatal(err)
 	}
+
+	handle, err := turbine.Run(rt, FetchWorkflow, "https://example.com")
+	if err != nil {
+		log.Fatal(err)
+	}
+	result, err := handle.GetResult()
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println(result)
 }

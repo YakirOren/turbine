@@ -1,33 +1,42 @@
 # Lifecycle
 
-## Setup vs New + Launch
+## Choosing a constructor
 
-`Setup` hooks into PocketBase's lifecycle automatically:
+Turbine exposes five entry points. Pick by answering two questions: **who owns the PocketBase app** and **does the app serve HTTP**.
 
-```go
-rt := turbine.Setup(app, turbine.Config{})
-// Register workflows...
-// app.Start() launches Turbine automatically
-```
+| I want to... | Use this constructor |
+|---|---|
+| Build a PocketBase plugin and let the app drive everything (HTTP server, OnServe, OnTerminate) | `turbine.Setup(app, cfg)` |
+| Quickly stand up a turbine-backed app with HTTP serving and no app-construction boilerplate | `app, rt := turbine.NewApp(cfg)` |
+| Run workflows from a script, cron job, or background worker, no HTTP server | `rt := turbine.NewStandalone(cfg)` |
+| Run workflows alongside a PocketBase app I configured myself, but without serving HTTP | `rt := turbine.SetupStandalone(app, cfg)` |
+| Embed turbine into a custom lifecycle where I manage Launch and Shutdown by hand | `rt := turbine.NewRuntime(app, cfg)` |
 
-For manual control:
+**Lifecycle ordering.** Every constructor returns a runtime in the **unlaunched** state. The required order is:
 
-```go
-rt := turbine.New(app, turbine.Config{})
-// Register workflows...
-rt.Launch()          // start runtime, recover pending workflows
-defer rt.Shutdown(30 * time.Second)
-```
+1. Construct the runtime via one of the five entry points
+2. `turbine.Register(rt, MyWorkflow)`, register every workflow you want to run
+3. Start the runtime:
+   - For `Setup` and `NewApp`: call `app.Start()`, which fires `OnServe` and triggers `rt.Launch()` for you
+   - For `NewStandalone`, `SetupStandalone`, and `NewRuntime`: call `rt.Launch()` yourself
+4. Use the runtime
+5. Shut it down:
+   - For `Setup` and `NewApp`: `OnTerminate` calls `rt.Shutdown()` for you when the app exits
+   - For `NewStandalone`, `SetupStandalone`, and `NewRuntime`: call `rt.Shutdown()` yourself (recommended: `defer rt.Shutdown()` right after construction)
+
+**`Register` must run before `Launch`.** Calling `turbine.Register` after the runtime has launched will panic. The construct -> register -> launch ordering above prevents this by design.
+
+**Logger defaults.** `NewStandalone` defaults `cfg.Logger` to a stdout `slog` handler so script output is visible. Every other constructor leaves `cfg.Logger` as the caller provided it; when `cfg.Logger` is `nil`, workflow and step logs fall back to the PocketBase `app.Logger()`. PocketBase's own log destinations (the `_logs` collection, etc.) are independent of `cfg.Logger`.
 
 ## Shutdown
 
 Two-phase process:
 
-1. **Drain** — stop accepting new work, let running workflows finish naturally
-2. **Force** — if the timeout expires, cancel all remaining workflows
+1. **Drain**, stop accepting new work, let running workflows finish naturally
+2. **Force**, if `Config.ShutdownTimeout` expires, cancel all remaining workflows
 
 ```go
-rt.Shutdown(30 * time.Second)
+err := rt.Shutdown()
 ```
 
 During shutdown:
@@ -36,8 +45,10 @@ During shutdown:
 - New `Run` calls return `turbine.ErrShuttingDown`
 - Running workflows get their context cancelled after the timeout
 
+`Shutdown` returns an error if the drain phase timed out and workflows were force-cancelled. Calling `Shutdown` before `Launch` is safe and returns `nil`.
+
 ::: info
-`Setup` uses a hardcoded 30-second shutdown timeout. For custom timeouts, use `New` + `Launch` + `Shutdown`.
+`Shutdown` always uses `Config.ShutdownTimeout` (default 30s). Set it on the `Config` passed to `NewRuntime` / `Setup` to tune the deadline.
 :::
 
 ## Runtime State
@@ -48,8 +59,8 @@ During shutdown:
 | `rt.IsDraining()` | `true` during shutdown drain phase |
 | `rt.GetExecutorID()` | Instance identifier (default: `"local"`) |
 | `rt.GetApplicationVersion()` | App version (default: binary hash) |
-| `rt.GetApplicationID()` | PocketBase app name |
-| `rt.App()` | The PocketBase `core.App` |
+| `rt.GetApplicationID()` | App name |
+| `rt.App()` | The `core.App` |
 
 ## Introspection
 
