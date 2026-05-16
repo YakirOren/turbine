@@ -33,7 +33,7 @@ func TestWaitForApproval_Approved(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	handle, err := Run(rt, wf, "test-input")
 	if err != nil {
@@ -96,7 +96,7 @@ func TestWaitForApproval_Rejected(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	handle, err := Run(rt, wf, "test-input")
 	if err != nil {
@@ -167,7 +167,7 @@ func TestWaitForApproval_Webhook(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	handle, err := Run(rt, wf, "test-input")
 	if err != nil {
@@ -225,7 +225,7 @@ func TestWaitForApproval_WithTimeout(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	handle, err := Run(rt, wf, "test-input")
 	if err != nil {
