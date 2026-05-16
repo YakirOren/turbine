@@ -29,7 +29,7 @@ func TestSyncRegisteredWorkflows_AllFields(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	records, err := rt.app.FindAllRecords(collectionWorkflows)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestSyncRegisteredWorkflows_NameFallbackToFQN(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	records, err := rt.app.FindAllRecords(collectionWorkflows)
 	if err != nil {
@@ -111,7 +111,7 @@ func TestSyncRegisteredWorkflows_Upsert(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	records, _ := rt.app.FindAllRecords(collectionWorkflows)
 	if len(records) != 1 {
@@ -163,7 +163,7 @@ func TestSyncRegisteredWorkflows_Idempotent(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	records, _ := rt.app.FindAllRecords(collectionWorkflows)
 	if len(records) != 1 {
@@ -195,7 +195,7 @@ func TestSyncRegisteredWorkflows_NilOptionalFields(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	records, err := rt.app.FindAllRecords(collectionWorkflows)
 	if err != nil {
@@ -240,7 +240,7 @@ func TestSyncRegisteredWorkflows_RemovesStale(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	// Insert a stale record manually.
 	col, err := rt.app.FindCollectionByNameOrId(collectionWorkflows)

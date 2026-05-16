@@ -73,7 +73,7 @@ func TestTriggerByFQN(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	rawInput := json.RawMessage(`{"key":"value","num":42}`)
 	workflowID, err := rt.TriggerByFQN(fqn, rawInput)

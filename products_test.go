@@ -58,7 +58,7 @@ func TestSendProduct_Store(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	handle, err := Run(rt, myWF, "test")
 	if err != nil {
@@ -112,7 +112,7 @@ func TestSendProduct_WithSender(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	handle, err := Run(rt, myWF, "test")
 	if err != nil {
@@ -164,7 +164,7 @@ func TestSendProduct_SenderFails(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	handle, err := Run(rt, myWF, "test")
 	if err != nil {
@@ -210,7 +210,7 @@ func TestWorkflowSender(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	sender := NewWorkflowSender(rt, targetWF)
 
@@ -261,7 +261,7 @@ func TestSendProduct_Dedup(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	handle, err := Run(rt, myWF, "test")
 	if err != nil {

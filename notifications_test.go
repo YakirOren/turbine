@@ -19,7 +19,7 @@ func TestValidateAlertChannelRecord(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	col, err := app.FindCollectionByNameOrId(collectionAlertChannels)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestAlertChannelURLMasking(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	col, err := app.FindCollectionByNameOrId(collectionAlertChannels)
 	if err != nil {
@@ -163,7 +163,7 @@ func TestSendNotification(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	col, err := app.FindCollectionByNameOrId(collectionAlertChannels)
 	if err != nil {

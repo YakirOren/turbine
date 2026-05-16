@@ -35,7 +35,7 @@ func OrderWorkflow(ctx turbine.Context, orderID string) (string, error) {
 
 func main() {
 	rt := turbine.NewStandalone(turbine.Config{})
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	turbine.Register(rt, OrderWorkflow)
 

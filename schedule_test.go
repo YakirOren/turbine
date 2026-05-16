@@ -24,7 +24,7 @@ func TestScheduledWorkflowRegistration(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	// Verify cron job was registered
 	entry, ok := rt.workflowRegistry.Load(resolveWorkflowFunctionName(myWF))
@@ -53,7 +53,7 @@ func TestScheduledWorkflowExecution(t *testing.T) {
 	if err := rt.Launch(); err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Shutdown()
+	defer func() { _ = rt.Shutdown() }()
 
 	// Simulate what the cron callback does: enqueue the workflow via the internal queue
 	now := time.Now()
