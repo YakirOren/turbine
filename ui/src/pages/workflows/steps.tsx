@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRefetchOnTerminal } from "@/hooks/use-refetch-on-terminal";
 import { useNavigate, useParams } from "react-router";
 import { useList, useShow } from "@refinedev/core";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
@@ -225,6 +226,10 @@ function StepFlowContent({ workflowId }: { workflowId: string }) {
         refetchInterval: isTerminal ? false : 2000,
     });
 
+    // Polling stops the moment the workflow goes terminal — refetch once more
+    // in case the final step's completion landed between polls.
+    useRefetchOnTerminal(stepsQuery.refetch, isTerminal);
+
     const stepsData = stepsQuery.data;
 
     const selectedStep: StepNodeRecord | null = useMemo(() => {
@@ -383,7 +388,7 @@ function StepFlowContent({ workflowId }: { workflowId: string }) {
                                 )}
                             >
                                 {(layout === "split" || layout === "graph-only") && (
-                                    <div className="relative h-[380px] overflow-hidden rounded-lg border bg-background animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
+                                    <div className="relative h-96 overflow-hidden rounded-lg border bg-background animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out">
                                         {stepsQuery.isLoading ? (
                                             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                                                 Loading graph…
@@ -858,6 +863,11 @@ function WorkflowLogs({
             return 2000;
         },
     });
+
+    // PocketBase batches log writes with a 3s flush interval, so do a delayed
+    // follow-up refetch to capture entries still buffered when the workflow
+    // transitioned to terminal.
+    useRefetchOnTerminal(logsQuery.refetch, TERMINAL_STATUSES.has(status), 4000);
 
     const rawLogs = useMemo(() => {
         const pages = logsQuery.data?.pages ?? [];

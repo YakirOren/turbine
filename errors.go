@@ -74,10 +74,6 @@ func newErrCancelled(workflowID string) *Error {
 	return &Error{Message: fmt.Sprintf("Workflow %s was cancelled", workflowID), Code: ErrCancelled}
 }
 
-func newErrConflictingID(workflowID string) *Error {
-	return &Error{Message: fmt.Sprintf("Conflicting workflow ID %s", workflowID), Code: ErrConflictingID, WorkflowID: workflowID}
-}
-
 func newErrDeadLetter(workflowID string, maxRetries int) *Error {
 	return &Error{Message: fmt.Sprintf("Workflow %s has been moved to the dead-letter queue after exceeding the maximum of %d retries", workflowID, maxRetries), Code: ErrDeadLetter, WorkflowID: workflowID, MaxRetries: maxRetries}
 }

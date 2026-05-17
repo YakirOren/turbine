@@ -114,14 +114,23 @@ func TestRecordAndCheckOperationResult(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Record an operation result
+	startedAt := time.Now().UnixMilli()
+	if err := sysDB.recordOperationStart(context.Background(), recordOperationStartDBInput{
+		workflowUUID: wfID,
+		functionID:   1,
+		functionName: "myStep",
+		startedAt:    startedAt,
+	}); err != nil {
+		t.Fatalf("recordOperationStart failed: %v", err)
+	}
+
 	outputStr := `"hello world"`
 	recordInput := recordOperationResultDBInput{
 		workflowUUID: wfID,
 		functionID:   1,
 		functionName: "myStep",
 		output:       &outputStr,
-		startedAt:    time.Now().UnixMilli(),
+		startedAt:    startedAt,
 		endedAt:      time.Now().UnixMilli(),
 	}
 	err = sysDB.recordOperationResult(context.Background(), recordInput)
@@ -144,6 +153,39 @@ func TestRecordAndCheckOperationResult(t *testing.T) {
 	}
 	if result.output == nil || *result.output != outputStr {
 		t.Fatalf("expected output %q, got %v", outputStr, result.output)
+	}
+}
+
+func TestCheckOperationExecutionRecoversCrashedStep(t *testing.T) {
+	sysDB, cleanup := setupSysDB(t)
+	defer cleanup()
+
+	wfID := "wf-op-crash-1"
+	if _, err := sysDB.insertStatus(context.Background(), insertStatusDBInput{
+		status: makeStatus(wfID),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a crash: start was recorded, result never arrived.
+	if err := sysDB.recordOperationStart(context.Background(), recordOperationStartDBInput{
+		workflowUUID: wfID,
+		functionID:   1,
+		functionName: "myStep",
+		startedAt:    time.Now().UnixMilli(),
+	}); err != nil {
+		t.Fatalf("recordOperationStart failed: %v", err)
+	}
+
+	result, err := sysDB.checkOperationExecution(context.Background(), checkOperationExecutionDBInput{
+		workflowUUID: wfID,
+		functionID:   1,
+	})
+	if err != nil {
+		t.Fatalf("checkOperationExecution failed: %v", err)
+	}
+	if result != nil {
+		t.Fatalf("expected nil result (step should re-execute), got %+v", result)
 	}
 }
 
@@ -401,16 +443,24 @@ func TestGetWorkflowSteps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Record two operations
 	out1 := `"step1"`
 	out2 := `"step2"`
 	for i, out := range []*string{&out1, &out2} {
+		startedAt := time.Now().UnixMilli()
+		if err := sysDB.recordOperationStart(context.Background(), recordOperationStartDBInput{
+			workflowUUID: wfID,
+			functionID:   i + 1,
+			functionName: "step",
+			startedAt:    startedAt,
+		}); err != nil {
+			t.Fatalf("record start %d: %v", i+1, err)
+		}
 		err = sysDB.recordOperationResult(context.Background(), recordOperationResultDBInput{
 			workflowUUID: wfID,
 			functionID:   i + 1,
 			functionName: "step",
 			output:       out,
-			startedAt:    time.Now().UnixMilli(),
+			startedAt:    startedAt,
 			endedAt:      time.Now().UnixMilli(),
 		})
 		if err != nil {

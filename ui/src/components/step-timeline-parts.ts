@@ -36,16 +36,32 @@ export interface BuildTimelinePartsInput {
   isRunning: boolean;
 }
 
+// Running steps (endedAtMs == 0) get an effective end of "now" while the
+// workflow is live, so the segment extends to include their elapsed time.
+// Otherwise (terminal workflow or no live tick yet) treat them as
+// instantaneous to avoid stretching the timeline forward.
+export function effectiveEndMs(
+  step: StepNodeRecord,
+  nowMs: number,
+  isRunning: boolean,
+): number {
+  if (step.endedAtMs) return step.endedAtMs;
+  return isRunning ? Math.max(nowMs, step.startedAtMs) : step.startedAtMs;
+}
+
 export function buildTimelineParts(input: BuildTimelinePartsInput): TimelinePart[] {
   const { steps } = input;
   const withStart = steps.filter((s) => s.startedAtMs > 0);
   if (withStart.length === 0) return [];
   const ordered = [...withStart].sort((a, b) => a.startedAtMs - b.startedAtMs);
 
+  const effectiveEnd = (s: StepNodeRecord): number =>
+    effectiveEndMs(s, input.nowMs, input.isRunning);
+
   type Gap = { index: number; startMs: number; endMs: number; durMs: number };
   const candidates: Gap[] = [];
   for (let i = 0; i < ordered.length - 1; i++) {
-    const prevEnd = ordered[i].endedAtMs || ordered[i].startedAtMs;
+    const prevEnd = effectiveEnd(ordered[i]);
     const nextStart = ordered[i + 1].startedAtMs;
     const gap = nextStart - prevEnd;
     if (gap >= BREAK_FLOOR_MS) {
@@ -54,13 +70,13 @@ export function buildTimelineParts(input: BuildTimelinePartsInput): TimelinePart
   }
 
   const stepDurTotal = ordered.reduce(
-    (acc, s) => acc + Math.max((s.endedAtMs || s.startedAtMs) - s.startedAtMs, 0),
+    (acc, s) => acc + Math.max(effectiveEnd(s) - s.startedAtMs, 0),
     0,
   );
   const candidateGapTotal = candidates.reduce((acc, g) => acc + g.durMs, 0);
   const firstStart = ordered[0].startedAtMs;
   const lastEnd = ordered.reduce(
-    (max, s) => Math.max(max, s.endedAtMs || s.startedAtMs),
+    (max, s) => Math.max(max, effectiveEnd(s)),
     firstStart,
   );
   const allGapsTotal = lastEnd - firstStart - stepDurTotal;

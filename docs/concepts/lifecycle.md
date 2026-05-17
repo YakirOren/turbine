@@ -36,7 +36,7 @@ Two-phase process:
 2. **Force**, if `Config.ShutdownTimeout` expires, cancel all remaining workflows
 
 ```go
-err := rt.Shutdown()
+rt.Shutdown()
 ```
 
 During shutdown:
@@ -45,7 +45,7 @@ During shutdown:
 - New `Run` calls return `turbine.ErrShuttingDown`
 - Running workflows get their context cancelled after the timeout
 
-`Shutdown` returns an error if the drain phase timed out and workflows were force-cancelled. Calling `Shutdown` before `Launch` is safe and returns `nil`.
+If the drain phase times out and workflows are force-cancelled, `Shutdown` logs a `Warn` and returns. Calling `Shutdown` before `Launch` is safe. Drain progress messages are written to stdout, bypassing `cfg.Logger` and `app.Logger()` so they're still visible while the app's own logging pipeline is tearing down.
 
 ::: info
 `Shutdown` always uses `Config.ShutdownTimeout` (default 30s). Set it on the `Config` passed to `NewRuntime` / `Setup` to tune the deadline.
@@ -94,6 +94,8 @@ for _, s := range steps {
     fmt.Printf("step %d: %s (output=%s)\n", s.FunctionID, s.FunctionName, s.Output)
 }
 ```
+
+In-progress steps are included in the result with `EndedAt == 0`. They become complete once the step returns and its result is recorded.
 
 ## Workflow Status Types
 

@@ -174,6 +174,13 @@ type recordChildGetResultDBInput struct {
 	errorMsg     *string
 }
 
+type recordOperationStartDBInput struct {
+	workflowUUID string
+	functionID   int
+	functionName string
+	startedAt    int64
+}
+
 type recordOperationResultDBInput struct {
 	workflowUUID string
 	functionID   int
@@ -319,6 +326,7 @@ type systemDatabase interface {
 	checkChildWorkflow(ctx context.Context, workflowUUID string, functionID int) (*string, error)
 	recordChildGetResult(ctx context.Context, input recordChildGetResultDBInput) error
 
+	recordOperationStart(ctx context.Context, input recordOperationStartDBInput) error
 	recordOperationResult(ctx context.Context, input recordOperationResultDBInput) error
 	checkOperationExecution(ctx context.Context, input checkOperationExecutionDBInput) (*recordedResult, error)
 	getWorkflowSteps(ctx context.Context, input getWorkflowStepsInput) ([]stepInfo, error)

@@ -30,7 +30,7 @@ func Setup(app core.App, config Config) *Runtime {
 	})
 
 	app.OnTerminate().BindFunc(func(e *core.TerminateEvent) error {
-		_ = rt.Shutdown()
+		rt.Shutdown()
 		return e.Next()
 	})
 
