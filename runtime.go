@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -215,7 +216,8 @@ func (rt *Runtime) IsDraining() bool { return rt.draining.Load() }
 // Shutdown gracefully stops the runtime with a two-phase approach:
 // 1. Drain, stop accepting new work, let running workflows finish naturally
 // 2. Force, if cfg.ShutdownTimeout expires, cancel root context to kill remaining workflows
-// Idempotent. Drain timeouts are logged at Warn level.
+// Idempotent. Drain progress is logged directly to stdout, not via app.Logger,
+// since the app's logger pipeline may itself be shutting down.
 func (rt *Runtime) Shutdown() {
 	if !rt.launched.Load() {
 		if rt.ownedApp != nil {
@@ -224,8 +226,9 @@ func (rt *Runtime) Shutdown() {
 		return
 	}
 
+	shutdownLog := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	timeout := rt.config.ShutdownTimeout
-	rt.app.Logger().Info("turbine shutting down")
+	shutdownLog.Info("turbine shutting down")
 
 	rt.draining.Store(true)
 	rt.launched.Store(false)
@@ -235,7 +238,7 @@ func (rt *Runtime) Shutdown() {
 		select {
 		case <-rt.queueRunner.completionChan:
 		case <-time.After(timeout):
-			rt.app.Logger().Warn("timeout waiting for queue runner to drain")
+			shutdownLog.Warn("timeout waiting for queue runner to drain")
 		}
 	}
 
@@ -247,7 +250,7 @@ func (rt *Runtime) Shutdown() {
 	select {
 	case <-done:
 	case <-time.After(timeout):
-		rt.app.Logger().Warn("timeout waiting for workflows, force-cancelling")
+		shutdownLog.Warn("timeout waiting for workflows, force-cancelling")
 		rt.ctxCancelFunc(errors.New("turbine shutdown timeout"))
 		select {
 		case <-done:

@@ -45,7 +45,7 @@ During shutdown:
 - New `Run` calls return `turbine.ErrShuttingDown`
 - Running workflows get their context cancelled after the timeout
 
-If the drain phase times out and workflows are force-cancelled, `Shutdown` logs a `Warn` and returns. Calling `Shutdown` before `Launch` is safe.
+If the drain phase times out and workflows are force-cancelled, `Shutdown` logs a `Warn` and returns. Calling `Shutdown` before `Launch` is safe. Drain progress messages are written to stdout, bypassing `cfg.Logger` and `app.Logger()` so they're still visible while the app's own logging pipeline is tearing down.
 
 ::: info
 `Shutdown` always uses `Config.ShutdownTimeout` (default 30s). Set it on the `Config` passed to `NewRuntime` / `Setup` to tune the deadline.
