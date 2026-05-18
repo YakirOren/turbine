@@ -190,7 +190,7 @@ func main() {
 	dashboard.Mount(app, rt)
 
 	app.OnServe().BindFunc(func(e *turbine.ServeEvent) error {
-		// POST /order/:id — start an order workflow
+		// POST /order/:id, start an order workflow
 		e.Router.POST("/order/{id}", func(re *turbine.RequestEvent) error {
 			id := re.Request.PathValue("id")
 

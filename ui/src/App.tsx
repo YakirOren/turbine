@@ -75,7 +75,7 @@ function App() {
                         </Route>
                     </Route>
 
-                    {/* Public routes — logged-in users redirected to dashboard */}
+                    {/* Public routes, logged-in users redirected to dashboard */}
                     <Route
                         element={
                             <Authenticated key="auth-pages" fallback={<Outlet/>}>

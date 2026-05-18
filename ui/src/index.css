@@ -95,7 +95,7 @@
     --danger: #ef4444;
     --danger-foreground: #b91c1c;
     /* Soft tokens derive from base + background. Defined once; auto-adapt to theme.
-       Use oklab (rectangular) — oklch rotates hue between opposite-hue colors. */
+       Use oklab (rectangular), oklch rotates hue between opposite-hue colors. */
     --brand-soft: color-mix(in oklab, var(--brand) 6%, var(--background));
     --success-soft: color-mix(in oklab, var(--success) 14%, var(--background));
     --warning-soft: color-mix(in oklab, var(--warning) 14%, var(--background));

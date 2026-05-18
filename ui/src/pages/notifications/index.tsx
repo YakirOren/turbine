@@ -445,7 +445,7 @@ export function NotificationList() {
                 >
                   Shoutrrr
                 </a>
-                {" "}URL — supports Slack, Discord, Telegram, Email, and more
+                {" "}URL, supports Slack, Discord, Telegram, Email, and more
               </FieldDescription>
             </Field>
             <Field>

@@ -30,7 +30,7 @@ func TestQueueEnqueueAndDequeue(t *testing.T) {
 		t.Fatalf("Run with queue failed: %v", err)
 	}
 
-	// The workflow is enqueued — queue runner should pick it up
+	// The workflow is enqueued, queue runner should pick it up
 	// Poll for completion
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {

@@ -382,7 +382,7 @@ func main() {
 		ProductSender: &LogSender{},
 	})
 
-	// Triggerable from dashboard (no schema — raw JSON input)
+	// Triggerable from dashboard (no schema, raw JSON input)
 	turbine.Register(rt, OrderWorkflow,
 		turbine.WithDashboardTrigger(),
 		turbine.WithTags("orders", "e2e"),
@@ -398,7 +398,7 @@ func main() {
 	)
 	turbine.Register(rt, ReportWorkflow, turbine.WithDashboardTrigger(), turbine.WithTags("reports"))
 
-	// Triggerable with input schema — typed form in dashboard
+	// Triggerable with input schema, typed form in dashboard
 	turbine.Register(rt, DeployWorkflow,
 		turbine.WithName("deploy"),
 		turbine.WithDashboardTrigger(),
