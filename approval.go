@@ -13,10 +13,10 @@ type ApprovalResult struct {
 
 const approvalTopic = "pt.approval"
 
-// _maxApprovalWait is used when no timeout is specified. Recv requires a positive
+// maxApprovalWait is used when no timeout is specified. Recv requires a positive
 // duration (zero means "don't wait"), so we use a very large value to simulate
 // indefinite blocking.
-const _maxApprovalWait = 100 * 365 * 24 * time.Hour
+const maxApprovalWait = 100 * 365 * 24 * time.Hour
 
 // ErrApprovalTimeout is returned when WaitForApproval times out.
 var ErrApprovalTimeout = errors.New("turbine: approval timed out")
@@ -46,7 +46,7 @@ func WaitForApproval(ctx Context, opts ...ApprovalOption) (ApprovalResult, error
 
 	timeout := o.timeout
 	if timeout <= 0 {
-		timeout = _maxApprovalWait
+		timeout = maxApprovalWait
 	}
 
 	ctx.SetAppStatus("waiting for approval", "yellow")

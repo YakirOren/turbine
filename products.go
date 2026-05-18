@@ -22,14 +22,14 @@ func NewWorkflowSender[R any](rt *Runtime, workflow Workflow[ProductRecord, R]) 
 	return &WorkflowSender[R]{rt: rt, workflow: workflow}
 }
 
-func (ws *WorkflowSender[R]) Send(ctx context.Context, product ProductRecord, _ io.Reader) error {
+func (ws *WorkflowSender[R]) Send(_ context.Context, product ProductRecord, _ io.Reader) error {
 	_, err := Run(ws.rt, ws.workflow, product)
 	return err
 }
 
 // SendProduct stores a product file and optionally sends it via the registered ProductSender.
 // Must be called from within a step (requires workflow context).
-// Returns error if the sender fails — the product is still stored with "failed" status.
+// Returns error if the sender fails, the product is still stored with "failed" status.
 func SendProduct(ctx context.Context, fileName string, data io.Reader, metadata map[string]any) error {
 	rt := runtimeFromContext(ctx)
 	if rt == nil {
@@ -59,7 +59,7 @@ func SendProduct(ctx context.Context, fileName string, data io.Reader, metadata 
 		Limit(1).
 		Row(&existingID)
 	if dupErr == nil && existingID != "" {
-		return nil // Already stored — dedup
+		return nil // Already stored, dedup
 	}
 
 	// Look up step name from operation outputs

@@ -15,7 +15,9 @@ func setupRuntime(t *testing.T) (*Runtime, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt := NewRuntime(app, Config{})
+	// Tests use httptest.NewServer which binds 127.0.0.1; opt out of the
+	// production SSRF guard so the loopback receivers in webhook tests work.
+	rt := NewRuntime(app, Config{AllowPrivateAddresses: true})
 	return rt, app.Cleanup
 }
 
@@ -342,7 +344,7 @@ func TestGarbageCollectPreservesPending(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// GC with tiny retention — should NOT delete pending workflow
+	// GC with tiny retention, should NOT delete pending workflow
 	rt.config.GCRetention = 1 * time.Millisecond
 	time.Sleep(2 * time.Millisecond)
 	if err := rt.GarbageCollect(); err != nil {

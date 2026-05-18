@@ -204,7 +204,7 @@ func buildStepsTree(steps []stepRow, workflowStatus string, appStatus string) ([
 				prevSid := strconv.Itoa(prev.FunctionID)
 
 				if prevSequentialID == "" || prevSid == lastSequentialID && prevSequentialID == "" {
-					// Previous step is the very first node — it becomes the parent
+					// Previous step is the very first node, it becomes the parent
 					currentGroup = &group{
 						parentID: prevSid,
 						members:  []string{sid},
@@ -212,7 +212,7 @@ func buildStepsTree(steps []stepRow, workflowStatus string, appStatus string) ([
 					}
 					edges = append(edges, stepsTreeEdge{Source: prevSid, Target: sid})
 				} else {
-					// Previous step is a parallel sibling — rewire it into a group
+					// Previous step is a parallel sibling, rewire it into a group
 					// The step before prev (prevSequentialID) becomes the parent
 					parentID := prevSequentialID
 					currentGroup = &group{
@@ -252,7 +252,7 @@ func buildStepsTree(steps []stepRow, workflowStatus string, appStatus string) ([
 		}
 	}
 
-	// Connect final step(s) to result — or approval node if present
+	// Connect final step(s) to result, or approval node if present
 	finalTarget := resultNodeID
 	if approvalNodeID != "" {
 		finalTarget = approvalNodeID

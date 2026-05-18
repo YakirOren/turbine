@@ -216,11 +216,19 @@ type stepInfo struct {
 	endedAt      *int64
 }
 
-// SendInput is the input for sending a notification to a workflow.
-type SendInput struct {
-	DestinationUUID string
-	Topic           string
-	Message         *string
+// sendInput is the input for sending a notification to a workflow.
+//
+// ProducerWorkflowID + ProducerStepID, when non-empty, form an idempotency key
+// so a step that crashes mid-Send and replays on recovery does not deliver the
+// message twice. Direct (non-step) Send leaves both empty and falls back to a
+// random row id, the producer is responsible for at-most-once semantics in that case.
+type sendInput struct {
+	DestinationUUID   string
+	Topic             string
+	Message           *string
+	ProducerWorkflow  string
+	ProducerStepID    int
+	HasProducer       bool
 }
 
 type recvInput struct {
@@ -229,8 +237,8 @@ type recvInput struct {
 	timeout      time.Duration
 }
 
-// SetValueInput is the input for setting a workflow event.
-type SetValueInput struct {
+// setValueInput is the input for setting a workflow event.
+type setValueInput struct {
 	WorkflowUUID string
 	Key          string
 	Value        *string
@@ -331,9 +339,9 @@ type systemDatabase interface {
 	checkOperationExecution(ctx context.Context, input checkOperationExecutionDBInput) (*recordedResult, error)
 	getWorkflowSteps(ctx context.Context, input getWorkflowStepsInput) ([]stepInfo, error)
 
-	send(ctx context.Context, input SendInput) error
+	send(ctx context.Context, input sendInput) error
 	recv(ctx context.Context, input recvInput) (*string, error)
-	setEvent(ctx context.Context, input SetValueInput) error
+	setEvent(ctx context.Context, input setValueInput) error
 	getEvent(ctx context.Context, input getEventInput) (*string, error)
 
 	dequeueWorkflows(ctx context.Context, input dequeueWorkflowsInput) ([]dequeuedWorkflow, error)

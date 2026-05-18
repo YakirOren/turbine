@@ -32,7 +32,7 @@ func setupRuntimeWithSender(t *testing.T, sender ProductSender) (*Runtime, func(
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{}
+	cfg := Config{AllowPrivateAddresses: true}
 	if sender != nil {
 		cfg.ProductSender = sender
 	}
@@ -244,7 +244,7 @@ func TestSendProduct_Dedup(t *testing.T) {
 			if err1 != nil {
 				return nil, err1
 			}
-			// Second call with same file_name — should be a no-op
+			// Second call with same file_name, should be a no-op
 			err2 := SendProduct(ctx, "dup.txt", strings.NewReader("data2"), nil)
 			if err2 != nil {
 				return nil, err2

@@ -53,7 +53,7 @@ type Runtime struct {
 
 	// Workflow registry
 	workflowRegistry        *sync.Map // map[string]workflowRegistryEntry
-	workflowCustomNameToFQN *sync.Map // maps custom names → FQN
+	workflowCustomNameToFQN *sync.Map // maps custom names -> FQN
 
 	// Set of workflow IDs currently running (key = workflow ID, value = struct{}{})
 	activeWorkflowIDs *sync.Map
@@ -63,7 +63,7 @@ type Runtime struct {
 	// Disabled compile-time schedules (key = schedule name, value = struct{}{})
 	disabledSchedules *sync.Map
 
-	// Cached dispatch targets — reloaded via collection hooks
+	// Cached dispatch targets, reloaded via collection hooks
 	webhookCache      atomic.Value // []cachedWebhook
 	alertChannelCache atomic.Value // []cachedAlertChannel
 
@@ -281,14 +281,11 @@ func (rt *Runtime) baseLogger() *slog.Logger {
 	return rt.app.Logger()
 }
 
-// Accessors
+// App returns the underlying PocketBase app.
+func (rt *Runtime) App() core.App { return rt.app }
 
-func (rt *Runtime) GetApplicationVersion() string { return rt.applicationVersion }
-func (rt *Runtime) GetExecutorID() string         { return rt.executorID }
-func (rt *Runtime) GetApplicationID() string      { return rt.applicationID }
-func (rt *Runtime) IsLaunched() bool              { return rt.launched.Load() }
-func (rt *Runtime) App() core.App                 { return rt.app }
-func (rt *Runtime) Queues() []WorkflowQueue       { return rt.queueRunner.listQueues() }
+// Queues returns the workflow queues registered on the runtime.
+func (rt *Runtime) Queues() []WorkflowQueue { return rt.queueRunner.listQueues() }
 
 // SetProductSender sets the product sender after construction.
 // Use this when the sender needs a reference to the runtime (e.g., WorkflowSender).

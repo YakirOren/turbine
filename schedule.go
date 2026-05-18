@@ -14,30 +14,30 @@ const (
 	scheduleTypeCompile = "compile"
 )
 
-var _ core.RecordProxy = (*Schedule)(nil)
+var _ core.RecordProxy = (*schedule)(nil)
 
-// Schedule is a typed proxy for pt_schedules records.
-type Schedule struct {
+// schedule is a typed proxy for pt_schedules records.
+type schedule struct {
 	core.BaseRecordProxy
 }
 
-func newSchedule(record *core.Record) *Schedule {
-	s := &Schedule{}
+func newSchedule(record *core.Record) *schedule {
+	s := &schedule{}
 	s.SetProxyRecord(record)
 	return s
 }
 
-func (s *Schedule) WorkflowFQN() string            { return s.GetString("workflow_fqn") }
-func (s *Schedule) SetWorkflowFQN(fqn string)      { s.Set("workflow_fqn", fqn) }
-func (s *Schedule) Input() json.RawMessage         { return json.RawMessage(s.GetString("input")) }
-func (s *Schedule) SetInput(input json.RawMessage) { s.Set("input", string(input)) }
-func (s *Schedule) Type() string                   { return s.GetString("type") }
-func (s *Schedule) SetType(t string)               { s.Set("type", t) }
-func (s *Schedule) Enabled() bool                  { return s.GetBool("enabled") }
-func (s *Schedule) SetEnabled(v bool)              { s.Set("enabled", v) }
-func (s *Schedule) CronExpression() string         { return s.GetString("cron_expression") }
-func (s *Schedule) SetCronExpression(expr string)  { s.Set("cron_expression", expr) }
-func (s *Schedule) Jitter() time.Duration {
+func (s *schedule) WorkflowFQN() string            { return s.GetString("workflow_fqn") }
+func (s *schedule) SetWorkflowFQN(fqn string)      { s.Set("workflow_fqn", fqn) }
+func (s *schedule) Input() json.RawMessage         { return json.RawMessage(s.GetString("input")) }
+func (s *schedule) SetInput(input json.RawMessage) { s.Set("input", string(input)) }
+func (s *schedule) Type() string                   { return s.GetString("type") }
+func (s *schedule) SetType(t string)               { s.Set("type", t) }
+func (s *schedule) Enabled() bool                  { return s.GetBool("enabled") }
+func (s *schedule) SetEnabled(v bool)              { s.Set("enabled", v) }
+func (s *schedule) CronExpression() string         { return s.GetString("cron_expression") }
+func (s *schedule) SetCronExpression(expr string)  { s.Set("cron_expression", expr) }
+func (s *schedule) Jitter() time.Duration {
 	jitter := s.GetString("jitter")
 	if jitter == "" {
 		return 0
@@ -45,25 +45,25 @@ func (s *Schedule) Jitter() time.Duration {
 	d, _ := time.ParseDuration(jitter)
 	return d
 }
-func (s *Schedule) SetJitter(d time.Duration)  { s.Set("jitter", d.String()) }
-func (s *Schedule) ScheduledAt() time.Time     { return s.GetDateTime("scheduled_at").Time() }
-func (s *Schedule) SetScheduledAt(t time.Time) { s.Set("scheduled_at", t) }
-func (s *Schedule) Created() types.DateTime    { return s.GetDateTime("created") }
-func (s *Schedule) Updated() types.DateTime    { return s.GetDateTime("updated") }
+func (s *schedule) SetJitter(d time.Duration)  { s.Set("jitter", d.String()) }
+func (s *schedule) ScheduledAt() time.Time     { return s.GetDateTime("scheduled_at").Time() }
+func (s *schedule) SetScheduledAt(t time.Time) { s.Set("scheduled_at", t) }
+func (s *schedule) Created() types.DateTime    { return s.GetDateTime("created") }
+func (s *schedule) Updated() types.DateTime    { return s.GetDateTime("updated") }
 
-func findAllSchedules(app core.App) ([]*Schedule, error) {
+func findAllSchedules(app core.App) ([]*schedule, error) {
 	records, err := app.FindAllRecords(collectionSchedules)
 	if err != nil {
 		return nil, err
 	}
-	schedules := make([]*Schedule, len(records))
+	schedules := make([]*schedule, len(records))
 	for i, r := range records {
 		schedules[i] = newSchedule(r)
 	}
 	return schedules, nil
 }
 
-func findScheduleByFilter(app core.App, filter string, params map[string]any) (*Schedule, error) {
+func findScheduleByFilter(app core.App, filter string, params map[string]any) (*schedule, error) {
 	record, err := app.FindFirstRecordByFilter(collectionSchedules, filter, params)
 	if err != nil {
 		return nil, err
@@ -71,14 +71,14 @@ func findScheduleByFilter(app core.App, filter string, params map[string]any) (*
 	return newSchedule(record), nil
 }
 
-func findCompileScheduleByFQN(app core.App, fqn string) (*Schedule, error) {
+func findCompileScheduleByFQN(app core.App, fqn string) (*schedule, error) {
 	return findScheduleByFilter(app,
 		"workflow_fqn = {:fqn} && type = {:type}",
 		map[string]any{"fqn": fqn, "type": scheduleTypeCompile},
 	)
 }
 
-func createSchedule(app core.App, fqn string, input json.RawMessage, schedType string, cronExpr string, scheduledAt time.Time) (*Schedule, error) {
+func createSchedule(app core.App, fqn string, input json.RawMessage, schedType string, cronExpr string, scheduledAt time.Time) (*schedule, error) {
 	col, err := app.FindCollectionByNameOrId(collectionSchedules)
 	if err != nil {
 		return nil, err

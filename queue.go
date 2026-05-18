@@ -1,11 +1,12 @@
 package turbine
 
 import (
+	"runtime/debug"
 	"sync"
 )
 
 const (
-	_DEFAULT_MAX_TASKS_PER_ITERATION = 100
+	defaultMaxTasksPerIteration = 100
 )
 
 // WorkflowQueue defines a named queue with concurrency and rate limiting options.
@@ -110,26 +111,39 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 			return
 		}
 
-		skipDequeue := false
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					queueLogger.Error("queue iteration panicked",
+						"panic", r,
+						"stack", string(debug.Stack()),
+						"source", "system")
+				}
+			}()
 
-		partitionKeys := []string{""}
-		if queue.PartitionQueue {
-			parts, err := retryWithResult(rt.ctx, func() ([]string, error) {
-				return rt.systemDB.getQueuePartitions(rt.ctx, queue.Name)
-			}, withRetrierLogger(queueLogger))
-			if err != nil {
-				skipDequeue = true
-				queueLogger.Error("error getting queue partitions", "error", err)
-			} else {
-				partitionKeys = parts
+			skipDequeue := false
+
+			partitionKeys := []string{""}
+			if queue.PartitionQueue {
+				parts, err := retryWithResult(rt.ctx, func() ([]string, error) {
+					return rt.systemDB.getQueuePartitions(rt.ctx, queue.Name)
+				}, withRetrierLogger(queueLogger))
+				if err != nil {
+					skipDequeue = true
+					queueLogger.Error("error getting queue partitions", "error", err)
+				} else {
+					partitionKeys = parts
+				}
 			}
-		}
 
-		if !skipDequeue {
+			if skipDequeue {
+				return
+			}
+
 			for _, partKey := range partitionKeys {
 				limit := queue.MaxTasksPerIteration
 				if limit == 0 {
-					limit = _DEFAULT_MAX_TASKS_PER_ITERATION
+					limit = defaultMaxTasksPerIteration
 				}
 
 				workflows, err := retryWithResult(rt.ctx, func() ([]dequeuedWorkflow, error) {
@@ -169,7 +183,7 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 					}
 				}
 			}
-		}
+		}()
 
 		// Wait for enqueue event or shutdown
 		enqueueCh := rt.systemDB.waitForEnqueue(rt.drainCtx, queue.Name)
@@ -179,7 +193,7 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 			queueLogger.Debug("queue goroutine stopping", "cause", "draining")
 			return
 		case <-enqueueCh:
-			// Workflow enqueued — immediately dequeue
+			// Workflow enqueued, immediately dequeue
 		}
 	}
 }
@@ -199,7 +213,7 @@ func newWorkflowQueue(rt *Runtime, name string, options ...QueueOption) Workflow
 
 	q := WorkflowQueue{
 		Name:                 name,
-		MaxTasksPerIteration: _DEFAULT_MAX_TASKS_PER_ITERATION,
+		MaxTasksPerIteration: defaultMaxTasksPerIteration,
 	}
 	for _, opt := range options {
 		opt(&q)
