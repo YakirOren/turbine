@@ -7,7 +7,6 @@ import (
 	"math"
 	"reflect"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"time"
 
@@ -386,15 +385,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 
 		cronJobID := fmt.Sprintf("pt_sched_%s", customName)
 		if err := rt.app.Cron().Add(cronJobID, regOpts.cronSchedule, func() {
-			defer func() {
-				if r := recover(); r != nil {
-					rt.app.Logger().Error("cron schedule panicked",
-						"fqn", fqn,
-						"panic", r,
-						"stack", string(debug.Stack()),
-						"source", "system")
-				}
-			}()
+			defer recoverGoroutine(rt.app.Logger(), "cron schedule panicked", "fqn", fqn)
 			if !rt.launched.Load() {
 				return
 			}
@@ -613,12 +604,22 @@ func runWorkflowInternal(rt *Runtime, fn workflowFunc, input any, opts ...Workfl
 				return
 			}
 			panicMsg := fmt.Sprintf("workflow panicked: %v", r)
-			rt.app.Logger().Error("workflow goroutine panicked",
+			logPanic(rt.app.Logger(), r, "workflow goroutine panicked",
 				"workflow_id", workflowID,
-				"name", params.WorkflowName,
-				"panic", r,
-				"stack", string(debug.Stack()),
-				"source", "system")
+				"name", params.WorkflowName)
+			// Reset the user-set app status so the dashboard does not keep
+			// showing the pre-panic label (e.g. "running") next to a failed row.
+			// Order matters: write the app status BEFORE the outcome so a poller
+			// reading mid-write never sees ERROR paired with a stale "running"
+			// badge. The intermediate state is "still PENDING with new badge"
+			// which is harmless.
+			_ = retry(rt.ctx, func() error {
+				return rt.systemDB.updateAppStatus(rt.ctx, updateAppStatusDBInput{
+					workflowID:     workflowID,
+					appStatus:      "panicked",
+					appStatusColor: "red",
+				})
+			}, withRetrierLogger(rt.app.Logger()))
 			_ = retry(rt.ctx, func() error {
 				return rt.systemDB.updateWorkflowOutcome(rt.ctx, updateWorkflowOutcomeDBInput{
 					workflowID: workflowID,
@@ -945,15 +946,14 @@ func DoAsync[R any](ctx Context, fn Step[R], opts ...StepOption) (chan AsyncResu
 	go func() {
 		defer close(ch)
 		defer func() {
-			if r := recover(); r != nil {
-				if rt != nil && rt.app != nil {
-					rt.app.Logger().Error("DoAsync goroutine panicked",
-						"panic", r,
-						"stack", string(debug.Stack()),
-						"source", "system")
-				}
-				ch <- AsyncResult[R]{Err: fmt.Errorf("DoAsync panicked: %v", r)}
+			r := recover()
+			if r == nil {
+				return
 			}
+			if rt != nil && rt.app != nil {
+				logPanic(rt.app.Logger(), r, "DoAsync goroutine panicked")
+			}
+			ch <- AsyncResult[R]{Err: fmt.Errorf("DoAsync panicked: %v", r)}
 		}()
 		res, err := Do(ctx, fn, opts...)
 		ch <- AsyncResult[R]{Result: res, Err: err}
@@ -976,16 +976,14 @@ func Send(ctx Context, destinationID string, message any, topic string) error {
 			return fmt.Errorf("cannot call Send within a step")
 		}
 		_, err = Do(ctx, func(stepCtx context.Context) (any, error) {
-			stepState, _ := stepCtx.Value(workflowStateKey).(*workflowState)
 			in := sendInput{
 				DestinationUUID: destinationID,
 				Topic:           topic,
 				Message:         encoded,
 			}
-			if stepState != nil {
+			if stepState, _ := stepCtx.Value(workflowStateKey).(*workflowState); stepState != nil {
 				in.ProducerWorkflow = stepState.workflowID
 				in.ProducerStepID = int(stepState.stepID.Load())
-				in.HasProducer = true
 			}
 			return nil, rt.systemDB.send(stepCtx, in)
 		}, WithStepName("pt.send"))
@@ -1165,64 +1163,72 @@ func (rt *Runtime) Resume(workflowID string) error {
 	return nil
 }
 
-// ListOption configures a Runtime.List query.
-type ListOption func(*listWorkflowsDBInput)
+// ListOption configures a Runtime.List query. The interface is sealed via the
+// unexported apply method, callers consume options returned by WithStatus,
+// WithLimit, etc., but cannot define their own implementations.
+type ListOption interface {
+	apply(*listWorkflowsDBInput)
+}
+
+type listOptionFunc func(*listWorkflowsDBInput)
+
+func (f listOptionFunc) apply(in *listWorkflowsDBInput) { f(in) }
 
 // WithStatus filters results to workflows in any of the given statuses.
 func WithStatus(statuses ...StatusType) ListOption {
-	return func(o *listWorkflowsDBInput) { o.status = statuses }
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.status = statuses })
 }
 
 // WithWorkflowNames filters results to workflows registered under any of the given names.
 func WithWorkflowNames(names ...string) ListOption {
-	return func(o *listWorkflowsDBInput) { o.workflowName = names }
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.workflowName = names })
 }
 
 // WithExecutorIDs filters results to workflows executed by any of the given executor IDs.
 func WithExecutorIDs(ids ...string) ListOption {
-	return func(o *listWorkflowsDBInput) { o.executorIDs = ids }
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.executorIDs = ids })
 }
 
 // WithApplicationVersions filters results to workflows recorded against any of the given versions.
 func WithApplicationVersions(versions ...string) ListOption {
-	return func(o *listWorkflowsDBInput) { o.applicationVersion = versions }
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.applicationVersion = versions })
 }
 
 // WithWorkflowIDs filters results to workflows with any of the given IDs.
 func WithWorkflowIDs(ids ...string) ListOption {
-	return func(o *listWorkflowsDBInput) { o.workflowIDs = ids }
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.workflowIDs = ids })
 }
 
 // WithLimit caps the number of results returned. A value of zero means no limit.
 func WithLimit(n int) ListOption {
-	return func(o *listWorkflowsDBInput) { o.limit = n }
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.limit = n })
 }
 
 // WithLoadInput populates Status.Input for each returned row. Off by default for efficiency.
 func WithLoadInput() ListOption {
-	return func(o *listWorkflowsDBInput) { o.loadInput = true }
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.loadInput = true })
 }
 
 // WithSortAscending sorts results by creation time ascending. Default is descending.
 func WithSortAscending() ListOption {
-	return func(o *listWorkflowsDBInput) { o.sortAscending = true }
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.sortAscending = true })
 }
 
 // WithCreatedBefore filters results to workflows created strictly before t.
 func WithCreatedBefore(t time.Time) ListOption {
-	return func(o *listWorkflowsDBInput) { o.createdBefore = &t }
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.createdBefore = &t })
 }
 
 // WithCreatedAfter filters results to workflows created strictly after t.
 func WithCreatedAfter(t time.Time) ListOption {
-	return func(o *listWorkflowsDBInput) { o.createdAfter = &t }
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.createdAfter = &t })
 }
 
 // List returns workflows matching the given filters.
 func (rt *Runtime) List(opts ...ListOption) ([]Status, error) {
 	var input listWorkflowsDBInput
 	for _, o := range opts {
-		o(&input)
+		o.apply(&input)
 	}
 	return retryWithResult(rt.ctx, func() ([]Status, error) {
 		return rt.systemDB.listWorkflows(rt.ctx, input)

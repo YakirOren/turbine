@@ -33,6 +33,26 @@ const (
 	StatusWaitingForApproval          StatusType = "WAITING_FOR_APPROVAL"
 )
 
+// IsTerminal reports whether the status is a final state, the workflow will
+// not progress further on its own.
+func (s StatusType) IsTerminal() bool {
+	switch s {
+	case StatusSuccess, StatusError, StatusCancelled, StatusMaxRecoveryAttemptsExceeded:
+		return true
+	}
+	return false
+}
+
+// IsTerminalFailure reports whether the status is a terminal failure state.
+// Success workflows are terminal but not failed, this returns false for them.
+func (s StatusType) IsTerminalFailure() bool {
+	switch s {
+	case StatusError, StatusCancelled, StatusMaxRecoveryAttemptsExceeded:
+		return true
+	}
+	return false
+}
+
 // Status contains information about a workflow's current state.
 type Status struct {
 	ID                 string        `json:"workflow_id"`
@@ -218,17 +238,17 @@ type stepInfo struct {
 
 // sendInput is the input for sending a notification to a workflow.
 //
-// ProducerWorkflowID + ProducerStepID, when non-empty, form an idempotency key
-// so a step that crashes mid-Send and replays on recovery does not deliver the
-// message twice. Direct (non-step) Send leaves both empty and falls back to a
-// random row id, the producer is responsible for at-most-once semantics in that case.
+// ProducerWorkflow + ProducerStepID, when ProducerWorkflow is non-empty, form
+// an idempotency key so a step that crashes mid-Send and replays on recovery
+// does not deliver the message twice. Direct (non-step) Send leaves
+// ProducerWorkflow empty and falls back to a random row id, the producer is
+// responsible for at-most-once semantics in that case.
 type sendInput struct {
-	DestinationUUID   string
-	Topic             string
-	Message           *string
-	ProducerWorkflow  string
-	ProducerStepID    int
-	HasProducer       bool
+	DestinationUUID  string
+	Topic            string
+	Message          *string
+	ProducerWorkflow string
+	ProducerStepID   int
 }
 
 type recvInput struct {

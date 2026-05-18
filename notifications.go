@@ -2,9 +2,7 @@ package turbine
 
 import (
 	"fmt"
-	"net"
 	"net/url"
-	"runtime/debug"
 
 	"github.com/nicholas-fedor/shoutrrr"
 	"github.com/pocketbase/dbx"
@@ -50,18 +48,11 @@ func (rt *Runtime) dispatchNotifications(workflowID, name string, status StatusT
 		}
 
 		go func(rawURL string) {
-			defer func() {
-				if r := recover(); r != nil {
-					rt.app.Logger().Error("notification goroutine panicked",
-						"service", extractScheme(rawURL),
-						"panic", r,
-						"stack", string(debug.Stack()),
-						"source", "system")
-				}
-			}()
+			scheme := extractScheme(rawURL)
+			defer recoverGoroutine(rt.app.Logger(), "notification goroutine panicked", "service", scheme)
 			if err := shoutrrr.Send(rawURL, message); err != nil {
 				rt.app.Logger().Error("notification delivery failed",
-					"service", extractScheme(rawURL),
+					"service", scheme,
 					"error", err,
 					"source", "system",
 				)
@@ -118,14 +109,7 @@ func validateShoutrrrSSRF(rawURL string) error {
 	if host == "" {
 		return fmt.Errorf("generic:// URL must have a host")
 	}
-	if ip := net.ParseIP(host); ip != nil && isPrivateOrLoopbackIP(ip) {
-		return errPrivateAddress
-	}
-	switch host {
-	case "localhost", "ip6-localhost", "ip6-loopback":
-		return errPrivateAddress
-	}
-	return nil
+	return rejectPrivateHost(host)
 }
 
 // SendNotification sends a custom message to the alert channel matching name.

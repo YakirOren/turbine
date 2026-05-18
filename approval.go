@@ -13,6 +13,12 @@ type ApprovalResult struct {
 
 const approvalTopic = "pt.approval"
 
+// AppStatusWaitingForApproval is the app_status value set on a workflow while
+// it is blocked inside WaitForApproval. Exported so external packages (the
+// dashboard, custom UIs) can match against the same string without duplicating
+// the literal.
+const AppStatusWaitingForApproval = "waiting for approval"
+
 // maxApprovalWait is used when no timeout is specified. Recv requires a positive
 // duration (zero means "don't wait"), so we use a very large value to simulate
 // indefinite blocking.
@@ -49,7 +55,7 @@ func WaitForApproval(ctx Context, opts ...ApprovalOption) (ApprovalResult, error
 		timeout = maxApprovalWait
 	}
 
-	ctx.SetAppStatus("waiting for approval", "yellow")
+	ctx.SetAppStatus(AppStatusWaitingForApproval, "yellow")
 
 	rt := runtimeFromContext(ctx)
 	wfState, _ := ctx.Value(workflowStateKey).(*workflowState)

@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hashicorp/go-retryablehttp"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -67,6 +68,10 @@ type Runtime struct {
 	webhookCache      atomic.Value // []cachedWebhook
 	alertChannelCache atomic.Value // []cachedAlertChannel
 
+	// Shared retryable HTTP client for webhook delivery. Built once so the
+	// underlying http.Transport's connection pool is reused across dispatches.
+	webhookClient *retryablehttp.Client
+
 	productSender ProductSender
 }
 
@@ -122,6 +127,7 @@ func NewRuntime(app core.App, config Config) *Runtime {
 	rt.queueRunner = newQueueRunner()
 	newWorkflowQueue(rt, ptInternalQueueName)
 	rt.scheduleManager = newScheduleManager()
+	rt.webhookClient = rt.newWebhookClient()
 
 	return rt
 }

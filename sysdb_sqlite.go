@@ -872,7 +872,7 @@ func (s *sqliteSysDB) send(ctx context.Context, input sendInput) error {
 	// (producer_workflow, producer_step) so step replay after crash does not
 	// re-insert the message. ON CONFLICT DO NOTHING makes the insert idempotent.
 	var msgID string
-	if input.HasProducer {
+	if input.ProducerWorkflow != "" {
 		msgID = fmt.Sprintf("snd_%s_%d", input.ProducerWorkflow, input.ProducerStepID)
 	} else {
 		msgID = core.GenerateDefaultRandomId()

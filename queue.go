@@ -1,7 +1,6 @@
 package turbine
 
 import (
-	"runtime/debug"
 	"sync"
 )
 
@@ -112,14 +111,7 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 		}
 
 		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					queueLogger.Error("queue iteration panicked",
-						"panic", r,
-						"stack", string(debug.Stack()),
-						"source", "system")
-				}
-			}()
+			defer recoverGoroutine(queueLogger, "queue iteration panicked")
 
 			skipDequeue := false
 

@@ -115,6 +115,10 @@ type NotifyInput struct {
 	Urgent  bool   `json:"urgent"`
 }
 
+type PanicInput struct {
+	Where string `json:"where"` // "in_step", "after_step", "before_step"
+}
+
 // --- Workflows ---
 
 // SMSWorkflow sends an SMS. Enqueued via the "sms" partition queue.
@@ -344,6 +348,42 @@ func DeployWorkflow(ctx turbine.Context, input DeployInput) (string, error) {
 	return result, nil
 }
 
+// PanicWorkflow demonstrates panic recovery. The workflow goroutine's defer
+// catches the panic, marks the workflow ERROR with the panic message, and
+// emits a stack trace to the system logs. Pick "where" to compare:
+//
+//   - before_step: workflow body panics before any step runs. No step rows.
+//   - in_step: panic inside a step. Leaves an orphan step row (started_at set,
+//     ended_at = 0) that GC eventually reaps with the workflow.
+//   - after_step: one step completes and is checkpointed, then the workflow
+//     body panics. Step row is terminal SUCCESS, workflow is ERROR.
+func PanicWorkflow(ctx turbine.Context, input PanicInput) (string, error) {
+	ctx.SetAppStatus("running", "blue")
+
+	if input.Where == "before_step" {
+		panic("demo: workflow panicked before any step ran")
+	}
+
+	result, err := turbine.Do(ctx, func(ctx context.Context) (string, error) {
+		logger := turbine.LoggerFrom(ctx)
+		logger.Info("step running, will it panic?", "where", input.Where)
+		time.Sleep(1 * time.Second)
+		if input.Where == "in_step" {
+			panic("demo: step panicked mid-execution")
+		}
+		return "step completed normally", nil
+	}, turbine.WithStepName("maybe-panic"))
+	if err != nil {
+		return "", err
+	}
+
+	if input.Where == "after_step" {
+		panic("demo: workflow panicked after step completed and checkpointed")
+	}
+
+	return result, nil
+}
+
 // NotifyWorkflow sends a notification to a channel.
 func NotifyWorkflow(ctx turbine.Context, input NotifyInput) (string, error) {
 	logger := ctx.Logger()
@@ -410,6 +450,20 @@ func main() {
 				{"name": "regions", "type": "multiselect", "label": "Regions", "options": []string{"us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1"}},
 				{"name": "version", "type": "string", "label": "Version", "required": true, "placeholder": "v1.2.3"},
 				{"name": "dry_run", "type": "boolean", "label": "Dry Run"},
+			},
+		}),
+	)
+
+	turbine.Register(rt, PanicWorkflow,
+		turbine.WithName("panic-demo"),
+		turbine.WithDashboardTrigger(),
+		turbine.WithTags("demo", "panic"),
+		turbine.WithSummaryFunc(func(in PanicInput) string {
+			return fmt.Sprintf("Panic %s", in.Where)
+		}),
+		turbine.WithInputSchema(map[string]any{
+			"fields": []map[string]any{
+				{"name": "where", "type": "select", "label": "Where to panic", "required": true, "options": []string{"in_step", "after_step", "before_step"}},
 			},
 		}),
 	)

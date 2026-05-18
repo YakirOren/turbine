@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
-	"runtime/debug"
 	"sync"
 	"time"
 
@@ -35,16 +34,8 @@ func (sm *scheduleManager) registerOnce(rt *Runtime, recordID string, fqn string
 	sm.mu.Unlock()
 
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				rt.app.Logger().Error("one-time schedule goroutine panicked",
-					"record_id", recordID,
-					"fqn", fqn,
-					"panic", r,
-					"stack", string(debug.Stack()),
-					"source", "system")
-			}
-		}()
+		defer recoverGoroutine(rt.app.Logger(), "one-time schedule goroutine panicked",
+			"record_id", recordID, "fqn", fqn)
 		timer := time.NewTimer(delay)
 		defer timer.Stop()
 		select {
@@ -77,16 +68,8 @@ func (sm *scheduleManager) registerOnce(rt *Runtime, recordID string, fqn string
 func (sm *scheduleManager) registerCron(rt *Runtime, recordID string, fqn string, rawInput json.RawMessage, cronExpr string, jitter time.Duration) error {
 	cronJobID := fmt.Sprintf("pt_ui_sched_%s", recordID)
 	return rt.app.Cron().Add(cronJobID, cronExpr, func() {
-		defer func() {
-			if r := recover(); r != nil {
-				rt.app.Logger().Error("cron schedule goroutine panicked",
-					"record_id", recordID,
-					"fqn", fqn,
-					"panic", r,
-					"stack", string(debug.Stack()),
-					"source", "system")
-			}
-		}()
+		defer recoverGoroutine(rt.app.Logger(), "cron schedule goroutine panicked",
+			"record_id", recordID, "fqn", fqn)
 		if !rt.launched.Load() {
 			return
 		}

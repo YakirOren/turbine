@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"runtime/debug"
 	"strings"
 	"time"
 
@@ -78,6 +77,20 @@ func isPrivateOrLoopbackIP(ip net.IP) bool {
 	return false
 }
 
+// rejectPrivateHost returns errPrivateAddress if host is an IP literal in a
+// private/loopback range or a well-known DNS alias for loopback. Shared between
+// http(s) webhook URLs and shoutrrr generic:// alert-channel URLs.
+func rejectPrivateHost(host string) error {
+	if ip := net.ParseIP(host); ip != nil && isPrivateOrLoopbackIP(ip) {
+		return errPrivateAddress
+	}
+	switch strings.ToLower(host) {
+	case "localhost", "ip6-localhost", "ip6-loopback":
+		return errPrivateAddress
+	}
+	return nil
+}
+
 // validateOutboundURL parses a URL, requires http/https, and rejects hosts
 // whose IP literal is private/loopback. DNS-resolved hostnames are validated
 // at dial time by checkOutboundAddr below; this catches the obvious "http://127.0.0.1/" case
@@ -94,15 +107,7 @@ func validateOutboundURL(rawURL string) error {
 	if host == "" {
 		return fmt.Errorf("invalid URL: host is empty")
 	}
-	if ip := net.ParseIP(host); ip != nil && isPrivateOrLoopbackIP(ip) {
-		return errPrivateAddress
-	}
-	// Reject obvious DNS aliases for loopback. DNS-level rebinding is caught at dial time.
-	switch strings.ToLower(host) {
-	case "localhost", "ip6-localhost", "ip6-loopback":
-		return errPrivateAddress
-	}
-	return nil
+	return rejectPrivateHost(host)
 }
 
 // checkOutboundAddr is plugged into http.Transport.DialContext to reject
@@ -198,7 +203,7 @@ func (rt *Runtime) dispatchWebhooks(workflowID, name string, status StatusType, 
 		return
 	}
 
-	client := rt.newWebhookClient()
+	client := rt.webhookClient
 
 	for _, wh := range webhooks {
 		if !matchesEvent(wh.events, eventName) {
@@ -206,15 +211,7 @@ func (rt *Runtime) dispatchWebhooks(workflowID, name string, status StatusType, 
 		}
 
 		go func(url, secret string) {
-			defer func() {
-				if r := recover(); r != nil {
-					rt.app.Logger().Error("webhook goroutine panicked",
-						"url", url,
-						"panic", r,
-						"stack", string(debug.Stack()),
-						"source", "system")
-				}
-			}()
+			defer recoverGoroutine(rt.app.Logger(), "webhook goroutine panicked", "url", url)
 			if !rt.config.AllowPrivateAddresses {
 				if err := validateOutboundURL(url); err != nil {
 					rt.app.Logger().Warn("webhook delivery refused", "url", url, "error", err)
