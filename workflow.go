@@ -20,25 +20,21 @@ var workflowStateKey = workflowStateKeyType{}
 // Workflow is a type-safe workflow function.
 type Workflow[P any, R any] func(ctx Context, input P) (R, error)
 
-// WorkflowFunc is a type-erased workflow function used internally.
-type WorkflowFunc func(ctx Context, input any) (any, error)
+// workflowFunc is a type-erased workflow function used internally.
+type workflowFunc func(ctx Context, input any) (any, error)
 
 // Step is a function executed as a durable step within a workflow.
 // Steps are automatically recorded and replayed during recovery.
 type Step[R any] func(ctx context.Context) (R, error)
 
-// StepFunc is a type-erased step function.
-type StepFunc func(ctx context.Context) (any, error)
+// stepFunc is a type-erased step function.
+type stepFunc func(ctx context.Context) (any, error)
 
-// AsyncResult holds the result and error from a concurrent step started with Go.
+// AsyncResult holds the result and error from a concurrent step started with DoAsync.
 type AsyncResult[R any] struct {
 	Result R
 	Err    error
 }
-
-/********************************/
-/******* WORKFLOW OPTIONS *******/
-/********************************/
 
 type workflowOptions struct {
 	WorkflowName        string
@@ -205,10 +201,6 @@ func WithHandlePollingInterval(interval time.Duration) GetResultOption {
 	}
 }
 
-/***************************************/
-/******* WORKFLOW REGISTRATION ********/
-/***************************************/
-
 const defaultMaxRecoveryAttempts = 100
 
 type wrappedWorkflowFunc func(rt *Runtime, input any, opts ...WorkflowOption) (Handle[any], error)
@@ -248,7 +240,7 @@ func WithName(name string) WorkflowRegistrationOption {
 }
 
 // WithSchedule registers the workflow as a scheduled workflow using cron syntax.
-// Scheduled workflows must accept time.Time as input — they receive the scheduled execution time.
+// Scheduled workflows must accept time.Time as input, they receive the scheduled execution time.
 func WithSchedule(cronExpr string) WorkflowRegistrationOption {
 	return func(p *workflowRegistrationOptions) { p.cronSchedule = cronExpr }
 }
@@ -337,7 +329,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 	fqn := resolveWorkflowFunctionName(fn)
 
 	// Type-erased wrapper for recovery and queue runner
-	typedErasedWF := WorkflowFunc(func(ctx Context, input any) (any, error) {
+	typedErasedWF := workflowFunc(func(ctx Context, input any) (any, error) {
 		var encodedInput *string
 		if input != nil {
 			var ok bool
@@ -393,6 +385,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 
 		cronJobID := fmt.Sprintf("pt_sched_%s", customName)
 		if err := rt.app.Cron().Add(cronJobID, regOpts.cronSchedule, func() {
+			defer recoverGoroutine(rt.app.Logger(), "cron schedule panicked", "fqn", fqn)
 			if !rt.launched.Load() {
 				return
 			}
@@ -414,15 +407,11 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 	}
 }
 
-/**********************************/
-/******* RUN WORKFLOW ********/
-/**********************************/
-
 // Run starts a typed workflow. Returns a handle to get the result.
 func Run[P any, R any](rt *Runtime, fn Workflow[P, R], input P, opts ...WorkflowOption) (Handle[R], error) {
 	opts = append(opts, withWorkflowName(resolveWorkflowFunctionName(fn)))
 
-	typedErasedWF := WorkflowFunc(func(ctx Context, inputAny any) (any, error) {
+	typedErasedWF := workflowFunc(func(ctx Context, inputAny any) (any, error) {
 		return fn(ctx, inputAny.(P))
 	})
 
@@ -460,7 +449,7 @@ func Run[P any, R any](rt *Runtime, fn Workflow[P, R], input P, opts ...Workflow
 }
 
 // runWorkflowInternal is the core workflow execution logic.
-func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...WorkflowOption) (Handle[any], error) {
+func runWorkflowInternal(rt *Runtime, fn workflowFunc, input any, opts ...WorkflowOption) (Handle[any], error) {
 	params := workflowOptions{ApplicationVersion: rt.applicationVersion}
 	for _, opt := range opts {
 		opt(&params)
@@ -609,9 +598,44 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 		rt.activeWorkflowIDs.Store(workflowID, struct{}{})
 		defer rt.activeWorkflowIDs.Delete(workflowID)
 
+		defer func() {
+			r := recover()
+			if r == nil {
+				return
+			}
+			panicMsg := fmt.Sprintf("workflow panicked: %v", r)
+			logPanic(rt.app.Logger(), r, "workflow goroutine panicked",
+				"workflow_id", workflowID,
+				"name", params.WorkflowName)
+			// Reset the user-set app status so the dashboard does not keep
+			// showing the pre-panic label (e.g. "running") next to a failed row.
+			// Order matters: write the app status BEFORE the outcome so a poller
+			// reading mid-write never sees ERROR paired with a stale "running"
+			// badge. The intermediate state is "still PENDING with new badge"
+			// which is harmless.
+			_ = retry(rt.ctx, func() error {
+				return rt.systemDB.updateAppStatus(rt.ctx, updateAppStatusDBInput{
+					workflowID:     workflowID,
+					appStatus:      "panicked",
+					appStatusColor: "red",
+				})
+			}, withRetrierLogger(rt.app.Logger()))
+			_ = retry(rt.ctx, func() error {
+				return rt.systemDB.updateWorkflowOutcome(rt.ctx, updateWorkflowOutcomeDBInput{
+					workflowID: workflowID,
+					status:     StatusError,
+					output:     nil,
+					errorMsg:   &panicMsg,
+				})
+			}, withRetrierLogger(rt.app.Logger()))
+			go rt.dispatchEvent(workflowID, params.WorkflowName, StatusError, nil, &panicMsg)
+			outcomeChan <- workflowOutcome[any]{err: errors.New(panicMsg)}
+			close(outcomeChan)
+		}()
+
 		result, fnErr := fn(wfCtx, input)
 
-		// Handle workflow ID conflict — another goroutine owns this workflow ID.
+		// Handle workflow ID conflict, another goroutine owns this workflow ID.
 		// Wait for the existing workflow to complete and return its result.
 		if errors.Is(fnErr, &Error{Code: ErrConflictingID}) {
 			rt.app.Logger().Warn("workflow ID conflict, waiting for existing workflow", "workflow_id", workflowID)
@@ -672,14 +696,10 @@ func runWorkflowInternal(rt *Runtime, fn WorkflowFunc, input any, opts ...Workfl
 	}, nil
 }
 
-/******************************/
-/******* STEP EXECUTION *******/
-/******************************/
-
 const (
-	_DEFAULT_STEP_BASE_INTERVAL  = 100 * time.Millisecond
-	_DEFAULT_STEP_MAX_INTERVAL   = 5 * time.Second
-	_DEFAULT_STEP_BACKOFF_FACTOR = 2.0
+	defaultStepBaseInterval  = 100 * time.Millisecond
+	defaultStepMaxInterval   = 5 * time.Second
+	defaultStepBackoffFactor = 2.0
 )
 
 type stepOptions struct {
@@ -694,13 +714,13 @@ type stepOptions struct {
 
 func (opts *stepOptions) setDefaults() {
 	if opts.backoffFactor == 0 {
-		opts.backoffFactor = _DEFAULT_STEP_BACKOFF_FACTOR
+		opts.backoffFactor = defaultStepBackoffFactor
 	}
 	if opts.baseInterval == 0 {
-		opts.baseInterval = _DEFAULT_STEP_BASE_INTERVAL
+		opts.baseInterval = defaultStepBaseInterval
 	}
 	if opts.maxInterval == 0 {
-		opts.maxInterval = _DEFAULT_STEP_MAX_INTERVAL
+		opts.maxInterval = defaultStepMaxInterval
 	}
 }
 
@@ -731,7 +751,7 @@ func WithMaxInterval(interval time.Duration) StepOption {
 	return func(opts *stepOptions) { opts.maxInterval = interval }
 }
 
-func WithNextStepID(stepID int) StepOption {
+func withNextStepID(stepID int) StepOption {
 	return func(opts *stepOptions) { opts.preStepID = &stepID }
 }
 
@@ -748,7 +768,7 @@ func Do[R any](ctx Context, fn Step[R], opts ...StepOption) (R, error) {
 	stepName := runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
 	opts = append(opts, WithStepName(stepName))
 
-	typeErased := StepFunc(func(ctx context.Context) (any, error) { return fn(ctx) })
+	typeErased := stepFunc(func(ctx context.Context) (any, error) { return fn(ctx) })
 
 	result, err := runAsStepInternal(ctx, rt, typeErased, opts...)
 	if result == nil {
@@ -774,7 +794,7 @@ type stepCheckpointedOutcome struct {
 	value any
 }
 
-func runAsStepInternal(ctx context.Context, rt *Runtime, fn StepFunc, opts ...StepOption) (any, error) {
+func runAsStepInternal(ctx context.Context, rt *Runtime, fn stepFunc, opts ...StepOption) (any, error) {
 	stepOpts := &stepOptions{}
 	for _, opt := range opts {
 		opt(stepOpts)
@@ -817,7 +837,7 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn StepFunc, opts ...St
 			return stepCheckpointedOutcome{value: recorded.output}, stepErr
 		}
 
-		// Clear recovering flag — we've passed replay and are executing new steps
+		// Clear recovering flag, we've passed replay and are executing new steps
 		wfState.recovering = false
 	}
 
@@ -919,20 +939,27 @@ func DoAsync[R any](ctx Context, fn Step[R], opts ...StepOption) (chan AsyncResu
 	if !ok || wfState == nil {
 		return nil, fmt.Errorf("doAsync must be called within a workflow")
 	}
-	opts = append(opts, WithNextStepID(wfState.nextStepID()))
+	opts = append(opts, withNextStepID(wfState.nextStepID()))
 
 	ch := make(chan AsyncResult[R], 1)
+	rt := runtimeFromContext(ctx)
 	go func() {
 		defer close(ch)
+		defer func() {
+			r := recover()
+			if r == nil {
+				return
+			}
+			if rt != nil && rt.app != nil {
+				logPanic(rt.app.Logger(), r, "DoAsync goroutine panicked")
+			}
+			ch <- AsyncResult[R]{Err: fmt.Errorf("DoAsync panicked: %v", r)}
+		}()
 		res, err := Do(ctx, fn, opts...)
 		ch <- AsyncResult[R]{Result: res, Err: err}
 	}()
 	return ch, nil
 }
-
-/*****************************************/
-/******* WORKFLOW COMMUNICATIONS *********/
-/*****************************************/
 
 // Send sends a message to another workflow.
 func Send(ctx Context, destinationID string, message any, topic string) error {
@@ -948,18 +975,23 @@ func Send(ctx Context, destinationID string, message any, topic string) error {
 		if wfState.isWithinStep {
 			return fmt.Errorf("cannot call Send within a step")
 		}
-		_, err = Do(ctx, func(ctx context.Context) (any, error) {
-			return nil, rt.systemDB.send(ctx, SendInput{
+		_, err = Do(ctx, func(stepCtx context.Context) (any, error) {
+			in := sendInput{
 				DestinationUUID: destinationID,
 				Topic:           topic,
 				Message:         encoded,
-			})
+			}
+			if stepState, _ := stepCtx.Value(workflowStateKey).(*workflowState); stepState != nil {
+				in.ProducerWorkflow = stepState.workflowID
+				in.ProducerStepID = int(stepState.stepID.Load())
+			}
+			return nil, rt.systemDB.send(stepCtx, in)
 		}, WithStepName("pt.send"))
 		return err
 	}
 
 	return retry(ctx, func() error {
-		return rt.systemDB.send(ctx, SendInput{
+		return rt.systemDB.send(ctx, sendInput{
 			DestinationUUID: destinationID,
 			Topic:           topic,
 			Message:         encoded,
@@ -1008,7 +1040,7 @@ func SetValue(ctx Context, key string, value any) error {
 	}
 
 	_, err = Do(ctx, func(ctx context.Context) (any, error) {
-		return nil, rt.systemDB.setEvent(ctx, SetValueInput{
+		return nil, rt.systemDB.setEvent(ctx, setValueInput{
 			WorkflowUUID: wfState.workflowID,
 			Key:          key,
 			Value:        encoded,
@@ -1082,10 +1114,6 @@ func Pause(ctx Context, duration time.Duration) error {
 	return nil
 }
 
-/****************************************/
-/******* WORKFLOW MANAGEMENT ***********/
-/****************************************/
-
 // Retrieve returns a handle to an existing workflow.
 func Retrieve[R any](rt *Runtime, workflowID string) Handle[R] {
 	return &workflowPollingHandle[R]{baseHandle: baseHandle{workflowID: workflowID, runtime: rt}}
@@ -1135,8 +1163,73 @@ func (rt *Runtime) Resume(workflowID string) error {
 	return nil
 }
 
+// ListOption configures a Runtime.List query. The interface is sealed via the
+// unexported apply method, callers consume options returned by WithStatus,
+// WithLimit, etc., but cannot define their own implementations.
+type ListOption interface {
+	apply(*listWorkflowsDBInput)
+}
+
+type listOptionFunc func(*listWorkflowsDBInput)
+
+func (f listOptionFunc) apply(in *listWorkflowsDBInput) { f(in) }
+
+// WithStatus filters results to workflows in any of the given statuses.
+func WithStatus(statuses ...StatusType) ListOption {
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.status = statuses })
+}
+
+// WithWorkflowNames filters results to workflows registered under any of the given names.
+func WithWorkflowNames(names ...string) ListOption {
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.workflowName = names })
+}
+
+// WithExecutorIDs filters results to workflows executed by any of the given executor IDs.
+func WithExecutorIDs(ids ...string) ListOption {
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.executorIDs = ids })
+}
+
+// WithApplicationVersions filters results to workflows recorded against any of the given versions.
+func WithApplicationVersions(versions ...string) ListOption {
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.applicationVersion = versions })
+}
+
+// WithWorkflowIDs filters results to workflows with any of the given IDs.
+func WithWorkflowIDs(ids ...string) ListOption {
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.workflowIDs = ids })
+}
+
+// WithLimit caps the number of results returned. A value of zero means no limit.
+func WithLimit(n int) ListOption {
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.limit = n })
+}
+
+// WithLoadInput populates Status.Input for each returned row. Off by default for efficiency.
+func WithLoadInput() ListOption {
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.loadInput = true })
+}
+
+// WithSortAscending sorts results by creation time ascending. Default is descending.
+func WithSortAscending() ListOption {
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.sortAscending = true })
+}
+
+// WithCreatedBefore filters results to workflows created strictly before t.
+func WithCreatedBefore(t time.Time) ListOption {
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.createdBefore = &t })
+}
+
+// WithCreatedAfter filters results to workflows created strictly after t.
+func WithCreatedAfter(t time.Time) ListOption {
+	return listOptionFunc(func(o *listWorkflowsDBInput) { o.createdAfter = &t })
+}
+
 // List returns workflows matching the given filters.
-func (rt *Runtime) List(input listWorkflowsDBInput) ([]Status, error) {
+func (rt *Runtime) List(opts ...ListOption) ([]Status, error) {
+	var input listWorkflowsDBInput
+	for _, o := range opts {
+		o.apply(&input)
+	}
 	return retryWithResult(rt.ctx, func() ([]Status, error) {
 		return rt.systemDB.listWorkflows(rt.ctx, input)
 	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))

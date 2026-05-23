@@ -226,7 +226,7 @@ function StepFlowContent({ workflowId }: { workflowId: string }) {
         refetchInterval: isTerminal ? false : 2000,
     });
 
-    // Polling stops the moment the workflow goes terminal — refetch once more
+    // Polling stops the moment the workflow goes terminal, refetch once more
     // in case the final step's completion landed between polls.
     useRefetchOnTerminal(stepsQuery.refetch, isTerminal);
 
@@ -855,7 +855,7 @@ function WorkflowLogs({
         initialPageParam: undefined,
         getNextPageParam: (lastPage): string | undefined =>
             lastPage.length === LOG_PAGE_SIZE ? lastPage[lastPage.length - 1].created : undefined,
-        // Pause polling once the user has loaded older pages — otherwise every tick
+        // Pause polling once the user has loaded older pages, otherwise every tick
         // refetches every loaded page sequentially (TanStack v5 refetches all pages).
         refetchInterval: (query) => {
             if (TERMINAL_STATUSES.has(status)) return false;

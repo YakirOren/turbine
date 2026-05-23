@@ -115,7 +115,7 @@ func TestBuildStepsTree_ErrorStatus(t *testing.T) {
 }
 
 func TestBuildStepsTree_DoAsyncParallel(t *testing.T) {
-	// Simulates: validate → (charge || inventory) → reserve → (ship || confirm)
+	// Simulates: validate -> (charge || inventory) -> reserve -> (ship || confirm)
 	steps := []stepRow{
 		{FunctionID: 0, FunctionName: "validate", StartedAtMs: 0, EndedAtMs: 100},
 		{FunctionID: 1, FunctionName: "charge", StartedAtMs: 100, EndedAtMs: 300},
@@ -128,10 +128,10 @@ func TestBuildStepsTree_DoAsyncParallel(t *testing.T) {
 	_, edges := buildStepsTree(steps, "SUCCESS", "")
 
 	// Expected edges:
-	// 0→1, 0→2 (parallel group 1)
-	// 1→3, 2→3 (converge to reserve)
-	// 3→4, 3→5 (parallel group 2)
-	// 4→result, 5→result (end)
+	// 0->1, 0->2 (parallel group 1)
+	// 1->3, 2->3 (converge to reserve)
+	// 3->4, 3->5 (parallel group 2)
+	// 4->result, 5->result (end)
 	if len(edges) != 8 {
 		t.Fatalf("expected 8 edges, got %d: %+v", len(edges), edges)
 	}
@@ -158,7 +158,7 @@ func TestBuildStepsTree_RealWorldDoAsync(t *testing.T) {
 
 	_, edges := buildStepsTree(steps, "SUCCESS", "")
 
-	// validate → (charge || inventory) → reserve → (ship || confirm) → result
+	// validate -> (charge || inventory) -> reserve -> (ship || confirm) -> result
 	if len(edges) != 8 {
 		t.Fatalf("expected 8 edges, got %d: %+v", len(edges), edges)
 	}
@@ -232,6 +232,6 @@ func TestBuildStepsTree_NoApprovalNodeWhenNotWaiting(t *testing.T) {
 func assertEdge(t *testing.T, edge stepsTreeEdge, source, target string) {
 	t.Helper()
 	if edge.Source != source || edge.Target != target {
-		t.Errorf("expected edge %s→%s, got %s→%s", source, target, edge.Source, edge.Target)
+		t.Errorf("expected edge %s->%s, got %s->%s", source, target, edge.Source, edge.Target)
 	}
 }

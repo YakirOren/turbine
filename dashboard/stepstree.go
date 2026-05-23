@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/YakirOren/turbine"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -94,6 +95,8 @@ func buildStepsTree(steps []stepRow, workflowStatus string, appStatus string) ([
 	nodes := make([]stepsTreeNode, 0, len(steps)+1)
 	edges := make([]stepsTreeEdge, 0, len(steps))
 
+	wfStatus := turbine.StatusType(workflowStatus)
+
 	for _, s := range steps {
 		nodeType := "step"
 		if s.ChildWorkflowID != nil && *s.ChildWorkflowID != "" {
@@ -101,9 +104,15 @@ func buildStepsTree(steps []stepRow, workflowStatus string, appStatus string) ([
 		}
 
 		status := "success"
-		if s.Error != nil && *s.Error != "" {
+		switch {
+		case s.Error != nil && *s.Error != "":
 			status = "error"
-		} else if s.EndedAtMs == 0 {
+		case s.EndedAtMs == 0 && wfStatus.IsTerminalFailure():
+			// Step started but never wrote a result row. Workflow already in a
+			// terminal failure state means the step was abandoned (panic, process
+			// kill, shutdown cancel) and will never resume. Show as failed.
+			status = "error"
+		case s.EndedAtMs == 0:
 			status = "running"
 		}
 
@@ -123,9 +132,10 @@ func buildStepsTree(steps []stepRow, workflowStatus string, appStatus string) ([
 
 	resultNodeID := "result"
 	resultStatus := "success"
-	if workflowStatus == "ERROR" || workflowStatus == "MAX_RECOVERY_ATTEMPTS_EXCEEDED" {
+	switch {
+	case wfStatus.IsTerminalFailure():
 		resultStatus = "error"
-	} else if workflowStatus != "SUCCESS" {
+	case wfStatus != turbine.StatusSuccess:
 		resultStatus = "running"
 	}
 	nodes = append(nodes, stepsTreeNode{
@@ -137,7 +147,7 @@ func buildStepsTree(steps []stepRow, workflowStatus string, appStatus string) ([
 
 	// Track whether we need to inject a synthetic approval node
 	approvalNodeID := ""
-	if appStatus == "waiting for approval" && workflowStatus != "SUCCESS" && workflowStatus != "ERROR" && workflowStatus != "CANCELLED" && workflowStatus != "MAX_RECOVERY_ATTEMPTS_EXCEEDED" {
+	if appStatus == turbine.AppStatusWaitingForApproval && !wfStatus.IsTerminal() {
 		approvalNodeID = "approval-wait"
 		nodes = append(nodes, stepsTreeNode{
 			ID:     approvalNodeID,
@@ -204,7 +214,7 @@ func buildStepsTree(steps []stepRow, workflowStatus string, appStatus string) ([
 				prevSid := strconv.Itoa(prev.FunctionID)
 
 				if prevSequentialID == "" || prevSid == lastSequentialID && prevSequentialID == "" {
-					// Previous step is the very first node — it becomes the parent
+					// Previous step is the very first node, it becomes the parent
 					currentGroup = &group{
 						parentID: prevSid,
 						members:  []string{sid},
@@ -212,7 +222,7 @@ func buildStepsTree(steps []stepRow, workflowStatus string, appStatus string) ([
 					}
 					edges = append(edges, stepsTreeEdge{Source: prevSid, Target: sid})
 				} else {
-					// Previous step is a parallel sibling — rewire it into a group
+					// Previous step is a parallel sibling, rewire it into a group
 					// The step before prev (prevSequentialID) becomes the parent
 					parentID := prevSequentialID
 					currentGroup = &group{
@@ -252,7 +262,7 @@ func buildStepsTree(steps []stepRow, workflowStatus string, appStatus string) ([
 		}
 	}
 
-	// Connect final step(s) to result — or approval node if present
+	// Connect final step(s) to result, or approval node if present
 	finalTarget := resultNodeID
 	if approvalNodeID != "" {
 		finalTarget = approvalNodeID

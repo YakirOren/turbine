@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-// Holds refetch in a ref so the effect depends only on isTerminal — otherwise
+// Holds refetch in a ref so the effect depends only on isTerminal, otherwise
 // the query object's identity changes every render, the effect re-runs, and
 // the cleanup clears the pending delayed refetch before it fires.
 export function useRefetchOnTerminal(

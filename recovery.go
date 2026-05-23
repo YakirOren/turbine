@@ -1,5 +1,30 @@
 package turbine
 
+import (
+	"log/slog"
+	"runtime/debug"
+)
+
+// logPanic logs a captured panic value with a stack trace and source=system tag.
+// Use this when the caller already called recover() and needs the panic value
+// for additional handling (e.g. propagating it on a channel).
+func logPanic(logger *slog.Logger, r any, msg string, fields ...any) {
+	args := make([]any, 0, len(fields)+6)
+	args = append(args, fields...)
+	args = append(args, "panic", r, "stack", string(debug.Stack()), "source", "system")
+	logger.Error(msg, args...)
+}
+
+// recoverGoroutine is the standard defer guard for log-only goroutines. Use
+// `defer recoverGoroutine(logger, "X goroutine panicked", "k", v)`. Sites that
+// need the panic value (workflow main goroutine, DoAsync) inline their own
+// recover and pass r to logPanic.
+func recoverGoroutine(logger *slog.Logger, msg string, fields ...any) {
+	if r := recover(); r != nil {
+		logPanic(logger, r, msg, fields...)
+	}
+}
+
 func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]Handle[any], error) {
 	appVersion := []string{}
 	if rt.applicationVersion != "" {

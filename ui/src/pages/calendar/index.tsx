@@ -39,7 +39,7 @@ function getRangeParams(timeRange: string): { fromMs: number; toMs: number; buck
     case "7d":
       return { fromMs: now - 604800_000, toMs: now, bucketMins: 1440 };
     default: {
-      // "all" — last 6 months
+      // "all", last 6 months
       const to = new Date();
       const from = new Date(to);
       from.setMonth(from.getMonth() - 5);

@@ -52,7 +52,7 @@ func TestValidateAlertChannelRecord(t *testing.T) {
 			rec.Set("url", tc.url)
 			rec.SetRaw("events", tc.events)
 
-			err := validateAlertChannelRecord(rec)
+			err := validateAlertChannelRecord(rec, false)
 			if (err != nil) != tc.wantErr {
 				t.Errorf("validateAlertChannelRecord() error = %v, wantErr = %v", err, tc.wantErr)
 			}
@@ -224,7 +224,7 @@ func TestCancelWorkflowTransitionFlag(t *testing.T) {
 	sysDB, cleanup := setupSysDB(t)
 	defer cleanup()
 
-	// Cancel a PENDING workflow — should transition
+	// Cancel a PENDING workflow, should transition
 	wfID := "wf-cancel-flag-1"
 	input := insertStatusDBInput{status: makeStatus(wfID)}
 	if _, err := sysDB.insertStatus(context.Background(), input); err != nil {
@@ -239,7 +239,7 @@ func TestCancelWorkflowTransitionFlag(t *testing.T) {
 		t.Fatal("expected cancel of PENDING workflow to transition state")
 	}
 
-	// Cancel a non-existent workflow — should return error, changed=false
+	// Cancel a non-existent workflow, should return error, changed=false
 	changed, err = sysDB.cancelWorkflow(context.Background(), cancelWorkflowDBInput{workflowID: "nonexistent"})
 	if err == nil {
 		t.Fatal("expected error for non-existent workflow")

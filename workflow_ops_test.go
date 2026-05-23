@@ -232,7 +232,7 @@ func TestCancelAndResume(t *testing.T) {
 		t.Fatalf("workflow was not cancelled within timeout, got %s", status.Status)
 	}
 
-	// Resume the cancelled workflow — status should move to ENQUEUED
+	// Resume the cancelled workflow, status should move to ENQUEUED
 	if err := rt.Resume("cancel-resume-test"); err != nil {
 		t.Fatalf("resume failed: %v", err)
 	}
@@ -279,9 +279,7 @@ func TestList(t *testing.T) {
 	}
 
 	// List by status
-	results, err := rt.List(listWorkflowsDBInput{
-		status: []StatusType{StatusSuccess},
-	})
+	results, err := rt.List(WithStatus(StatusSuccess))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,9 +288,7 @@ func TestList(t *testing.T) {
 	}
 
 	// List by workflow ID
-	results, err = rt.List(listWorkflowsDBInput{
-		workflowIDs: []string{"list-a"},
-	})
+	results, err = rt.List(WithWorkflowIDs("list-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,10 +300,7 @@ func TestList(t *testing.T) {
 	}
 
 	// List with limit
-	results, err = rt.List(listWorkflowsDBInput{
-		status: []StatusType{StatusSuccess},
-		limit:  1,
-	})
+	results, err = rt.List(WithStatus(StatusSuccess), WithLimit(1))
 	if err != nil {
 		t.Fatal(err)
 	}

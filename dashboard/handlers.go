@@ -143,7 +143,7 @@ func (h *handlers) approveWorkflow(e *core.RequestEvent) error {
 	if err != nil {
 		return e.NotFoundError("workflow not found", nil)
 	}
-	if record.GetString("app_status") != "waiting for approval" {
+	if record.GetString("app_status") != turbine.AppStatusWaitingForApproval {
 		return e.BadRequestError("workflow is not waiting for approval", nil)
 	}
 

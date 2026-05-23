@@ -46,25 +46,30 @@ func TestValidateWebhookRecord(t *testing.T) {
 	}
 
 	cases := []struct {
-		name    string
-		url     string
-		events  any
-		wantErr bool
+		name         string
+		url          string
+		events       any
+		allowPrivate bool
+		wantErr      bool
 	}{
 		// URL validation
-		{"valid https", "https://example.com/hook", []any{"workflow.SUCCESS"}, false},
-		{"valid http localhost", "http://localhost:8080/hook", []any{"workflow.SUCCESS"}, false},
-		{"invalid no scheme", "example.com", []any{"workflow.SUCCESS"}, true},
-		{"invalid ftp scheme", "ftp://example.com", []any{"workflow.SUCCESS"}, true},
-		{"invalid empty url", "", []any{"workflow.SUCCESS"}, true},
+		{"valid https", "https://example.com/hook", []any{"workflow.SUCCESS"}, false, false},
+		{"valid http localhost when allowed", "http://localhost:8080/hook", []any{"workflow.SUCCESS"}, true, false},
+		{"invalid http localhost by default (SSRF)", "http://localhost:8080/hook", []any{"workflow.SUCCESS"}, false, true},
+		{"invalid loopback IP (SSRF)", "http://127.0.0.1/hook", []any{"workflow.SUCCESS"}, false, true},
+		{"invalid RFC1918 (SSRF)", "http://10.0.0.1/hook", []any{"workflow.SUCCESS"}, false, true},
+		{"invalid AWS IMDS (SSRF)", "http://169.254.169.254/latest/meta-data/", []any{"workflow.SUCCESS"}, false, true},
+		{"invalid no scheme", "example.com", []any{"workflow.SUCCESS"}, false, true},
+		{"invalid ftp scheme", "ftp://example.com", []any{"workflow.SUCCESS"}, false, true},
+		{"invalid empty url", "", []any{"workflow.SUCCESS"}, false, true},
 		// Event validation
-		{"valid single event", "https://example.com", []any{"workflow.SUCCESS"}, false},
-		{"valid multiple events", "https://example.com", []any{"workflow.SUCCESS", "workflow.ERROR"}, false},
-		{"valid wildcard event", "https://example.com", []any{"workflow.*"}, false},
-		{"invalid empty events", "https://example.com", []any{}, true},
-		{"invalid nil events", "https://example.com", nil, true},
-		{"invalid event type", "https://example.com", []any{"workflow.UNKNOWN"}, true},
-		{"invalid mixed events", "https://example.com", []any{"workflow.SUCCESS", "bad"}, true},
+		{"valid single event", "https://example.com", []any{"workflow.SUCCESS"}, false, false},
+		{"valid multiple events", "https://example.com", []any{"workflow.SUCCESS", "workflow.ERROR"}, false, false},
+		{"valid wildcard event", "https://example.com", []any{"workflow.*"}, false, false},
+		{"invalid empty events", "https://example.com", []any{}, false, true},
+		{"invalid nil events", "https://example.com", nil, false, true},
+		{"invalid event type", "https://example.com", []any{"workflow.UNKNOWN"}, false, true},
+		{"invalid mixed events", "https://example.com", []any{"workflow.SUCCESS", "bad"}, false, true},
 	}
 
 	for _, tc := range cases {
@@ -73,7 +78,7 @@ func TestValidateWebhookRecord(t *testing.T) {
 			rec.Set("url", tc.url)
 			rec.SetRaw("events", tc.events)
 
-			err := validateWebhookRecord(rec)
+			err := validateWebhookRecord(rec, tc.allowPrivate)
 			if (err != nil) != tc.wantErr {
 				t.Errorf("validateWebhookRecord() error = %v, wantErr = %v", err, tc.wantErr)
 			}

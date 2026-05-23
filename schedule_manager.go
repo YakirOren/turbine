@@ -34,6 +34,8 @@ func (sm *scheduleManager) registerOnce(rt *Runtime, recordID string, fqn string
 	sm.mu.Unlock()
 
 	go func() {
+		defer recoverGoroutine(rt.app.Logger(), "one-time schedule goroutine panicked",
+			"record_id", recordID, "fqn", fqn)
 		timer := time.NewTimer(delay)
 		defer timer.Stop()
 		select {
@@ -66,6 +68,8 @@ func (sm *scheduleManager) registerOnce(rt *Runtime, recordID string, fqn string
 func (sm *scheduleManager) registerCron(rt *Runtime, recordID string, fqn string, rawInput json.RawMessage, cronExpr string, jitter time.Duration) error {
 	cronJobID := fmt.Sprintf("pt_ui_sched_%s", recordID)
 	return rt.app.Cron().Add(cronJobID, cronExpr, func() {
+		defer recoverGoroutine(rt.app.Logger(), "cron schedule goroutine panicked",
+			"record_id", recordID, "fqn", fqn)
 		if !rt.launched.Load() {
 			return
 		}
@@ -98,7 +102,7 @@ func (sm *scheduleManager) cancelOnce(recordID string) {
 	}
 }
 
-func (sm *scheduleManager) activate(rt *Runtime, s *Schedule) error {
+func (sm *scheduleManager) activate(rt *Runtime, s *schedule) error {
 	switch s.Type() {
 	case scheduleTypeCron:
 		return sm.registerCron(rt, s.Id, s.WorkflowFQN(), s.Input(), s.CronExpression(), s.Jitter())
@@ -108,7 +112,7 @@ func (sm *scheduleManager) activate(rt *Runtime, s *Schedule) error {
 	return nil
 }
 
-func (sm *scheduleManager) deactivate(rt *Runtime, s *Schedule) {
+func (sm *scheduleManager) deactivate(rt *Runtime, s *schedule) {
 	switch s.Type() {
 	case scheduleTypeCron:
 		sm.removeCron(rt, s.Id)

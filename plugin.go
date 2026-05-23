@@ -34,18 +34,25 @@ func Setup(app core.App, config Config) *Runtime {
 		return e.Next()
 	})
 
-	registerWebhookHooks(app)
-	registerAlertChannelHooks(app)
+	registerWebhookHooks(app, rt.config.AllowPrivateAddresses)
+	registerAlertChannelHooks(app, rt.config.AllowPrivateAddresses)
 
 	return rt
 }
 
-func validateWebhookRecord(r *core.Record) error {
-	// Validate URL
+// validateWebhookRecord validates a webhook record. When allowPrivate is false,
+// it also blocks loopback / link-local / RFC1918 / CGNAT hosts to prevent SSRF
+// reach into internal services (cloud metadata, internal Redis, etc.).
+func validateWebhookRecord(r *core.Record, allowPrivate bool) error {
 	raw := r.GetString("url")
 	parsed, err := url.Parse(raw)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return router.NewBadRequestError("invalid webhook URL — must be http or https", nil)
+		return router.NewBadRequestError("invalid webhook URL: must be http or https", nil)
+	}
+	if !allowPrivate {
+		if err := validateOutboundURL(raw); err != nil {
+			return router.NewBadRequestError("invalid webhook URL: "+err.Error(), nil)
+		}
 	}
 
 	// Validate events
@@ -64,16 +71,16 @@ func validateWebhookRecord(r *core.Record) error {
 	return nil
 }
 
-func registerWebhookHooks(app core.App) {
+func registerWebhookHooks(app core.App, allowPrivate bool) {
 	app.OnRecordCreate(collectionWebhooks).BindFunc(func(e *core.RecordEvent) error {
-		if err := validateWebhookRecord(e.Record); err != nil {
+		if err := validateWebhookRecord(e.Record, allowPrivate); err != nil {
 			return err
 		}
 		return e.Next()
 	})
 
 	app.OnRecordUpdate(collectionWebhooks).BindFunc(func(e *core.RecordEvent) error {
-		if err := validateWebhookRecord(e.Record); err != nil {
+		if err := validateWebhookRecord(e.Record, allowPrivate); err != nil {
 			return err
 		}
 		return e.Next()
@@ -87,7 +94,7 @@ func registerWebhookHooks(app core.App) {
 	})
 }
 
-func validateAlertChannelRecord(r *core.Record) error {
+func validateAlertChannelRecord(r *core.Record, allowPrivate bool) error {
 	rawURL := r.GetString("url")
 	if rawURL == "" {
 		return router.NewBadRequestError("URL is required", nil)
@@ -97,6 +104,14 @@ func validateAlertChannelRecord(r *core.Record) error {
 	_, err := shoutrrr.CreateSender(rawURL)
 	if err != nil {
 		return router.NewBadRequestError("invalid notification URL: "+err.Error(), nil)
+	}
+
+	// shoutrrr's generic:// service is HTTP-backed and accepts arbitrary URLs.
+	// Block SSRF reach into loopback / link-local / RFC1918 ranges.
+	if !allowPrivate {
+		if err := validateShoutrrrSSRF(rawURL); err != nil {
+			return router.NewBadRequestError("invalid notification URL: "+err.Error(), nil)
+		}
 	}
 
 	// Validate events
@@ -115,16 +130,16 @@ func validateAlertChannelRecord(r *core.Record) error {
 	return nil
 }
 
-func registerAlertChannelHooks(app core.App) {
+func registerAlertChannelHooks(app core.App, allowPrivate bool) {
 	app.OnRecordCreate(collectionAlertChannels).BindFunc(func(e *core.RecordEvent) error {
-		if err := validateAlertChannelRecord(e.Record); err != nil {
+		if err := validateAlertChannelRecord(e.Record, allowPrivate); err != nil {
 			return err
 		}
 		return e.Next()
 	})
 
 	app.OnRecordUpdate(collectionAlertChannels).BindFunc(func(e *core.RecordEvent) error {
-		if err := validateAlertChannelRecord(e.Record); err != nil {
+		if err := validateAlertChannelRecord(e.Record, allowPrivate); err != nil {
 			return err
 		}
 		return e.Next()

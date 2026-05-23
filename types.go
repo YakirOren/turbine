@@ -33,6 +33,26 @@ const (
 	StatusWaitingForApproval          StatusType = "WAITING_FOR_APPROVAL"
 )
 
+// IsTerminal reports whether the status is a final state, the workflow will
+// not progress further on its own.
+func (s StatusType) IsTerminal() bool {
+	switch s {
+	case StatusSuccess, StatusError, StatusCancelled, StatusMaxRecoveryAttemptsExceeded:
+		return true
+	}
+	return false
+}
+
+// IsTerminalFailure reports whether the status is a terminal failure state.
+// Success workflows are terminal but not failed, this returns false for them.
+func (s StatusType) IsTerminalFailure() bool {
+	switch s {
+	case StatusError, StatusCancelled, StatusMaxRecoveryAttemptsExceeded:
+		return true
+	}
+	return false
+}
+
 // Status contains information about a workflow's current state.
 type Status struct {
 	ID                 string        `json:"workflow_id"`
@@ -216,11 +236,19 @@ type stepInfo struct {
 	endedAt      *int64
 }
 
-// SendInput is the input for sending a notification to a workflow.
-type SendInput struct {
-	DestinationUUID string
-	Topic           string
-	Message         *string
+// sendInput is the input for sending a notification to a workflow.
+//
+// ProducerWorkflow + ProducerStepID, when ProducerWorkflow is non-empty, form
+// an idempotency key so a step that crashes mid-Send and replays on recovery
+// does not deliver the message twice. Direct (non-step) Send leaves
+// ProducerWorkflow empty and falls back to a random row id, the producer is
+// responsible for at-most-once semantics in that case.
+type sendInput struct {
+	DestinationUUID  string
+	Topic            string
+	Message          *string
+	ProducerWorkflow string
+	ProducerStepID   int
 }
 
 type recvInput struct {
@@ -229,8 +257,8 @@ type recvInput struct {
 	timeout      time.Duration
 }
 
-// SetValueInput is the input for setting a workflow event.
-type SetValueInput struct {
+// setValueInput is the input for setting a workflow event.
+type setValueInput struct {
 	WorkflowUUID string
 	Key          string
 	Value        *string
@@ -331,9 +359,9 @@ type systemDatabase interface {
 	checkOperationExecution(ctx context.Context, input checkOperationExecutionDBInput) (*recordedResult, error)
 	getWorkflowSteps(ctx context.Context, input getWorkflowStepsInput) ([]stepInfo, error)
 
-	send(ctx context.Context, input SendInput) error
+	send(ctx context.Context, input sendInput) error
 	recv(ctx context.Context, input recvInput) (*string, error)
-	setEvent(ctx context.Context, input SetValueInput) error
+	setEvent(ctx context.Context, input setValueInput) error
 	getEvent(ctx context.Context, input getEventInput) (*string, error)
 
 	dequeueWorkflows(ctx context.Context, input dequeueWorkflowsInput) ([]dequeuedWorkflow, error)

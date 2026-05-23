@@ -70,7 +70,7 @@ func TestInsertStatusIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Insert again — should succeed (ON CONFLICT DO UPDATE)
+	// Insert again, should succeed (ON CONFLICT DO UPDATE)
 	result, err := sysDB.insertStatus(context.Background(), input)
 	if err != nil {
 		t.Fatalf("second insert failed: %v", err)
@@ -93,7 +93,7 @@ func TestInsertStatusConflictingName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Insert with different name — should error
+	// Insert with different name, should error
 	input.status.Name = "differentWorkflow"
 	_, err = sysDB.insertStatus(context.Background(), input)
 	if err == nil {
@@ -276,7 +276,7 @@ func TestSendAndRecv(t *testing.T) {
 
 	// Send a message
 	msg := `"hello"`
-	sendInput := SendInput{
+	sendInput := sendInput{
 		DestinationUUID: destWfID,
 		Topic:           "greet",
 		Message:         &msg,
@@ -338,7 +338,7 @@ func TestSetAndGetValue(t *testing.T) {
 
 	// Set event
 	val := `"event_value"`
-	setIn := SetValueInput{
+	setIn := setValueInput{
 		WorkflowUUID: wfID,
 		Key:          "myKey",
 		Value:        &val,
@@ -379,7 +379,7 @@ func TestSetValueIdempotent(t *testing.T) {
 	}
 
 	val := `"first"`
-	setIn := SetValueInput{
+	setIn := setValueInput{
 		WorkflowUUID: wfID,
 		Key:          "k1",
 		Value:        &val,
@@ -387,7 +387,7 @@ func TestSetValueIdempotent(t *testing.T) {
 	if err := sysDB.setEvent(context.Background(), setIn); err != nil {
 		t.Fatal(err)
 	}
-	// Set again with different value — ON CONFLICT DO UPDATE
+	// Set again with different value, ON CONFLICT DO UPDATE
 	val2 := `"second"`
 	setIn.Value = &val2
 	if err := sysDB.setEvent(context.Background(), setIn); err != nil {
@@ -703,7 +703,7 @@ func TestKVGetTypeMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Try to get as []int — json.Unmarshal will fail on "hello" → []int
+	// Try to get as []int, json.Unmarshal will fail on "hello" -> []int
 	_, _, err = KVGet[[]int](rt, context.Background(), "type-key")
 	if err == nil {
 		t.Fatal("expected deserialization error for type mismatch")
@@ -757,7 +757,7 @@ func TestGarbageCollectWorkflows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// GC with cutoff in the future — should delete completed workflows
+	// GC with cutoff in the future, should delete completed workflows
 	cutoff := time.Now().Add(1 * time.Minute)
 	gcInput := garbageCollectWorkflowsInput{
 		cutoffTime: cutoff,

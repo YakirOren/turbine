@@ -151,7 +151,7 @@ VALUES
 
 -- === SCHEDULED WORKFLOWS (MetricsSync + DailyCleanup) ===
 
--- MetricsSync runs every 5 min — show several recent ones
+-- MetricsSync runs every 5 min, show several recent ones
 INSERT INTO pt_workflow_status (id, name, status, inputs, output, error, executor_id, application_version, application_id, recovery_attempts, created_at_epoch_ms, updated_at_epoch_ms, queue_name, tags, summary)
 VALUES
   ('sched_ms_01', 'main.MetricsSync', 'SUCCESS', '{}', '{"aggregated":true}', '', 'exec-1', 'v1.4.2', 'demo', 0, 1775645700000, 1775645704000, '_pt_internal_queue', '["metrics","scheduled"]', ''),

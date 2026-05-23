@@ -48,8 +48,9 @@ func (rt *Runtime) dispatchNotifications(workflowID, name string, status StatusT
 		}
 
 		go func(rawURL string) {
+			scheme := extractScheme(rawURL)
+			defer recoverGoroutine(rt.app.Logger(), "notification goroutine panicked", "service", scheme)
 			if err := shoutrrr.Send(rawURL, message); err != nil {
-				scheme := extractScheme(rawURL)
 				rt.app.Logger().Error("notification delivery failed",
 					"service", scheme,
 					"error", err,
@@ -81,7 +82,7 @@ func formatNotificationMessage(workflowID, name string, status StatusType, error
 		}
 		return msg
 	default:
-		return fmt.Sprintf("[Turbine] Workflow %q (%s) — %s", name, workflowID, status)
+		return fmt.Sprintf("[Turbine] Workflow %q (%s): %s", name, workflowID, status)
 	}
 }
 
@@ -93,9 +94,27 @@ func extractScheme(rawURL string) string {
 	return parsed.Scheme
 }
 
+// validateShoutrrrSSRF rejects shoutrrr URLs whose generic:// host points at a
+// private / loopback / link-local address. Well-known service schemes (slack,
+// discord, telegram, ...) hit fixed public endpoints and are accepted as-is.
+func validateShoutrrrSSRF(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme != "generic" {
+		return nil
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return fmt.Errorf("generic:// URL must have a host")
+	}
+	return rejectPrivateHost(host)
+}
+
 // SendNotification sends a custom message to the alert channel matching name.
 // Disabled channels are a silent no-op (returns nil), matching the event-driven
-// dispatch behavior — toggling a channel off mutes both. If multiple channels
+// dispatch behavior, toggling a channel off mutes both. If multiple channels
 // share the same name, the first match wins. Returns an error only if no
 // channel with that name exists or if delivery fails.
 func (rt *Runtime) SendNotification(name, message string) error {
@@ -121,5 +140,5 @@ func (rt *Runtime) TestAlertChannel(id string) error {
 	}
 
 	rawURL := record.GetString("url")
-	return shoutrrr.Send(rawURL, "[Turbine] Test notification — this channel is working")
+	return shoutrrr.Send(rawURL, "[Turbine] Test notification: this channel is working")
 }

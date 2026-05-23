@@ -53,7 +53,7 @@ func derefStr(s *string) string {
 	return *s
 }
 
-// workflowExists returns nil if the workflow exists, or a ErrWorkflowNotFound if not.
+// workflowExists returns nil if the workflow exists, or an ErrWorkflowNotFound if not.
 func (s *sqliteSysDB) workflowExists(workflowID string) error {
 	var exists int
 	err := s.app.DB().Select("1").
@@ -416,7 +416,7 @@ func (s *sqliteSysDB) updateWorkflowOutcome(ctx context.Context, input updateWor
 	}).Row(&queueName)
 
 	if err != nil {
-		// No row matched (e.g. already cancelled) — not an error, just nothing to notify.
+		// No row matched (e.g. already cancelled). Not an error, just nothing to notify.
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -516,7 +516,7 @@ func (s *sqliteSysDB) cancelWorkflow(ctx context.Context, input cancelWorkflowDB
 	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		// Either doesn't exist or already in a terminal state — both are fine
+		// Either doesn't exist or already in a terminal state. Both are fine.
 		if err := s.workflowExists(input.workflowID); err != nil {
 			return false, err
 		}
@@ -666,7 +666,7 @@ func (s *sqliteSysDB) forkWorkflow(ctx context.Context, input forkWorkflowDBInpu
 }
 
 func (s *sqliteSysDB) recordOperationStart(ctx context.Context, input recordOperationStartDBInput) error {
-	// ON CONFLICT path: a row already exists for this (workflow, function) — the
+	// ON CONFLICT path: a row already exists for this (workflow, function), the
 	// previous run crashed mid-step or this is a recovery retry. Clear the
 	// prior partial state so checkOperationExecution returns (nil, nil) and
 	// the step re-executes.
@@ -731,7 +731,7 @@ func (s *sqliteSysDB) checkOperationExecution(ctx context.Context, input checkOp
 		return nil, newErrCancelled(input.workflowUUID)
 	}
 
-	// Check operation outputs — only completed rows (ended_at_epoch_ms != 0) are
+	// Check operation outputs, only completed rows (ended_at_epoch_ms != 0) are
 	// treated as checkpoints. A row with ended_at_epoch_ms == 0 means a previous
 	// run started the step but crashed before saving the result, so we re-execute.
 	var outputString, errorStr, functionName sql.NullString
@@ -867,15 +867,25 @@ func (s *sqliteSysDB) recordChildGetResult(ctx context.Context, input recordChil
 	return nil
 }
 
-func (s *sqliteSysDB) send(ctx context.Context, input SendInput) error {
-	msgID := core.GenerateDefaultRandomId()
-	_, err := s.app.DB().Insert("pt_notifications", dbx.Params{
-		"id":                  msgID,
-		"destination_id":      input.DestinationUUID,
-		"topic":               input.Topic,
-		"message":             derefStr(input.Message),
-		"created_at_epoch_ms": time.Now().UnixMilli(),
-		"consumed":            false,
+func (s *sqliteSysDB) send(ctx context.Context, input sendInput) error {
+	// When called as a workflow step, derive a deterministic row id from
+	// (producer_workflow, producer_step) so step replay after crash does not
+	// re-insert the message. ON CONFLICT DO NOTHING makes the insert idempotent.
+	var msgID string
+	if input.ProducerWorkflow != "" {
+		msgID = fmt.Sprintf("snd_%s_%d", input.ProducerWorkflow, input.ProducerStepID)
+	} else {
+		msgID = core.GenerateDefaultRandomId()
+	}
+	_, err := s.app.DB().NewQuery(`INSERT INTO pt_notifications
+		(id, destination_id, topic, message, created_at_epoch_ms, consumed)
+		VALUES ({:id}, {:dest}, {:topic}, {:msg}, {:ts}, FALSE)
+		ON CONFLICT (id) DO NOTHING`).Bind(dbx.Params{
+		"id":    msgID,
+		"dest":  input.DestinationUUID,
+		"topic": input.Topic,
+		"msg":   derefStr(input.Message),
+		"ts":    time.Now().UnixMilli(),
 	}).Execute()
 
 	if err != nil {
@@ -915,7 +925,7 @@ func (s *sqliteSysDB) recv(ctx context.Context, input recvInput) (*string, error
 		return &message.String, nil
 	}
 
-	// No message found — wait with event bus
+	// No message found, wait with event bus
 	if input.timeout <= 0 {
 		return nil, nil
 	}
@@ -964,7 +974,7 @@ func (s *sqliteSysDB) recv(ctx context.Context, input recvInput) (*string, error
 	}
 }
 
-func (s *sqliteSysDB) setEvent(ctx context.Context, input SetValueInput) error {
+func (s *sqliteSysDB) setEvent(ctx context.Context, input setValueInput) error {
 	_, err := s.app.DB().NewQuery(`INSERT INTO pt_workflow_events (id, workflow_id, key, value)
 		VALUES ({:id}, {:wf_id}, {:key}, {:value})
 		ON CONFLICT (workflow_id, key)
@@ -1001,7 +1011,7 @@ func (s *sqliteSysDB) getEvent(ctx context.Context, input getEventInput) (*strin
 		return &value.String, nil
 	}
 
-	// Event not found — wait with event bus
+	// Event not found, wait with event bus
 	if input.timeout <= 0 {
 		return nil, nil
 	}
@@ -1039,14 +1049,10 @@ func (s *sqliteSysDB) getEvent(ctx context.Context, input getEventInput) (*strin
 	}
 }
 
-/*******************************/
-/******* QUEUES ********/
-/*******************************/
-
 func (s *sqliteSysDB) dequeueWorkflows(ctx context.Context, input dequeueWorkflowsInput) ([]dequeuedWorkflow, error) {
 	limit := input.limit
 	if limit <= 0 {
-		limit = _DEFAULT_MAX_TASKS_PER_ITERATION
+		limit = defaultMaxTasksPerIteration
 	}
 
 	hasWorker := input.workerConcurrency != nil && *input.workerConcurrency > 0
@@ -1075,7 +1081,7 @@ func (s *sqliteSysDB) dequeueWorkflows(ctx context.Context, input dequeueWorkflo
 	}
 
 	if !hasWorker && !hasGlobal && !hasRate {
-		// No concurrency/rate constraints — use query builder for a simple dequeue
+		// No concurrency/rate constraints, use query builder for a simple dequeue
 		sub := s.app.DB().Select("id").
 			From("pt_workflow_status").
 			Where(dbx.HashExp{"queue_name": input.queueName, "status": string(StatusEnqueued)})
@@ -1103,7 +1109,7 @@ func (s *sqliteSysDB) dequeueWorkflows(ctx context.Context, input dequeueWorkflo
 		return s.scanDequeuedWorkflows(s.app.DB().NewQuery(query).Bind(params))
 	}
 
-	// Concurrency/rate constraints present — use a single atomic CTE so the
+	// Concurrency/rate constraints present, use a single atomic CTE so the
 	// counts and the UPDATE share the same write-lock (no TOCTOU race).
 
 	var rateCutoff int64
@@ -1113,7 +1119,7 @@ func (s *sqliteSysDB) dequeueWorkflows(ctx context.Context, input dequeueWorkflo
 	params["rate_cutoff"] = rateCutoff
 	params["queue_name"] = input.queueName
 
-	// CTE 1: counts — single scan of the queue to compute all constraint counts
+	// CTE 1: counts, single scan of the queue to compute all constraint counts
 	countsCTE := fmt.Sprintf(`counts AS (
 		SELECT
 			COALESCE(SUM(CASE WHEN status = {:pending} AND executor_id = {:executor} THEN 1 ELSE 0 END), 0) AS worker_running,
@@ -1123,7 +1129,7 @@ func (s *sqliteSysDB) dequeueWorkflows(ctx context.Context, input dequeueWorkflo
 		WHERE queue_name = {:queue_name}%s
 	)`, partFilter)
 
-	// CTE 2: effective_limit — MIN of base limit and each configured constraint
+	// CTE 2: effective_limit, MIN of base limit and each configured constraint
 	limitParts := []string{"SELECT {:base_limit} AS lim"}
 	if hasWorker {
 		params["worker_conc"] = *input.workerConcurrency
@@ -1142,7 +1148,7 @@ func (s *sqliteSysDB) dequeueWorkflows(ctx context.Context, input dequeueWorkflo
 		strings.Join(limitParts, " UNION ALL "),
 	)
 
-	// CTE 3: candidates — rows to dequeue, capped by the effective limit
+	// CTE 3: candidates, rows to dequeue, capped by the effective limit
 	candidatesCTE := fmt.Sprintf(`candidates AS (
 		SELECT id FROM pt_workflow_status
 		WHERE queue_name = {:queue_name} AND status = {:enqueued}%s

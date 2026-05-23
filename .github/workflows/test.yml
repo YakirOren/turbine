@@ -29,8 +29,12 @@ jobs:
       - name: Build UI
         if: steps.ui-changes.outputs.changed == 'true'
         run: cd ui && npm ci && npm run build
+      - name: Lint UI
+        if: steps.ui-changes.outputs.changed == 'true'
+        run: cd ui && npm run lint
       - run: go build ./...
       - run: go test ./...
+      - run: go vet ./examples/...
 
   lint:
     runs-on: ubuntu-latest
@@ -39,4 +43,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: ASCII punctuation check (Go sources)
+        run: |
+          if grep -rnP "[\xE2\x80\x93\xE2\x80\x94\xE2\x80\xA6\xE2\x86\x90\xE2\x86\x91\xE2\x86\x92\xE2\x86\x93]" --include="*.go" .; then
+            echo "::error::Found unicode dash, arrow, or ellipsis in .go files. Use plain ASCII (comma, colon, ->, ..., etc.)."
+            exit 1
+          fi
       - uses: golangci/golangci-lint-action@v7
