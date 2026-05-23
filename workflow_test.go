@@ -17,7 +17,11 @@ func setupRuntime(t *testing.T) (*Runtime, func()) {
 	}
 	// Tests use httptest.NewServer which binds 127.0.0.1; opt out of the
 	// production SSRF guard so the loopback receivers in webhook tests work.
-	rt := NewRuntime(app, Config{AllowPrivateAddresses: true})
+	// Short ShutdownTimeout caps cleanup wait when a workflow blocks past test return.
+	rt := NewRuntime(app, Config{
+		AllowPrivateAddresses: true,
+		ShutdownTimeout:       500 * time.Millisecond,
+	})
 	return rt, app.Cleanup
 }
 
