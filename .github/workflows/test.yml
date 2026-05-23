@@ -29,6 +29,9 @@ jobs:
       - name: Build UI
         if: steps.ui-changes.outputs.changed == 'true'
         run: cd ui && npm ci && npm run build
+      - name: Lint UI
+        if: steps.ui-changes.outputs.changed == 'true'
+        run: cd ui && npm run lint
       - run: go build ./...
       - run: go test ./...
       - run: go vet ./examples/...
