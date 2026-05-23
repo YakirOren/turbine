@@ -165,8 +165,4 @@ type systemDatabase interface {
 	updateAppStatus(ctx context.Context, input updateAppStatusDBInput) error
 
 	garbageCollectWorkflows(ctx context.Context, input garbageCollectWorkflowsInput) error
-
-	setKV(ctx context.Context, input setKVInput) error
-	getKV(ctx context.Context, input getKVInput) (*string, error)
-	deleteKV(ctx context.Context, input deleteKVInput) error
 }

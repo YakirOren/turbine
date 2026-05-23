@@ -40,6 +40,7 @@ type Runtime struct {
 	systemDB systemDatabase
 	messages *messages
 	steps    *steps
+	kv       *kv
 	eventBus *eventBus
 	config   *Config
 	logger   *slog.Logger // overrides app.Logger() for workflow + step logs when non-nil
@@ -109,6 +110,7 @@ func NewRuntime(app core.App, config Config) *Runtime {
 	sysDB := newSQLiteSysDB(app, eb)
 	msgs := newMessages(app, eb, app.Logger())
 	stp := newSteps(app, app.Logger())
+	kvs := newKV(app, app.Logger())
 
 	rt := &Runtime{
 		ctx:                     baseCtx,
@@ -119,6 +121,7 @@ func NewRuntime(app core.App, config Config) *Runtime {
 		systemDB:                sysDB,
 		messages:                msgs,
 		steps:                   stp,
+		kv:                      kvs,
 		eventBus:                eb,
 		config:                  &config,
 		logger:                  config.Logger,

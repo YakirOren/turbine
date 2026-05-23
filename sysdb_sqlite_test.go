@@ -32,10 +32,18 @@ func setupSysDBAndSteps(t *testing.T) (*sqliteSysDB, *steps, func()) {
 	return bundle.sysDB, bundle.steps, bundle.cleanup
 }
 
+// setupSysDBAndKV returns the sysDB plus a *kv bound to the same app.
+func setupSysDBAndKV(t *testing.T) (*sqliteSysDB, *kv, func()) {
+	t.Helper()
+	bundle := setupSysDBBundle(t)
+	return bundle.sysDB, bundle.kv, bundle.cleanup
+}
+
 type sysDBBundle struct {
 	sysDB    *sqliteSysDB
 	messages *messages
 	steps    *steps
+	kv       *kv
 	cleanup  func()
 }
 
@@ -52,6 +60,7 @@ func setupSysDBBundle(t *testing.T) sysDBBundle {
 		sysDB:    sysDB,
 		messages: newMessages(app, eb, app.Logger()),
 		steps:    newSteps(app, app.Logger()),
+		kv:       newKV(app, app.Logger()),
 		cleanup:  app.Cleanup,
 	}
 }
@@ -569,16 +578,16 @@ func TestValidateAppStatusColor(t *testing.T) {
 }
 
 func TestKVSetAndGet(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	_, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
 	val := `"hello"`
-	err := sysDB.setKV(context.Background(), setKVInput{key: "test-key", value: &val})
+	err := kvs.setKV(context.Background(), setKVInput{key: "test-key", value: &val})
 	if err != nil {
 		t.Fatalf("setKV failed: %v", err)
 	}
 
-	result, err := sysDB.getKV(context.Background(), getKVInput{key: "test-key"})
+	result, err := kvs.getKV(context.Background(), getKVInput{key: "test-key"})
 	if err != nil {
 		t.Fatalf("getKV failed: %v", err)
 	}
@@ -588,10 +597,10 @@ func TestKVSetAndGet(t *testing.T) {
 }
 
 func TestKVGetMissing(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	_, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	result, err := sysDB.getKV(context.Background(), getKVInput{key: "nonexistent"})
+	result, err := kvs.getKV(context.Background(), getKVInput{key: "nonexistent"})
 	if err != nil {
 		t.Fatalf("getKV should not error on missing key: %v", err)
 	}
@@ -601,23 +610,23 @@ func TestKVGetMissing(t *testing.T) {
 }
 
 func TestKVSetOverwrite(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	_, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
 	val1 := `"first"`
 	val2 := `"second"`
 
-	err := sysDB.setKV(context.Background(), setKVInput{key: "overwrite-key", value: &val1})
+	err := kvs.setKV(context.Background(), setKVInput{key: "overwrite-key", value: &val1})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = sysDB.setKV(context.Background(), setKVInput{key: "overwrite-key", value: &val2})
+	err = kvs.setKV(context.Background(), setKVInput{key: "overwrite-key", value: &val2})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := sysDB.getKV(context.Background(), getKVInput{key: "overwrite-key"})
+	result, err := kvs.getKV(context.Background(), getKVInput{key: "overwrite-key"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,21 +636,21 @@ func TestKVSetOverwrite(t *testing.T) {
 }
 
 func TestKVDelete(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	_, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
 	val := `"to-delete"`
-	err := sysDB.setKV(context.Background(), setKVInput{key: "del-key", value: &val})
+	err := kvs.setKV(context.Background(), setKVInput{key: "del-key", value: &val})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = sysDB.deleteKV(context.Background(), deleteKVInput{key: "del-key"})
+	err = kvs.deleteKV(context.Background(), deleteKVInput{key: "del-key"})
 	if err != nil {
 		t.Fatalf("deleteKV failed: %v", err)
 	}
 
-	result, err := sysDB.getKV(context.Background(), getKVInput{key: "del-key"})
+	result, err := kvs.getKV(context.Background(), getKVInput{key: "del-key"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -651,20 +660,20 @@ func TestKVDelete(t *testing.T) {
 }
 
 func TestKVDeleteMissing(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	_, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	err := sysDB.deleteKV(context.Background(), deleteKVInput{key: "never-existed"})
+	err := kvs.deleteKV(context.Background(), deleteKVInput{key: "never-existed"})
 	if err != nil {
 		t.Fatalf("deleteKV should not error on missing key: %v", err)
 	}
 }
 
 func TestKVPublicAPIRoundTrip(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	sysDB, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	rt := &Runtime{systemDB: sysDB}
+	rt := &Runtime{systemDB: sysDB, kv: kvs}
 
 	type config struct {
 		RateLimit int    `json:"rate_limit"`
@@ -688,10 +697,10 @@ func TestKVPublicAPIRoundTrip(t *testing.T) {
 }
 
 func TestKVSetEmptyKey(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	sysDB, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	rt := &Runtime{systemDB: sysDB}
+	rt := &Runtime{systemDB: sysDB, kv: kvs}
 	err := rt.KVSet(context.Background(), "", "value")
 	if err == nil {
 		t.Fatal("expected error for empty key")
@@ -699,10 +708,10 @@ func TestKVSetEmptyKey(t *testing.T) {
 }
 
 func TestKVSetNilValue(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	sysDB, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	rt := &Runtime{systemDB: sysDB}
+	rt := &Runtime{systemDB: sysDB, kv: kvs}
 	err := rt.KVSet(context.Background(), "nil-key", nil)
 	if err == nil {
 		t.Fatal("expected error for nil value")
@@ -710,10 +719,10 @@ func TestKVSetNilValue(t *testing.T) {
 }
 
 func TestKVGetNotFound(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	sysDB, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	rt := &Runtime{systemDB: sysDB}
+	rt := &Runtime{systemDB: sysDB, kv: kvs}
 	val, ok, err := KVGet[string](rt, context.Background(), "missing")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -727,10 +736,10 @@ func TestKVGetNotFound(t *testing.T) {
 }
 
 func TestKVGetTypeMismatch(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	sysDB, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	rt := &Runtime{systemDB: sysDB}
+	rt := &Runtime{systemDB: sysDB, kv: kvs}
 
 	err := rt.KVSet(context.Background(), "type-key", "hello")
 	if err != nil {
@@ -745,10 +754,10 @@ func TestKVGetTypeMismatch(t *testing.T) {
 }
 
 func TestKVRoundTripInt(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	sysDB, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	rt := &Runtime{systemDB: sysDB}
+	rt := &Runtime{systemDB: sysDB, kv: kvs}
 
 	err := rt.KVSet(context.Background(), "counter", 42)
 	if err != nil {
