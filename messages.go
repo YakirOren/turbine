@@ -271,10 +271,13 @@ func (m *messages) getEvent(ctx context.Context, input getEventInput) (*string, 
 	}
 }
 
-func (m *messages) waitForEnqueue(ctx context.Context, queueName string) chan struct{} {
+// subscribeQueue returns a channel that fires when work is enqueued to queueName.
+// The caller must pass the channel back to unsubscribeQueue when done.
+func (m *messages) subscribeQueue(queueName string) chan struct{} {
 	return m.eb.Wait("queue::" + queueName)
 }
 
-func (m *messages) stopWaitForEnqueue(queueName string, ch chan struct{}) {
+// unsubscribeQueue removes a previously subscribed channel for queueName.
+func (m *messages) unsubscribeQueue(queueName string, ch chan struct{}) {
 	m.eb.Remove("queue::"+queueName, ch)
 }
