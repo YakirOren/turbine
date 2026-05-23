@@ -30,37 +30,25 @@ func newMessages(app core.App, eb *eventBus, logger *slog.Logger) *messages {
 }
 
 func (m *messages) awaitWorkflowResult(ctx context.Context, workflowID string, _ time.Duration) (*string, error) {
-	key := "workflow::" + workflowID
-	ch := m.eb.Wait(key)
-	defer m.eb.Remove(key, ch)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
+	type outcome struct {
+		output *string
+		err    error
+	}
+	res, err := pollOrWait(ctx, m.eb, "workflow::"+workflowID, 0, func() (outcome, bool, error) {
 		var status StatusType
 		var outputString, errorStr sql.NullString
 		var attempts int
 
-		err := m.app.DB().Select("status", "output", "error", "recovery_attempts").
+		dbErr := m.app.DB().Select("status", "output", "error", "recovery_attempts").
 			From("pt_workflow_status").
 			Where(dbx.HashExp{"id": workflowID}).
 			Row(&status, &outputString, &errorStr, &attempts)
 
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				select {
-				case <-ch:
-					ch = m.eb.Swap(key, ch)
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
-				continue
+		if dbErr != nil {
+			if errors.Is(dbErr, sql.ErrNoRows) {
+				return outcome{}, false, nil
 			}
-			return nil, fmt.Errorf("failed to query workflow status: %w", err)
+			return outcome{}, false, fmt.Errorf("failed to query workflow status: %w", dbErr)
 		}
 
 		var output *string
@@ -71,22 +59,21 @@ func (m *messages) awaitWorkflowResult(ctx context.Context, workflowID string, _
 		switch status {
 		case StatusSuccess, StatusError:
 			if !errorStr.Valid || errorStr.String == "" {
-				return output, nil
+				return outcome{output: output}, true, nil
 			}
-			return output, errors.New(errorStr.String)
+			return outcome{output: output, err: errors.New(errorStr.String)}, true, nil
 		case StatusCancelled:
-			return output, newErrAwaitCancelled(workflowID)
+			return outcome{output: output, err: newErrAwaitCancelled(workflowID)}, true, nil
 		case StatusMaxRecoveryAttemptsExceeded:
-			return output, newErrDeadLetter(workflowID, attempts-2)
+			return outcome{output: output, err: newErrDeadLetter(workflowID, attempts-2)}, true, nil
 		default:
-			select {
-			case <-ch:
-				ch = m.eb.Swap(key, ch)
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
+			return outcome{}, false, nil
 		}
+	})
+	if err != nil {
+		return nil, err
 	}
+	return res.output, res.err
 }
 
 func (m *messages) send(ctx context.Context, input sendInput) error {
@@ -122,78 +109,39 @@ func (m *messages) send(ctx context.Context, input sendInput) error {
 }
 
 func (m *messages) recv(ctx context.Context, input recvInput) (*string, error) {
-	// Try to consume a message directly
-	var message sql.NullString
-	err := m.app.DB().NewQuery(`
-		WITH oldest AS (
-			SELECT id, message
-			FROM pt_notifications
-			WHERE destination_id = {:dest} AND topic = {:topic} AND consumed = FALSE
-			ORDER BY created_at_epoch_ms ASC
-			LIMIT 1
-		)
-		UPDATE pt_notifications SET consumed = TRUE
-		WHERE id = (SELECT id FROM oldest)
-		RETURNING message`).Bind(dbx.Params{
-		"dest":  input.workflowUUID,
-		"topic": input.topic,
-	}).Row(&message)
-
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("failed to consume notification: %w", err)
-	}
-
-	if message.Valid {
-		return &message.String, nil
-	}
-
-	// No message found, wait with event bus
-	if input.timeout <= 0 {
-		return nil, nil
-	}
-
-	payload := fmt.Sprintf("%s::%s", input.workflowUUID, input.topic)
-	ch := m.eb.Wait(payload)
-	defer m.eb.Remove(payload, ch)
-
-	timer := time.NewTimer(input.timeout)
-	defer timer.Stop()
-
-	for {
-		select {
-		case <-ch:
-			ch = m.eb.Swap(payload, ch)
-
-			// Try again
-			err = m.app.DB().NewQuery(`
-				WITH oldest AS (
-					SELECT id, message
-					FROM pt_notifications
-					WHERE destination_id = {:dest} AND topic = {:topic} AND consumed = FALSE
-					ORDER BY created_at_epoch_ms ASC
-					LIMIT 1
-				)
-				UPDATE pt_notifications SET consumed = TRUE
-				WHERE id = (SELECT id FROM oldest)
-				RETURNING message`).Bind(dbx.Params{
-				"dest":  input.workflowUUID,
-				"topic": input.topic,
-			}).Row(&message)
-
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return nil, fmt.Errorf("failed to consume notification: %w", err)
-			}
-			if message.Valid {
-				return &message.String, nil
-			}
-
-		case <-timer.C:
-			return nil, nil
-
-		case <-ctx.Done():
-			return nil, ctx.Err()
+	tryConsume := func() (*string, bool, error) {
+		var message sql.NullString
+		err := m.app.DB().NewQuery(`
+			WITH oldest AS (
+				SELECT id, message
+				FROM pt_notifications
+				WHERE destination_id = {:dest} AND topic = {:topic} AND consumed = FALSE
+				ORDER BY created_at_epoch_ms ASC
+				LIMIT 1
+			)
+			UPDATE pt_notifications SET consumed = TRUE
+			WHERE id = (SELECT id FROM oldest)
+			RETURNING message`).Bind(dbx.Params{
+			"dest":  input.workflowUUID,
+			"topic": input.topic,
+		}).Row(&message)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, false, fmt.Errorf("failed to consume notification: %w", err)
 		}
+		if message.Valid {
+			return &message.String, true, nil
+		}
+		return nil, false, nil
 	}
+
+	// First attempt without subscribing if no timeout requested.
+	if input.timeout <= 0 {
+		msg, _, err := tryConsume()
+		return msg, err
+	}
+
+	key := fmt.Sprintf("%s::%s", input.workflowUUID, input.topic)
+	return pollOrWait(ctx, m.eb, key, input.timeout, tryConsume)
 }
 
 func (m *messages) setEvent(ctx context.Context, input setValueInput) error {
@@ -219,54 +167,81 @@ func (m *messages) setEvent(ctx context.Context, input setValueInput) error {
 }
 
 func (m *messages) getEvent(ctx context.Context, input getEventInput) (*string, error) {
-	var value sql.NullString
-	err := m.app.DB().Select("value").
-		From("pt_workflow_events").
-		Where(dbx.HashExp{"workflow_id": input.targetWorkflowUUID, "key": input.key}).
-		Row(&value)
-
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("failed to get event: %w", err)
+	tryRead := func() (*string, bool, error) {
+		var value sql.NullString
+		err := m.app.DB().Select("value").
+			From("pt_workflow_events").
+			Where(dbx.HashExp{"workflow_id": input.targetWorkflowUUID, "key": input.key}).
+			Row(&value)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, false, fmt.Errorf("failed to get event: %w", err)
+		}
+		if value.Valid {
+			return &value.String, true, nil
+		}
+		return nil, false, nil
 	}
 
-	if value.Valid {
-		return &value.String, nil
-	}
-
-	// Event not found, wait with event bus
 	if input.timeout <= 0 {
-		return nil, nil
+		val, _, err := tryRead()
+		return val, err
 	}
 
-	payload := fmt.Sprintf("%s::%s", input.targetWorkflowUUID, input.key)
-	ch := m.eb.Wait(payload)
-	defer m.eb.Remove(payload, ch)
+	key := fmt.Sprintf("%s::%s", input.targetWorkflowUUID, input.key)
+	return pollOrWait(ctx, m.eb, key, input.timeout, tryRead)
+}
 
-	timer := time.NewTimer(input.timeout)
-	defer timer.Stop()
+// pollOrWait runs check, and if it returns (zero, false, nil), subscribes to
+// the event bus on key, waits up to timeout (or forever if timeout == 0), then
+// re-checks. Uses eventBus.Swap on retry to atomically remove the old waiter
+// and register a new one, preventing missed Notify between checks.
+//
+// check returns (result, found, err). found=false means "no result yet, wait".
+// pollOrWait returns when check returns found=true, ctx is cancelled, or
+// timeout > 0 and the timer elapses without a hit.
+//
+// The check-after-subscribe order is load-bearing. If check ran first, a
+// Notify between check and Wait would be missed.
+func pollOrWait[T any](
+	ctx context.Context,
+	eb *eventBus,
+	key string,
+	timeout time.Duration,
+	check func() (T, bool, error),
+) (T, error) {
+	var zero T
+
+	ch := eb.Wait(key)
+	defer func() {
+		if ch != nil {
+			eb.Remove(key, ch)
+		}
+	}()
+
+	var timer *time.Timer
+	var timerC <-chan time.Time
+	if timeout > 0 {
+		timer = time.NewTimer(timeout)
+		defer timer.Stop()
+		timerC = timer.C
+	}
 
 	for {
+		result, found, err := check()
+		if err != nil {
+			return zero, err
+		}
+		if found {
+			return result, nil
+		}
+
 		select {
-		case <-ch:
-			ch = m.eb.Swap(payload, ch)
-
-			err = m.app.DB().Select("value").
-				From("pt_workflow_events").
-				Where(dbx.HashExp{"workflow_id": input.targetWorkflowUUID, "key": input.key}).
-				Row(&value)
-
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return nil, fmt.Errorf("failed to get event: %w", err)
-			}
-			if value.Valid {
-				return &value.String, nil
-			}
-
-		case <-timer.C:
-			return nil, nil
-
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return zero, ctx.Err()
+		case <-timerC:
+			return zero, nil
+		case <-ch:
+			ch = eb.Swap(key, ch)
 		}
 	}
 }
