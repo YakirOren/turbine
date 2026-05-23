@@ -819,7 +819,7 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn stepFunc, opts ...St
 	if !stepOpts.skipCheckpoint {
 		// Check if already executed
 		recorded, err := retryWithResult(ctx, func() (*recordedResult, error) {
-			return rt.systemDB.checkOperationExecution(ctx, checkOperationExecutionDBInput{
+			return rt.steps.checkOperationExecution(ctx, checkOperationExecutionDBInput{
 				workflowUUID: wfState.workflowID,
 				functionID:   stepID,
 			})
@@ -849,7 +849,7 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn stepFunc, opts ...St
 	startTime := time.Now()
 
 	startErr := retry(ctx, func() error {
-		return rt.systemDB.recordOperationStart(ctx, recordOperationStartDBInput{
+		return rt.steps.recordOperationStart(ctx, recordOperationStartDBInput{
 			workflowUUID: wfState.workflowID,
 			functionID:   stepID,
 			functionName: stepOpts.stepName,
@@ -887,7 +887,7 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn stepFunc, opts ...St
 	}
 
 	recErr := retry(ctx, func() error {
-		return rt.systemDB.recordOperationResult(ctx, recordOperationResultDBInput{
+		return rt.steps.recordOperationResult(ctx, recordOperationResultDBInput{
 			workflowUUID: wfState.workflowID,
 			functionID:   stepID,
 			functionName: stepOpts.stepName,
@@ -1238,7 +1238,7 @@ func (rt *Runtime) List(opts ...ListOption) ([]Status, error) {
 // Steps returns the execution steps for a workflow.
 func (rt *Runtime) Steps(workflowID string) ([]StepInfo, error) {
 	steps, err := retryWithResult(rt.ctx, func() ([]stepInfo, error) {
-		return rt.systemDB.getWorkflowSteps(rt.ctx, getWorkflowStepsInput{workflowID: workflowID})
+		return rt.steps.getWorkflowSteps(rt.ctx, getWorkflowStepsInput{workflowID: workflowID})
 	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
 	if err != nil {
 		return nil, err

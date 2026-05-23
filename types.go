@@ -158,15 +158,6 @@ type systemDatabase interface {
 	resumeWorkflow(ctx context.Context, input resumeWorkflowDBInput) error
 	forkWorkflow(ctx context.Context, input forkWorkflowDBInput) (string, error)
 
-	recordChildWorkflow(ctx context.Context, input recordChildWorkflowDBInput) error
-	checkChildWorkflow(ctx context.Context, workflowUUID string, functionID int) (*string, error)
-	recordChildGetResult(ctx context.Context, input recordChildGetResultDBInput) error
-
-	recordOperationStart(ctx context.Context, input recordOperationStartDBInput) error
-	recordOperationResult(ctx context.Context, input recordOperationResultDBInput) error
-	checkOperationExecution(ctx context.Context, input checkOperationExecutionDBInput) (*recordedResult, error)
-	getWorkflowSteps(ctx context.Context, input getWorkflowStepsInput) ([]stepInfo, error)
-
 	dequeueWorkflows(ctx context.Context, input dequeueWorkflowsInput) ([]dequeuedWorkflow, error)
 	clearQueueAssignment(ctx context.Context, workflowID string) (bool, error)
 	getQueuePartitions(ctx context.Context, queueName string) ([]string, error)

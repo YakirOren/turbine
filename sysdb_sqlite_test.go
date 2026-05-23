@@ -12,14 +12,34 @@ import (
 // helper: creates a test app with collections and a sysdb instance.
 func setupSysDB(t *testing.T) (*sqliteSysDB, func()) {
 	t.Helper()
-	sysDB, _, cleanup := setupSysDBAndMessages(t)
-	return sysDB, cleanup
+	bundle := setupSysDBBundle(t)
+	return bundle.sysDB, bundle.cleanup
 }
 
 // setupSysDBAndMessages also returns a *messages bound to the same app + eventBus.
 // Use this in tests that exercise the messaging surface (send / recv / setEvent /
 // getEvent / awaitWorkflowResult).
 func setupSysDBAndMessages(t *testing.T) (*sqliteSysDB, *messages, func()) {
+	t.Helper()
+	bundle := setupSysDBBundle(t)
+	return bundle.sysDB, bundle.messages, bundle.cleanup
+}
+
+// setupSysDBAndSteps returns the sysDB plus a *steps bound to the same app.
+func setupSysDBAndSteps(t *testing.T) (*sqliteSysDB, *steps, func()) {
+	t.Helper()
+	bundle := setupSysDBBundle(t)
+	return bundle.sysDB, bundle.steps, bundle.cleanup
+}
+
+type sysDBBundle struct {
+	sysDB    *sqliteSysDB
+	messages *messages
+	steps    *steps
+	cleanup  func()
+}
+
+func setupSysDBBundle(t *testing.T) sysDBBundle {
 	t.Helper()
 	app, err := tests.NewTestApp()
 	if err != nil {
@@ -28,8 +48,12 @@ func setupSysDBAndMessages(t *testing.T) (*sqliteSysDB, *messages, func()) {
 	eb := newEventBus()
 	sysDB := newSQLiteSysDB(app, eb)
 	sysDB.launch(context.Background())
-	msgs := newMessages(app, eb, app.Logger())
-	return sysDB, msgs, app.Cleanup
+	return sysDBBundle{
+		sysDB:    sysDB,
+		messages: newMessages(app, eb, app.Logger()),
+		steps:    newSteps(app, app.Logger()),
+		cleanup:  app.Cleanup,
+	}
 }
 
 func makeStatus(id string) Status {
@@ -112,7 +136,7 @@ func TestInsertStatusConflictingName(t *testing.T) {
 }
 
 func TestRecordAndCheckOperationResult(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	sysDB, stp, cleanup := setupSysDBAndSteps(t)
 	defer cleanup()
 
 	wfID := "wf-op-test-1"
@@ -125,7 +149,7 @@ func TestRecordAndCheckOperationResult(t *testing.T) {
 	}
 
 	startedAt := time.Now().UnixMilli()
-	if err := sysDB.recordOperationStart(context.Background(), recordOperationStartDBInput{
+	if err := stp.recordOperationStart(context.Background(), recordOperationStartDBInput{
 		workflowUUID: wfID,
 		functionID:   1,
 		functionName: "myStep",
@@ -143,7 +167,7 @@ func TestRecordAndCheckOperationResult(t *testing.T) {
 		startedAt:    startedAt,
 		endedAt:      time.Now().UnixMilli(),
 	}
-	err = sysDB.recordOperationResult(context.Background(), recordInput)
+	err = stp.recordOperationResult(context.Background(), recordInput)
 	if err != nil {
 		t.Fatalf("recordOperationResult failed: %v", err)
 	}
@@ -153,7 +177,7 @@ func TestRecordAndCheckOperationResult(t *testing.T) {
 		workflowUUID: wfID,
 		functionID:   1,
 	}
-	result, err := sysDB.checkOperationExecution(context.Background(), checkInput)
+	result, err := stp.checkOperationExecution(context.Background(), checkInput)
 	if err != nil {
 		t.Fatalf("checkOperationExecution failed: %v", err)
 	}
@@ -167,7 +191,7 @@ func TestRecordAndCheckOperationResult(t *testing.T) {
 }
 
 func TestCheckOperationExecutionRecoversCrashedStep(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	sysDB, stp, cleanup := setupSysDBAndSteps(t)
 	defer cleanup()
 
 	wfID := "wf-op-crash-1"
@@ -178,7 +202,7 @@ func TestCheckOperationExecutionRecoversCrashedStep(t *testing.T) {
 	}
 
 	// Simulate a crash: start was recorded, result never arrived.
-	if err := sysDB.recordOperationStart(context.Background(), recordOperationStartDBInput{
+	if err := stp.recordOperationStart(context.Background(), recordOperationStartDBInput{
 		workflowUUID: wfID,
 		functionID:   1,
 		functionName: "myStep",
@@ -187,7 +211,7 @@ func TestCheckOperationExecutionRecoversCrashedStep(t *testing.T) {
 		t.Fatalf("recordOperationStart failed: %v", err)
 	}
 
-	result, err := sysDB.checkOperationExecution(context.Background(), checkOperationExecutionDBInput{
+	result, err := stp.checkOperationExecution(context.Background(), checkOperationExecutionDBInput{
 		workflowUUID: wfID,
 		functionID:   1,
 	})
@@ -200,7 +224,7 @@ func TestCheckOperationExecutionRecoversCrashedStep(t *testing.T) {
 }
 
 func TestCheckOperationExecutionNotFound(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	sysDB, stp, cleanup := setupSysDBAndSteps(t)
 	defer cleanup()
 
 	// Create a workflow first so the status check passes
@@ -218,7 +242,7 @@ func TestCheckOperationExecutionNotFound(t *testing.T) {
 		workflowUUID: wfID,
 		functionID:   999,
 	}
-	result, err := sysDB.checkOperationExecution(context.Background(), checkInput)
+	result, err := stp.checkOperationExecution(context.Background(), checkInput)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -441,7 +465,7 @@ func TestGetValueTimeout(t *testing.T) {
 }
 
 func TestGetWorkflowSteps(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	sysDB, stp, cleanup := setupSysDBAndSteps(t)
 	defer cleanup()
 
 	wfID := "wf-steps-1"
@@ -457,7 +481,7 @@ func TestGetWorkflowSteps(t *testing.T) {
 	out2 := `"step2"`
 	for i, out := range []*string{&out1, &out2} {
 		startedAt := time.Now().UnixMilli()
-		if err := sysDB.recordOperationStart(context.Background(), recordOperationStartDBInput{
+		if err := stp.recordOperationStart(context.Background(), recordOperationStartDBInput{
 			workflowUUID: wfID,
 			functionID:   i + 1,
 			functionName: "step",
@@ -465,7 +489,7 @@ func TestGetWorkflowSteps(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("record start %d: %v", i+1, err)
 		}
-		err = sysDB.recordOperationResult(context.Background(), recordOperationResultDBInput{
+		err = stp.recordOperationResult(context.Background(), recordOperationResultDBInput{
 			workflowUUID: wfID,
 			functionID:   i + 1,
 			functionName: "step",
@@ -478,7 +502,7 @@ func TestGetWorkflowSteps(t *testing.T) {
 		}
 	}
 
-	steps, err := sysDB.getWorkflowSteps(context.Background(), getWorkflowStepsInput{workflowID: wfID})
+	steps, err := stp.getWorkflowSteps(context.Background(), getWorkflowStepsInput{workflowID: wfID})
 	if err != nil {
 		t.Fatalf("getWorkflowSteps failed: %v", err)
 	}
