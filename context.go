@@ -113,7 +113,7 @@ func setAppStatus(ctx context.Context, rt *Runtime, label, color string) error {
 	if wfState.recovering || (wfState.appStatus == label && wfState.appStatusColor == color) {
 		return nil
 	}
-	err := rt.systemDB.updateAppStatus(ctx, updateAppStatusDBInput{
+	err := rt.workflows.updateAppStatus(ctx, updateAppStatusDBInput{
 		workflowID:     wfState.workflowID,
 		appStatus:      label,
 		appStatusColor: color,

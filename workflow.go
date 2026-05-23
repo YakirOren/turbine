@@ -133,7 +133,7 @@ func (h *baseHandle) GetWorkflowID() string {
 
 func (h *baseHandle) GetStatus() (Status, error) {
 	statuses, err := retryWithResult(h.runtime.ctx, func() ([]Status, error) {
-		return h.runtime.systemDB.listWorkflows(h.runtime.ctx, listWorkflowsDBInput{
+		return h.runtime.workflows.listWorkflows(h.runtime.ctx, listWorkflowsDBInput{
 			workflowIDs: []string{h.workflowID},
 		})
 	}, withRetrierLogger(h.runtime.app.Logger()), withMaxRetries(3))
@@ -544,7 +544,7 @@ func runWorkflowInternal(rt *Runtime, fn workflowFunc, input any, opts ...Workfl
 		ownerXID:          &ownerXID,
 		incrementAttempts: params.isDequeue || params.isRecovery,
 	}
-	insertResult, err := rt.systemDB.insertStatus(rt.ctx, insertInput)
+	insertResult, err := rt.workflows.insertStatus(rt.ctx, insertInput)
 	if err != nil {
 		var ptErr *Error
 		if errors.As(err, &ptErr) && ptErr.Code == ErrDeadLetter {
@@ -614,14 +614,14 @@ func runWorkflowInternal(rt *Runtime, fn workflowFunc, input any, opts ...Workfl
 			// badge. The intermediate state is "still PENDING with new badge"
 			// which is harmless.
 			_ = retry(rt.ctx, func() error {
-				return rt.systemDB.updateAppStatus(rt.ctx, updateAppStatusDBInput{
+				return rt.workflows.updateAppStatus(rt.ctx, updateAppStatusDBInput{
 					workflowID:     workflowID,
 					appStatus:      "panicked",
 					appStatusColor: "red",
 				})
 			}, withRetrierLogger(rt.app.Logger()))
 			_ = retry(rt.ctx, func() error {
-				return rt.systemDB.updateWorkflowOutcome(rt.ctx, updateWorkflowOutcomeDBInput{
+				return rt.workflows.updateWorkflowOutcome(rt.ctx, updateWorkflowOutcomeDBInput{
 					workflowID: workflowID,
 					status:     StatusError,
 					output:     nil,
@@ -670,7 +670,7 @@ func runWorkflowInternal(rt *Runtime, fn workflowFunc, input any, opts ...Workfl
 		}
 
 		recordErr := retry(rt.ctx, func() error {
-			return rt.systemDB.updateWorkflowOutcome(rt.ctx, updateWorkflowOutcomeDBInput{
+			return rt.workflows.updateWorkflowOutcome(rt.ctx, updateWorkflowOutcomeDBInput{
 				workflowID: workflowID,
 				status:     outcomeStatus,
 				output:     encodedOutput,
@@ -1123,7 +1123,7 @@ func Retrieve[R any](rt *Runtime, workflowID string) Handle[R] {
 func (rt *Runtime) Cancel(workflowID string) error {
 	var transitioned bool
 	err := retry(rt.ctx, func() error {
-		changed, err := rt.systemDB.cancelWorkflow(rt.ctx, cancelWorkflowDBInput{workflowID: workflowID})
+		changed, err := rt.workflows.cancelWorkflow(rt.ctx, cancelWorkflowDBInput{workflowID: workflowID})
 		if err != nil {
 			return err
 		}
@@ -1150,7 +1150,7 @@ func (rt *Runtime) Cancel(workflowID string) error {
 // Resume resumes a cancelled workflow.
 func (rt *Runtime) Resume(workflowID string) error {
 	err := retry(rt.ctx, func() error {
-		return rt.systemDB.resumeWorkflow(rt.ctx, resumeWorkflowDBInput{
+		return rt.workflows.resumeWorkflow(rt.ctx, resumeWorkflowDBInput{
 			workflowID: workflowID,
 			executorID: rt.executorID,
 			appVersion: rt.applicationVersion,
@@ -1231,7 +1231,7 @@ func (rt *Runtime) List(opts ...ListOption) ([]Status, error) {
 		o.apply(&input)
 	}
 	return retryWithResult(rt.ctx, func() ([]Status, error) {
-		return rt.systemDB.listWorkflows(rt.ctx, input)
+		return rt.workflows.listWorkflows(rt.ctx, input)
 	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
 }
 

@@ -146,23 +146,3 @@ type ProductRecord struct {
 	Metadata map[string]any `json:"metadata"`
 }
 
-// systemDatabase is the internal interface for database operations.
-type systemDatabase interface {
-	launch(ctx context.Context)
-	shutdown(ctx context.Context, timeout time.Duration)
-
-	insertStatus(ctx context.Context, input insertStatusDBInput) (*insertWorkflowResult, error)
-	listWorkflows(ctx context.Context, input listWorkflowsDBInput) ([]Status, error)
-	updateWorkflowOutcome(ctx context.Context, input updateWorkflowOutcomeDBInput) error
-	cancelWorkflow(ctx context.Context, input cancelWorkflowDBInput) (bool, error)
-	resumeWorkflow(ctx context.Context, input resumeWorkflowDBInput) error
-	forkWorkflow(ctx context.Context, input forkWorkflowDBInput) (string, error)
-
-	dequeueWorkflows(ctx context.Context, input dequeueWorkflowsInput) ([]dequeuedWorkflow, error)
-	clearQueueAssignment(ctx context.Context, workflowID string) (bool, error)
-	getQueuePartitions(ctx context.Context, queueName string) ([]string, error)
-
-	updateAppStatus(ctx context.Context, input updateAppStatusDBInput) error
-
-	garbageCollectWorkflows(ctx context.Context, input garbageCollectWorkflowsInput) error
-}

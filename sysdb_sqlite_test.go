@@ -10,7 +10,7 @@ import (
 )
 
 // helper: creates a test app with collections and a sysdb instance.
-func setupSysDB(t *testing.T) (*sqliteSysDB, func()) {
+func setupSysDB(t *testing.T) (*workflows, func()) {
 	t.Helper()
 	bundle := setupSysDBBundle(t)
 	return bundle.sysDB, bundle.cleanup
@@ -19,28 +19,28 @@ func setupSysDB(t *testing.T) (*sqliteSysDB, func()) {
 // setupSysDBAndMessages also returns a *messages bound to the same app + eventBus.
 // Use this in tests that exercise the messaging surface (send / recv / setEvent /
 // getEvent / awaitWorkflowResult).
-func setupSysDBAndMessages(t *testing.T) (*sqliteSysDB, *messages, func()) {
+func setupSysDBAndMessages(t *testing.T) (*workflows, *messages, func()) {
 	t.Helper()
 	bundle := setupSysDBBundle(t)
 	return bundle.sysDB, bundle.messages, bundle.cleanup
 }
 
 // setupSysDBAndSteps returns the sysDB plus a *steps bound to the same app.
-func setupSysDBAndSteps(t *testing.T) (*sqliteSysDB, *steps, func()) {
+func setupSysDBAndSteps(t *testing.T) (*workflows, *steps, func()) {
 	t.Helper()
 	bundle := setupSysDBBundle(t)
 	return bundle.sysDB, bundle.steps, bundle.cleanup
 }
 
 // setupSysDBAndKV returns the sysDB plus a *kv bound to the same app.
-func setupSysDBAndKV(t *testing.T) (*sqliteSysDB, *kv, func()) {
+func setupSysDBAndKV(t *testing.T) (*workflows, *kv, func()) {
 	t.Helper()
 	bundle := setupSysDBBundle(t)
 	return bundle.sysDB, bundle.kv, bundle.cleanup
 }
 
 type sysDBBundle struct {
-	sysDB    *sqliteSysDB
+	sysDB    *workflows
 	messages *messages
 	steps    *steps
 	kv       *kv
@@ -54,7 +54,7 @@ func setupSysDBBundle(t *testing.T) sysDBBundle {
 		t.Fatal(err)
 	}
 	eb := newEventBus()
-	sysDB := newSQLiteSysDB(app, eb)
+	sysDB := newWorkflows(app, eb)
 	sysDB.launch(context.Background())
 	return sysDBBundle{
 		sysDB:    sysDB,
@@ -673,7 +673,7 @@ func TestKVPublicAPIRoundTrip(t *testing.T) {
 	sysDB, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	rt := &Runtime{systemDB: sysDB, kv: kvs}
+	rt := &Runtime{workflows: sysDB, kv: kvs}
 
 	type config struct {
 		RateLimit int    `json:"rate_limit"`
@@ -700,7 +700,7 @@ func TestKVSetEmptyKey(t *testing.T) {
 	sysDB, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	rt := &Runtime{systemDB: sysDB, kv: kvs}
+	rt := &Runtime{workflows: sysDB, kv: kvs}
 	err := rt.KVSet(context.Background(), "", "value")
 	if err == nil {
 		t.Fatal("expected error for empty key")
@@ -711,7 +711,7 @@ func TestKVSetNilValue(t *testing.T) {
 	sysDB, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	rt := &Runtime{systemDB: sysDB, kv: kvs}
+	rt := &Runtime{workflows: sysDB, kv: kvs}
 	err := rt.KVSet(context.Background(), "nil-key", nil)
 	if err == nil {
 		t.Fatal("expected error for nil value")
@@ -722,7 +722,7 @@ func TestKVGetNotFound(t *testing.T) {
 	sysDB, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	rt := &Runtime{systemDB: sysDB, kv: kvs}
+	rt := &Runtime{workflows: sysDB, kv: kvs}
 	val, ok, err := KVGet[string](rt, context.Background(), "missing")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -739,7 +739,7 @@ func TestKVGetTypeMismatch(t *testing.T) {
 	sysDB, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	rt := &Runtime{systemDB: sysDB, kv: kvs}
+	rt := &Runtime{workflows: sysDB, kv: kvs}
 
 	err := rt.KVSet(context.Background(), "type-key", "hello")
 	if err != nil {
@@ -757,7 +757,7 @@ func TestKVRoundTripInt(t *testing.T) {
 	sysDB, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	rt := &Runtime{systemDB: sysDB, kv: kvs}
+	rt := &Runtime{workflows: sysDB, kv: kvs}
 
 	err := rt.KVSet(context.Background(), "counter", 42)
 	if err != nil {

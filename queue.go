@@ -118,7 +118,7 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 			partitionKeys := []string{""}
 			if queue.PartitionQueue {
 				parts, err := retryWithResult(rt.ctx, func() ([]string, error) {
-					return rt.systemDB.getQueuePartitions(rt.ctx, queue.Name)
+					return rt.workflows.getQueuePartitions(rt.ctx, queue.Name)
 				}, withRetrierLogger(queueLogger))
 				if err != nil {
 					skipDequeue = true
@@ -139,7 +139,7 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 				}
 
 				workflows, err := retryWithResult(rt.ctx, func() ([]dequeuedWorkflow, error) {
-					return rt.systemDB.dequeueWorkflows(rt.ctx, dequeueWorkflowsInput{
+					return rt.workflows.dequeueWorkflows(rt.ctx, dequeueWorkflowsInput{
 						queueName:         queue.Name,
 						executorID:        rt.executorID,
 						appVersion:        rt.applicationVersion,

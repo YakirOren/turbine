@@ -32,7 +32,7 @@ func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]Handle[any], 
 	}
 
 	pendingWorkflows, err := retryWithResult(rt.ctx, func() ([]Status, error) {
-		return rt.systemDB.listWorkflows(rt.ctx, listWorkflowsDBInput{
+		return rt.workflows.listWorkflows(rt.ctx, listWorkflowsDBInput{
 			status:             []StatusType{StatusPending},
 			executorIDs:        executorIDs,
 			applicationVersion: appVersion,
@@ -48,7 +48,7 @@ func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]Handle[any], 
 	for _, wf := range pendingWorkflows {
 		if wf.QueueName != "" {
 			cleared, err := retryWithResult(rt.ctx, func() (bool, error) {
-				return rt.systemDB.clearQueueAssignment(rt.ctx, wf.ID)
+				return rt.workflows.clearQueueAssignment(rt.ctx, wf.ID)
 			}, withRetrierLogger(rt.app.Logger()))
 			if err != nil {
 				rt.app.Logger().Error("error clearing queue assignment", "workflow_id", wf.ID, "error", err)

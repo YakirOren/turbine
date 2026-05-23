@@ -36,12 +36,12 @@ type Runtime struct {
 	// ownedApp is non-nil when a constructor owns the PocketBase app lifecycle
 	// (currently: NewStandalone). When set, Launch calls Bootstrap and Shutdown
 	// calls ResetBootstrapState.
-	ownedApp core.App
-	systemDB systemDatabase
-	messages *messages
-	steps    *steps
-	kv       *kv
-	eventBus *eventBus
+	ownedApp  core.App
+	workflows *workflows
+	messages  *messages
+	steps     *steps
+	kv        *kv
+	eventBus  *eventBus
 	config   *Config
 	logger   *slog.Logger // overrides app.Logger() for workflow + step logs when non-nil
 
@@ -107,7 +107,7 @@ func NewRuntime(app core.App, config Config) *Runtime {
 	drainCtx, drainCancel := context.WithCancel(baseCtx)
 	eb := newEventBus()
 
-	sysDB := newSQLiteSysDB(app, eb)
+	wfs := newWorkflows(app, eb)
 	msgs := newMessages(app, eb, app.Logger())
 	stp := newSteps(app, app.Logger())
 	kvs := newKV(app, app.Logger())
@@ -118,7 +118,7 @@ func NewRuntime(app core.App, config Config) *Runtime {
 		drainCtx:                drainCtx,
 		drainCancelFunc:         drainCancel,
 		app:                     app,
-		systemDB:                sysDB,
+		workflows:               wfs,
 		messages:                msgs,
 		steps:                   stp,
 		kv:                      kvs,
@@ -166,7 +166,7 @@ func (rt *Runtime) Launch() error {
 
 	rt.applicationID = rt.app.Settings().Meta.AppName
 
-	rt.systemDB.launch(rt.ctx)
+	rt.workflows.launch(rt.ctx)
 
 	// Recover pending workflows before starting the queue runner
 	// to avoid racing between recovery and dequeue
@@ -213,7 +213,7 @@ func (rt *Runtime) Launch() error {
 				return
 			}
 			cutoff := time.Now().Add(-rt.config.GCRetention)
-			if err := rt.systemDB.garbageCollectWorkflows(rt.ctx, garbageCollectWorkflowsInput{
+			if err := rt.workflows.garbageCollectWorkflows(rt.ctx, garbageCollectWorkflowsInput{
 				cutoffTime: cutoff,
 			}); err != nil {
 				rt.app.Logger().Error("workflow garbage collection failed", "error", err)
@@ -275,8 +275,8 @@ func (rt *Runtime) Shutdown() {
 		}
 	}
 
-	if rt.systemDB != nil {
-		rt.systemDB.shutdown(rt.ctx, timeout)
+	if rt.workflows != nil {
+		rt.workflows.shutdown(rt.ctx, timeout)
 	}
 
 	if rt.ownedApp != nil {
@@ -287,7 +287,7 @@ func (rt *Runtime) Shutdown() {
 // GarbageCollect removes completed workflows older than the configured retention period.
 func (rt *Runtime) GarbageCollect() error {
 	cutoff := time.Now().Add(-rt.config.GCRetention)
-	return rt.systemDB.garbageCollectWorkflows(rt.ctx, garbageCollectWorkflowsInput{cutoffTime: cutoff})
+	return rt.workflows.garbageCollectWorkflows(rt.ctx, garbageCollectWorkflowsInput{cutoffTime: cutoff})
 }
 
 // baseLogger returns the runtime's configured logger, falling back to the app logger.
