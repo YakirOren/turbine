@@ -178,10 +178,10 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 		}()
 
 		// Wait for enqueue event or shutdown
-		enqueueCh := rt.systemDB.waitForEnqueue(rt.drainCtx, queue.Name)
+		enqueueCh := rt.messages.waitForEnqueue(rt.drainCtx, queue.Name)
 		select {
 		case <-rt.drainCtx.Done():
-			rt.systemDB.stopWaitForEnqueue(queue.Name, enqueueCh)
+			rt.messages.stopWaitForEnqueue(queue.Name, enqueueCh)
 			queueLogger.Debug("queue goroutine stopping", "cause", "draining")
 			return
 		case <-enqueueCh:

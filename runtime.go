@@ -38,6 +38,8 @@ type Runtime struct {
 	// calls ResetBootstrapState.
 	ownedApp core.App
 	systemDB systemDatabase
+	messages *messages
+	eventBus *eventBus
 	config   *Config
 	logger   *slog.Logger // overrides app.Logger() for workflow + step logs when non-nil
 
@@ -104,6 +106,7 @@ func NewRuntime(app core.App, config Config) *Runtime {
 	eb := newEventBus()
 
 	sysDB := newSQLiteSysDB(app, eb)
+	msgs := newMessages(app, eb, app.Logger())
 
 	rt := &Runtime{
 		ctx:                     baseCtx,
@@ -112,6 +115,8 @@ func NewRuntime(app core.App, config Config) *Runtime {
 		drainCancelFunc:         drainCancel,
 		app:                     app,
 		systemDB:                sysDB,
+		messages:                msgs,
+		eventBus:                eb,
 		config:                  &config,
 		logger:                  config.Logger,
 		applicationVersion:      config.ApplicationVersion,

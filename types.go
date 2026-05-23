@@ -154,7 +154,6 @@ type systemDatabase interface {
 	insertStatus(ctx context.Context, input insertStatusDBInput) (*insertWorkflowResult, error)
 	listWorkflows(ctx context.Context, input listWorkflowsDBInput) ([]Status, error)
 	updateWorkflowOutcome(ctx context.Context, input updateWorkflowOutcomeDBInput) error
-	awaitWorkflowResult(ctx context.Context, workflowID string, pollInterval time.Duration) (*string, error)
 	cancelWorkflow(ctx context.Context, input cancelWorkflowDBInput) (bool, error)
 	resumeWorkflow(ctx context.Context, input resumeWorkflowDBInput) error
 	forkWorkflow(ctx context.Context, input forkWorkflowDBInput) (string, error)
@@ -168,16 +167,9 @@ type systemDatabase interface {
 	checkOperationExecution(ctx context.Context, input checkOperationExecutionDBInput) (*recordedResult, error)
 	getWorkflowSteps(ctx context.Context, input getWorkflowStepsInput) ([]stepInfo, error)
 
-	send(ctx context.Context, input sendInput) error
-	recv(ctx context.Context, input recvInput) (*string, error)
-	setEvent(ctx context.Context, input setValueInput) error
-	getEvent(ctx context.Context, input getEventInput) (*string, error)
-
 	dequeueWorkflows(ctx context.Context, input dequeueWorkflowsInput) ([]dequeuedWorkflow, error)
 	clearQueueAssignment(ctx context.Context, workflowID string) (bool, error)
 	getQueuePartitions(ctx context.Context, queueName string) ([]string, error)
-	waitForEnqueue(ctx context.Context, queueName string) chan struct{}
-	stopWaitForEnqueue(queueName string, ch chan struct{})
 
 	updateAppStatus(ctx context.Context, input updateAppStatusDBInput) error
 

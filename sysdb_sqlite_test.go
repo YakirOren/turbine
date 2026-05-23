@@ -12,6 +12,15 @@ import (
 // helper: creates a test app with collections and a sysdb instance.
 func setupSysDB(t *testing.T) (*sqliteSysDB, func()) {
 	t.Helper()
+	sysDB, _, cleanup := setupSysDBAndMessages(t)
+	return sysDB, cleanup
+}
+
+// setupSysDBAndMessages also returns a *messages bound to the same app + eventBus.
+// Use this in tests that exercise the messaging surface (send / recv / setEvent /
+// getEvent / awaitWorkflowResult).
+func setupSysDBAndMessages(t *testing.T) (*sqliteSysDB, *messages, func()) {
+	t.Helper()
 	app, err := tests.NewTestApp()
 	if err != nil {
 		t.Fatal(err)
@@ -19,7 +28,8 @@ func setupSysDB(t *testing.T) (*sqliteSysDB, func()) {
 	eb := newEventBus()
 	sysDB := newSQLiteSysDB(app, eb)
 	sysDB.launch(context.Background())
-	return sysDB, app.Cleanup
+	msgs := newMessages(app, eb, app.Logger())
+	return sysDB, msgs, app.Cleanup
 }
 
 func makeStatus(id string) Status {
@@ -261,7 +271,7 @@ func TestCancelWorkflow(t *testing.T) {
 }
 
 func TestSendAndRecv(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	sysDB, msgs, cleanup := setupSysDBAndMessages(t)
 	defer cleanup()
 
 	destWfID := "wf-recv-1"
@@ -281,7 +291,7 @@ func TestSendAndRecv(t *testing.T) {
 		Topic:           "greet",
 		Message:         &msg,
 	}
-	err = sysDB.send(context.Background(), sendInput)
+	err = msgs.send(context.Background(), sendInput)
 	if err != nil {
 		t.Fatalf("send failed: %v", err)
 	}
@@ -294,7 +304,7 @@ func TestSendAndRecv(t *testing.T) {
 		topic:        "greet",
 		timeout:      2 * time.Second,
 	}
-	result, err := sysDB.recv(ctx, recvIn)
+	result, err := msgs.recv(ctx, recvIn)
 	if err != nil {
 		t.Fatalf("recv failed: %v", err)
 	}
@@ -304,7 +314,7 @@ func TestSendAndRecv(t *testing.T) {
 }
 
 func TestRecvTimeout(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	_, msgs, cleanup := setupSysDBAndMessages(t)
 	defer cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
@@ -314,7 +324,7 @@ func TestRecvTimeout(t *testing.T) {
 		topic:        "nothing",
 		timeout:      0, // immediate
 	}
-	result, err := sysDB.recv(ctx, recvIn)
+	result, err := msgs.recv(ctx, recvIn)
 	if err != nil {
 		t.Fatalf("recv should not error on timeout, got: %v", err)
 	}
@@ -324,7 +334,7 @@ func TestRecvTimeout(t *testing.T) {
 }
 
 func TestSetAndGetValue(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	sysDB, msgs, cleanup := setupSysDBAndMessages(t)
 	defer cleanup()
 
 	wfID := "wf-event-1"
@@ -343,7 +353,7 @@ func TestSetAndGetValue(t *testing.T) {
 		Key:          "myKey",
 		Value:        &val,
 	}
-	err = sysDB.setEvent(context.Background(), setIn)
+	err = msgs.setEvent(context.Background(), setIn)
 	if err != nil {
 		t.Fatalf("setEvent failed: %v", err)
 	}
@@ -356,7 +366,7 @@ func TestSetAndGetValue(t *testing.T) {
 		key:                "myKey",
 		timeout:            2 * time.Second,
 	}
-	result, err := sysDB.getEvent(ctx, getIn)
+	result, err := msgs.getEvent(ctx, getIn)
 	if err != nil {
 		t.Fatalf("getEvent failed: %v", err)
 	}
@@ -366,7 +376,7 @@ func TestSetAndGetValue(t *testing.T) {
 }
 
 func TestSetValueIdempotent(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	sysDB, msgs, cleanup := setupSysDBAndMessages(t)
 	defer cleanup()
 
 	wfID := "wf-event-idem-1"
@@ -384,13 +394,13 @@ func TestSetValueIdempotent(t *testing.T) {
 		Key:          "k1",
 		Value:        &val,
 	}
-	if err := sysDB.setEvent(context.Background(), setIn); err != nil {
+	if err := msgs.setEvent(context.Background(), setIn); err != nil {
 		t.Fatal(err)
 	}
 	// Set again with different value, ON CONFLICT DO UPDATE
 	val2 := `"second"`
 	setIn.Value = &val2
-	if err := sysDB.setEvent(context.Background(), setIn); err != nil {
+	if err := msgs.setEvent(context.Background(), setIn); err != nil {
 		t.Fatal(err)
 	}
 
@@ -401,7 +411,7 @@ func TestSetValueIdempotent(t *testing.T) {
 		key:                "k1",
 		timeout:            1 * time.Second,
 	}
-	result, err := sysDB.getEvent(ctx, getIn)
+	result, err := msgs.getEvent(ctx, getIn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +421,7 @@ func TestSetValueIdempotent(t *testing.T) {
 }
 
 func TestGetValueTimeout(t *testing.T) {
-	sysDB, cleanup := setupSysDB(t)
+	_, msgs, cleanup := setupSysDBAndMessages(t)
 	defer cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
@@ -421,7 +431,7 @@ func TestGetValueTimeout(t *testing.T) {
 		key:                "nokey",
 		timeout:            0,
 	}
-	result, err := sysDB.getEvent(ctx, getIn)
+	result, err := msgs.getEvent(ctx, getIn)
 	if err != nil {
 		t.Fatalf("getEvent should not error on timeout, got: %v", err)
 	}

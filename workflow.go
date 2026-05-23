@@ -181,7 +181,7 @@ func (h *workflowPollingHandle[R]) GetResult(opts ...GetResultOption) (R, error)
 	}
 
 	encodedResult, err := retryWithResult(h.runtime.ctx, func() (*string, error) {
-		return h.runtime.systemDB.awaitWorkflowResult(h.runtime.ctx, h.workflowID, options.pollInterval)
+		return h.runtime.messages.awaitWorkflowResult(h.runtime.ctx, h.workflowID, options.pollInterval)
 	}, withRetrierLogger(h.runtime.app.Logger()))
 	if err != nil {
 		return *new(R), err
@@ -640,7 +640,7 @@ func runWorkflowInternal(rt *Runtime, fn workflowFunc, input any, opts ...Workfl
 		if errors.Is(fnErr, &Error{Code: ErrConflictingID}) {
 			rt.app.Logger().Warn("workflow ID conflict, waiting for existing workflow", "workflow_id", workflowID)
 			encoded, awaitErr := retryWithResult(rt.ctx, func() (*string, error) {
-				return rt.systemDB.awaitWorkflowResult(rt.ctx, workflowID, dbRetryInterval)
+				return rt.messages.awaitWorkflowResult(rt.ctx, workflowID, dbRetryInterval)
 			}, withRetrierLogger(rt.app.Logger()))
 			outcomeChan <- workflowOutcome[any]{result: encoded, err: awaitErr}
 			close(outcomeChan)
@@ -985,13 +985,13 @@ func Send(ctx Context, destinationID string, message any, topic string) error {
 				in.ProducerWorkflow = stepState.workflowID
 				in.ProducerStepID = int(stepState.stepID.Load())
 			}
-			return nil, rt.systemDB.send(stepCtx, in)
+			return nil, rt.messages.send(stepCtx, in)
 		}, WithStepName("pt.send"))
 		return err
 	}
 
 	return retry(ctx, func() error {
-		return rt.systemDB.send(ctx, sendInput{
+		return rt.messages.send(ctx, sendInput{
 			DestinationUUID: destinationID,
 			Topic:           topic,
 			Message:         encoded,
@@ -1011,7 +1011,7 @@ func Recv[R any](ctx Context, topic string, timeout time.Duration) (R, error) {
 	}
 
 	encoded, err := retryWithResult(ctx, func() (*string, error) {
-		return rt.systemDB.recv(ctx, recvInput{
+		return rt.messages.recv(ctx, recvInput{
 			workflowUUID: wfState.workflowID,
 			topic:        topic,
 			timeout:      timeout,
@@ -1040,7 +1040,7 @@ func SetValue(ctx Context, key string, value any) error {
 	}
 
 	_, err = Do(ctx, func(ctx context.Context) (any, error) {
-		return nil, rt.systemDB.setEvent(ctx, setValueInput{
+		return nil, rt.messages.setEvent(ctx, setValueInput{
 			WorkflowUUID: wfState.workflowID,
 			Key:          key,
 			Value:        encoded,
@@ -1053,7 +1053,7 @@ func SetValue(ctx Context, key string, value any) error {
 func GetValue[R any](ctx Context, targetWorkflowID string, key string, timeout time.Duration) (R, error) {
 	rt := runtimeFromContext(ctx)
 	encoded, err := retryWithResult(ctx, func() (*string, error) {
-		return rt.systemDB.getEvent(ctx, getEventInput{
+		return rt.messages.getEvent(ctx, getEventInput{
 			targetWorkflowUUID: targetWorkflowID,
 			key:                key,
 			timeout:            timeout,
