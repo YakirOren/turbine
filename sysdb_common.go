@@ -1,6 +1,31 @@
 package turbine
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+const (
+	ptInternalQueueName = "_pt_internal_queue"
+	dbRetryInterval     = 1 * time.Second
+)
+
+// derefStr converts a *string to string, returning "" for nil.
+// PocketBase TextFields are NOT NULL with default "", so we must never bind nil.
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// isSQLiteUniqueViolation checks if an error is a SQLite UNIQUE constraint violation.
+func isSQLiteUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
 
 // Internal DB input/output types
 //

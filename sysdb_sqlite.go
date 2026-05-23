@@ -14,11 +14,6 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-const (
-	ptInternalQueueName = "_pt_internal_queue"
-	dbRetryInterval     = 1 * time.Second
-)
-
 type sqliteSysDB struct {
 	app      core.App
 	eventBus *eventBus
@@ -44,15 +39,6 @@ func (s *sqliteSysDB) shutdown(ctx context.Context, timeout time.Duration) {
 	s.logger.Debug("SQLite system database shut down")
 }
 
-// derefStr converts a *string to string, returning "" for nil.
-// PocketBase TextFields are NOT NULL with default "", so we must never bind nil.
-func derefStr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
 // workflowExists returns nil if the workflow exists, or an ErrWorkflowNotFound if not.
 func (s *sqliteSysDB) workflowExists(workflowID string) error {
 	var exists int
@@ -68,14 +54,6 @@ func (s *sqliteSysDB) workflowExists(workflowID string) error {
 		return fmt.Errorf("failed to check workflow existence: %w", err)
 	}
 	return nil
-}
-
-// isSQLiteUniqueViolation checks if an error is a SQLite UNIQUE constraint violation.
-func isSQLiteUniqueViolation(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 func (s *sqliteSysDB) insertStatus(ctx context.Context, input insertStatusDBInput) (*insertWorkflowResult, error) {
