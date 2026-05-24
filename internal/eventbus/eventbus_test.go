@@ -1,4 +1,4 @@
-package turbine
+package eventbus
 
 import (
 	"sync"
@@ -7,7 +7,7 @@ import (
 )
 
 func TestEventBusNotifyWake(t *testing.T) {
-	eb := newEventBus()
+	eb := NewBus()
 	ch := eb.Wait("wf1::topic1")
 
 	go func() {
@@ -23,7 +23,7 @@ func TestEventBusNotifyWake(t *testing.T) {
 }
 
 func TestEventBusNoFalseWake(t *testing.T) {
-	eb := newEventBus()
+	eb := NewBus()
 	ch := eb.Wait("wf1::topic1")
 
 	eb.Notify("wf2::topic1")
@@ -36,7 +36,7 @@ func TestEventBusNoFalseWake(t *testing.T) {
 }
 
 func TestEventBusMultipleWaiters(t *testing.T) {
-	eb := newEventBus()
+	eb := NewBus()
 	var wg sync.WaitGroup
 	wg.Add(3)
 
@@ -65,7 +65,7 @@ func TestEventBusMultipleWaiters(t *testing.T) {
 }
 
 func TestEventBusRemove(t *testing.T) {
-	eb := newEventBus()
+	eb := NewBus()
 	ch := eb.Wait("wf1::key")
 	eb.Remove("wf1::key", ch)
 

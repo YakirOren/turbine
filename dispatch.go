@@ -1,21 +1,23 @@
 package turbine
 
 import (
+	"github.com/YakirOren/turbine/internal/dispatch"
+	"github.com/YakirOren/turbine/internal/retry"
 	"github.com/pocketbase/pocketbase/core"
 )
 
 // dispatchEvent sends webhooks and notifications for a workflow event.
 // Callers should invoke this in a goroutine: go rt.dispatchEvent(...)
 func (rt *Runtime) dispatchEvent(workflowID, name string, status StatusType, output *string, errorMsg *string) {
-	defer recoverGoroutine(rt.app.Logger(), "dispatch panic recovered", "workflow_id", workflowID)
-	rt.dispatchWebhooks(workflowID, name, status, output, errorMsg)
-	rt.dispatchNotifications(workflowID, name, status, errorMsg)
+	defer retry.RecoverGoroutine(rt.app.Logger(), "dispatch panic recovered", "workflow_id", workflowID)
+	rt.webhooks.Dispatch(workflowID, name, string(status), output, errorMsg, dispatch.MatchesEvent)
+	rt.notifications.Dispatch(workflowID, name, status, errorMsg, dispatch.MatchesEvent)
 }
 
 // reloadDispatchCaches loads webhook and alert channel records into memory.
 func (rt *Runtime) reloadDispatchCaches() {
-	rt.reloadWebhookCache()
-	rt.reloadAlertChannelCache()
+	rt.webhooks.ReloadCache()
+	rt.notifications.ReloadCache()
 }
 
 // registerDispatchHooks registers PocketBase hooks that invalidate the
@@ -28,12 +30,12 @@ func (rt *Runtime) registerDispatchHooks() {
 		switch col {
 		case collectionWebhooks:
 			reload = func(e *core.RecordEvent) error {
-				rt.reloadWebhookCache()
+				rt.webhooks.ReloadCache()
 				return e.Next()
 			}
 		case collectionAlertChannels:
 			reload = func(e *core.RecordEvent) error {
-				rt.reloadAlertChannelCache()
+				rt.notifications.ReloadCache()
 				return e.Next()
 			}
 		}
@@ -44,13 +46,3 @@ func (rt *Runtime) registerDispatchHooks() {
 	}
 }
 
-// matchesEvent checks if eventName matches any entry in the events list,
-// including wildcard patterns like "workflow.*".
-func matchesEvent(events []string, eventName string) bool {
-	for _, ev := range events {
-		if ev == eventName || ev == "workflow.*" {
-			return true
-		}
-	}
-	return false
-}

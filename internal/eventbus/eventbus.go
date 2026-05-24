@@ -1,20 +1,23 @@
-package turbine
+// Package eventbus provides an in-memory pub/sub used by turbine to coordinate
+// workflow completion and queue enqueue events between subsystems within a
+// single process.
+package eventbus
 
 import "sync"
 
-type eventBus struct {
+type Bus struct {
 	mu      sync.Mutex
 	waiters map[string][]chan struct{}
 }
 
-func newEventBus() *eventBus {
-	return &eventBus{
+func NewBus() *Bus {
+	return &Bus{
 		waiters: make(map[string][]chan struct{}),
 	}
 }
 
 // Wait registers a waiter for the given key and returns a channel that will be signaled.
-func (eb *eventBus) Wait(key string) chan struct{} {
+func (eb *Bus) Wait(key string) chan struct{} {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 	ch := make(chan struct{}, 1)
@@ -23,7 +26,7 @@ func (eb *eventBus) Wait(key string) chan struct{} {
 }
 
 // Notify signals all waiters for the given key and removes them.
-func (eb *eventBus) Notify(key string) {
+func (eb *Bus) Notify(key string) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 	for _, ch := range eb.waiters[key] {
@@ -36,7 +39,7 @@ func (eb *eventBus) Notify(key string) {
 }
 
 // Remove unregisters a specific waiter channel for the given key.
-func (eb *eventBus) Remove(key string, ch chan struct{}) {
+func (eb *Bus) Remove(key string, ch chan struct{}) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 	eb.removeLocked(key, ch)
@@ -44,7 +47,7 @@ func (eb *eventBus) Remove(key string, ch chan struct{}) {
 
 // Swap atomically replaces a waiter channel with a new one, preventing
 // a gap where a Notify could be missed between Remove and Wait.
-func (eb *eventBus) Swap(key string, old chan struct{}) chan struct{} {
+func (eb *Bus) Swap(key string, old chan struct{}) chan struct{} {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 	eb.removeLocked(key, old)
@@ -53,7 +56,7 @@ func (eb *eventBus) Swap(key string, old chan struct{}) chan struct{} {
 	return ch
 }
 
-func (eb *eventBus) removeLocked(key string, ch chan struct{}) {
+func (eb *Bus) removeLocked(key string, ch chan struct{}) {
 	waiters := eb.waiters[key]
 	for i, w := range waiters {
 		if w == ch {

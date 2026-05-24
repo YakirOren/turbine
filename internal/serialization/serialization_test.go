@@ -1,13 +1,13 @@
-package turbine
+package serialization
 
 import "testing"
 
 func TestSerializerRoundTrip(t *testing.T) {
-	encoded, err := encodeJSON("hello")
+	encoded, err := EncodeJSON("hello")
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := decodeJSON[string](encoded)
+	decoded, err := DecodeJSON[string](encoded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -17,11 +17,11 @@ func TestSerializerRoundTrip(t *testing.T) {
 }
 
 func TestSerializerNil(t *testing.T) {
-	encoded, err := encodeJSON[*string](nil)
+	encoded, err := EncodeJSON[*string](nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := decodeJSON[*string](encoded)
+	decoded, err := DecodeJSON[*string](encoded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,11 +36,11 @@ func TestSerializerStruct(t *testing.T) {
 		Value int
 	}
 	input := testData{Name: "test", Value: 42}
-	encoded, err := encodeJSON(input)
+	encoded, err := EncodeJSON(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := decodeJSON[testData](encoded)
+	decoded, err := DecodeJSON[testData](encoded)
 	if err != nil {
 		t.Fatal(err)
 	}

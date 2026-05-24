@@ -11,7 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hashicorp/go-retryablehttp"
+	"github.com/YakirOren/turbine/internal/eventbus"
+	"github.com/YakirOren/turbine/internal/notifications"
+	"github.com/YakirOren/turbine/internal/sysdb"
+	"github.com/YakirOren/turbine/internal/webhooks"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -40,8 +43,8 @@ type Runtime struct {
 	workflows *workflows
 	messages  *messages
 	steps     *steps
-	kv        *kv
-	eventBus  *eventBus
+	kv        *sysdb.KV
+	eventBus  *eventbus.Bus
 	config   *Config
 	logger   *slog.Logger // overrides app.Logger() for workflow + step logs when non-nil
 
@@ -68,13 +71,11 @@ type Runtime struct {
 	// Disabled compile-time schedules (key = schedule name, value = struct{}{})
 	disabledSchedules *sync.Map
 
-	// Cached dispatch targets, reloaded via collection hooks
-	webhookCache      atomic.Value // []cachedWebhook
-	alertChannelCache atomic.Value // []cachedAlertChannel
+	// Webhook delivery (cache + HTTP client + validation live inside the sender).
+	webhooks *webhooks.Sender
 
-	// Shared retryable HTTP client for webhook delivery. Built once so the
-	// underlying http.Transport's connection pool is reused across dispatches.
-	webhookClient *retryablehttp.Client
+	// Alert channel delivery (cache + shoutrrr send live inside the sender).
+	notifications *notifications.Sender
 
 	productSender ProductSender
 }
@@ -105,12 +106,12 @@ func NewRuntime(app core.App, config Config) *Runtime {
 
 	baseCtx, cancelFunc := context.WithCancelCause(context.Background())
 	drainCtx, drainCancel := context.WithCancel(baseCtx)
-	eb := newEventBus()
+	eb := eventbus.NewBus()
 
 	wfs := newWorkflows(app, eb, app.Logger())
 	msgs := newMessages(app, eb, app.Logger())
 	stp := newSteps(app, app.Logger())
-	kvs := newKV(app, app.Logger())
+	kvs := sysdb.NewKV(app, app.Logger())
 
 	rt := &Runtime{
 		ctx:                     baseCtx,
@@ -138,7 +139,14 @@ func NewRuntime(app core.App, config Config) *Runtime {
 	rt.queueRunner = newQueueRunner()
 	newWorkflowQueue(rt, ptInternalQueueName)
 	rt.scheduleManager = newScheduleManager()
-	rt.webhookClient = rt.newWebhookClient()
+	rt.webhooks = webhooks.NewSender(rt.ctx, app, app.Logger(), webhooks.Config{
+		Timeout:               config.WebhookTimeout,
+		MaxRetries:            config.WebhookMaxRetries,
+		AllowPrivateAddresses: config.AllowPrivateAddresses,
+	}, collectionWebhooks, validDispatchEvents)
+	rt.notifications = notifications.NewSender(app, app.Logger(), notifications.Config{
+		AllowPrivateAddresses: config.AllowPrivateAddresses,
+	}, collectionAlertChannels, validDispatchEvents)
 
 	return rt
 }

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/YakirOren/turbine/internal/retry"
+	"github.com/YakirOren/turbine/internal/serialization"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -132,11 +134,11 @@ func (h *baseHandle) GetWorkflowID() string {
 }
 
 func (h *baseHandle) GetStatus() (Status, error) {
-	statuses, err := retryWithResult(h.runtime.ctx, func() ([]Status, error) {
+	statuses, err := retry.RetryWithResult(h.runtime.ctx, func() ([]Status, error) {
 		return h.runtime.workflows.listWorkflows(h.runtime.ctx, listWorkflowsDBInput{
 			workflowIDs: []string{h.workflowID},
 		})
-	}, withRetrierLogger(h.runtime.app.Logger()), withMaxRetries(3))
+	}, retry.WithLogger(h.runtime.app.Logger()), retry.WithMaxRetries(3))
 	if err != nil {
 		return Status{}, fmt.Errorf("failed to get workflow status: %w", err)
 	}
@@ -180,16 +182,16 @@ func (h *workflowPollingHandle[R]) GetResult(opts ...GetResultOption) (R, error)
 		opt(options)
 	}
 
-	encodedResult, err := retryWithResult(h.runtime.ctx, func() (*string, error) {
+	encodedResult, err := retry.RetryWithResult(h.runtime.ctx, func() (*string, error) {
 		return h.runtime.messages.awaitWorkflowResult(h.runtime.ctx, h.workflowID, options.pollInterval)
-	}, withRetrierLogger(h.runtime.app.Logger()))
+	}, retry.WithLogger(h.runtime.app.Logger()))
 	if err != nil {
 		return *new(R), err
 	}
 	if encodedResult == nil {
 		return *new(R), nil
 	}
-	return decodeJSON[R](encodedResult)
+	return serialization.DecodeJSON[R](encodedResult)
 }
 
 // WithHandlePollingInterval sets the polling interval for GetResult.
@@ -265,7 +267,7 @@ func WithTags(tags ...string) WorkflowRegistrationOption {
 func WithSummaryFunc[P any](fn func(P) string) WorkflowRegistrationOption {
 	return func(opts *workflowRegistrationOptions) {
 		opts.summaryFunc = func(encodedInput *string) string {
-			typedInput, err := decodeJSON[P](encodedInput)
+			typedInput, err := serialization.DecodeJSON[P](encodedInput)
 			if err != nil {
 				return ""
 			}
@@ -290,7 +292,7 @@ func computeSummary(summaryFunc func(*string) string, input any, rt *Runtime) (r
 		encodedInput = v
 	default:
 		// Direct call: encode to JSON first so summaryFunc can decode to P
-		encoded, err := encodeJSON[any](input)
+		encoded, err := serialization.EncodeJSON[any](input)
 		if err != nil {
 			return ""
 		}
@@ -338,7 +340,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 				return nil, fmt.Errorf("expected *string input, got %T", input)
 			}
 		}
-		typedInput, err := decodeJSON[P](encodedInput)
+		typedInput, err := serialization.DecodeJSON[P](encodedInput)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode input: %w", err)
 		}
@@ -385,7 +387,7 @@ func Register[P any, R any](rt *Runtime, fn Workflow[P, R], opts ...WorkflowRegi
 
 		cronJobID := fmt.Sprintf("pt_sched_%s", customName)
 		if err := rt.app.Cron().Add(cronJobID, regOpts.cronSchedule, func() {
-			defer recoverGoroutine(rt.app.Logger(), "cron schedule panicked", "fqn", fqn)
+			defer retry.RecoverGoroutine(rt.app.Logger(), "cron schedule panicked", "fqn", fqn)
 			if !rt.launched.Load() {
 				return
 			}
@@ -512,7 +514,7 @@ func runWorkflowInternal(rt *Runtime, fn workflowFunc, input any, opts ...Workfl
 		encodedInput = input
 	} else {
 		var err error
-		encodedInput, err = encodeJSON[any](input)
+		encodedInput, err = serialization.EncodeJSON[any](input)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize input: %w", err)
 		}
@@ -604,7 +606,7 @@ func runWorkflowInternal(rt *Runtime, fn workflowFunc, input any, opts ...Workfl
 				return
 			}
 			panicMsg := fmt.Sprintf("workflow panicked: %v", r)
-			logPanic(rt.app.Logger(), r, "workflow goroutine panicked",
+			retry.LogPanic(rt.app.Logger(), r, "workflow goroutine panicked",
 				"workflow_id", workflowID,
 				"name", params.WorkflowName)
 			// Reset the user-set app status so the dashboard does not keep
@@ -613,21 +615,21 @@ func runWorkflowInternal(rt *Runtime, fn workflowFunc, input any, opts ...Workfl
 			// reading mid-write never sees ERROR paired with a stale "running"
 			// badge. The intermediate state is "still PENDING with new badge"
 			// which is harmless.
-			_ = retry(rt.ctx, func() error {
+			_ = retry.Retry(rt.ctx, func() error {
 				return rt.workflows.updateAppStatus(rt.ctx, updateAppStatusDBInput{
 					workflowID:     workflowID,
 					appStatus:      "panicked",
 					appStatusColor: "red",
 				})
-			}, withRetrierLogger(rt.app.Logger()))
-			_ = retry(rt.ctx, func() error {
+			}, retry.WithLogger(rt.app.Logger()))
+			_ = retry.Retry(rt.ctx, func() error {
 				return rt.workflows.updateWorkflowOutcome(rt.ctx, updateWorkflowOutcomeDBInput{
 					workflowID: workflowID,
 					status:     StatusError,
 					output:     nil,
 					errorMsg:   &panicMsg,
 				})
-			}, withRetrierLogger(rt.app.Logger()))
+			}, retry.WithLogger(rt.app.Logger()))
 			go rt.dispatchEvent(workflowID, params.WorkflowName, StatusError, nil, &panicMsg)
 			outcomeChan <- workflowOutcome[any]{err: errors.New(panicMsg)}
 			close(outcomeChan)
@@ -639,9 +641,9 @@ func runWorkflowInternal(rt *Runtime, fn workflowFunc, input any, opts ...Workfl
 		// Wait for the existing workflow to complete and return its result.
 		if errors.Is(fnErr, &Error{Code: ErrConflictingID}) {
 			rt.app.Logger().Warn("workflow ID conflict, waiting for existing workflow", "workflow_id", workflowID)
-			encoded, awaitErr := retryWithResult(rt.ctx, func() (*string, error) {
+			encoded, awaitErr := retry.RetryWithResult(rt.ctx, func() (*string, error) {
 				return rt.messages.awaitWorkflowResult(rt.ctx, workflowID, dbRetryInterval)
-			}, withRetrierLogger(rt.app.Logger()))
+			}, retry.WithLogger(rt.app.Logger()))
 			outcomeChan <- workflowOutcome[any]{result: encoded, err: awaitErr}
 			close(outcomeChan)
 			return
@@ -656,7 +658,7 @@ func runWorkflowInternal(rt *Runtime, fn workflowFunc, input any, opts ...Workfl
 		}
 
 		// Serialize output
-		encodedOutput, serErr := encodeJSON[any](result)
+		encodedOutput, serErr := serialization.EncodeJSON[any](result)
 		if serErr != nil {
 			outcomeChan <- workflowOutcome[any]{err: fmt.Errorf("failed to serialize output: %w", serErr)}
 			close(outcomeChan)
@@ -669,14 +671,14 @@ func runWorkflowInternal(rt *Runtime, fn workflowFunc, input any, opts ...Workfl
 			errorMsg = &s
 		}
 
-		recordErr := retry(rt.ctx, func() error {
+		recordErr := retry.Retry(rt.ctx, func() error {
 			return rt.workflows.updateWorkflowOutcome(rt.ctx, updateWorkflowOutcomeDBInput{
 				workflowID: workflowID,
 				status:     outcomeStatus,
 				output:     encodedOutput,
 				errorMsg:   errorMsg,
 			})
-		}, withRetrierLogger(rt.app.Logger()))
+		}, retry.WithLogger(rt.app.Logger()))
 		if recordErr != nil {
 			outcomeChan <- workflowOutcome[any]{err: recordErr}
 			close(outcomeChan)
@@ -781,7 +783,7 @@ func Do[R any](ctx Context, fn Step[R], opts ...StepOption) (R, error) {
 		if !ok {
 			return *new(R), fmt.Errorf("checkpointed value is not *string")
 		}
-		return decodeJSON[R](encoded)
+		return serialization.DecodeJSON[R](encoded)
 	}
 
 	if typed, ok := result.(R); ok {
@@ -818,12 +820,12 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn stepFunc, opts ...St
 
 	if !stepOpts.skipCheckpoint {
 		// Check if already executed
-		recorded, err := retryWithResult(ctx, func() (*recordedResult, error) {
+		recorded, err := retry.RetryWithResult(ctx, func() (*recordedResult, error) {
 			return rt.steps.checkOperationExecution(ctx, checkOperationExecutionDBInput{
 				workflowUUID: wfState.workflowID,
 				functionID:   stepID,
 			})
-		}, withRetrierLogger(rt.app.Logger()))
+		}, retry.WithLogger(rt.app.Logger()))
 		if err != nil {
 			return nil, fmt.Errorf("checking step execution: %w", err)
 		}
@@ -848,14 +850,14 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn stepFunc, opts ...St
 	stepCtx := context.WithValue(ctx, workflowStateKey, stepState)
 	startTime := time.Now()
 
-	startErr := retry(ctx, func() error {
+	startErr := retry.Retry(ctx, func() error {
 		return rt.steps.recordOperationStart(ctx, recordOperationStartDBInput{
 			workflowUUID: wfState.workflowID,
 			functionID:   stepID,
 			functionName: stepOpts.stepName,
 			startedAt:    startTime.UnixMilli(),
 		})
-	}, withRetrierLogger(rt.app.Logger()))
+	}, retry.WithLogger(rt.app.Logger()))
 	if startErr != nil {
 		return nil, fmt.Errorf("recording step start: %w", startErr)
 	}
@@ -874,7 +876,7 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn stepFunc, opts ...St
 	if !stepOpts.skipCheckpoint {
 		// WithoutCheckpoint steps may return non-serializable values (connections, handles).
 		var serErr error
-		encodedOutput, serErr = encodeJSON[any](stepOutput)
+		encodedOutput, serErr = serialization.EncodeJSON[any](stepOutput)
 		if serErr != nil {
 			return nil, fmt.Errorf("failed to serialize step output: %w", serErr)
 		}
@@ -886,7 +888,7 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn stepFunc, opts ...St
 		errorMsg = &s
 	}
 
-	recErr := retry(ctx, func() error {
+	recErr := retry.Retry(ctx, func() error {
 		return rt.steps.recordOperationResult(ctx, recordOperationResultDBInput{
 			workflowUUID: wfState.workflowID,
 			functionID:   stepID,
@@ -896,7 +898,7 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn stepFunc, opts ...St
 			startedAt:    startTime.UnixMilli(),
 			endedAt:      endTime.UnixMilli(),
 		})
-	}, withRetrierLogger(rt.app.Logger()))
+	}, retry.WithLogger(rt.app.Logger()))
 	if recErr != nil {
 		return nil, fmt.Errorf("recording step result: %w", recErr)
 	}
@@ -951,7 +953,7 @@ func DoAsync[R any](ctx Context, fn Step[R], opts ...StepOption) (chan AsyncResu
 				return
 			}
 			if rt != nil && rt.app != nil {
-				logPanic(rt.app.Logger(), r, "DoAsync goroutine panicked")
+				retry.LogPanic(rt.app.Logger(), r, "DoAsync goroutine panicked")
 			}
 			ch <- AsyncResult[R]{Err: fmt.Errorf("DoAsync panicked: %v", r)}
 		}()
@@ -964,7 +966,7 @@ func DoAsync[R any](ctx Context, fn Step[R], opts ...StepOption) (chan AsyncResu
 // Send sends a message to another workflow.
 func Send(ctx Context, destinationID string, message any, topic string) error {
 	rt := runtimeFromContext(ctx)
-	encoded, err := encodeJSON[any](message)
+	encoded, err := serialization.EncodeJSON[any](message)
 	if err != nil {
 		return fmt.Errorf("failed to serialize message: %w", err)
 	}
@@ -990,13 +992,13 @@ func Send(ctx Context, destinationID string, message any, topic string) error {
 		return err
 	}
 
-	return retry(ctx, func() error {
+	return retry.Retry(ctx, func() error {
 		return rt.messages.send(ctx, sendInput{
 			DestinationUUID: destinationID,
 			Topic:           topic,
 			Message:         encoded,
 		})
-	}, withRetrierLogger(rt.app.Logger()))
+	}, retry.WithLogger(rt.app.Logger()))
 }
 
 // Recv receives a message within a workflow.
@@ -1010,26 +1012,26 @@ func Recv[R any](ctx Context, topic string, timeout time.Duration) (R, error) {
 		return *new(R), fmt.Errorf("cannot call Recv within a step")
 	}
 
-	encoded, err := retryWithResult(ctx, func() (*string, error) {
+	encoded, err := retry.RetryWithResult(ctx, func() (*string, error) {
 		return rt.messages.recv(ctx, recvInput{
 			workflowUUID: wfState.workflowID,
 			topic:        topic,
 			timeout:      timeout,
 		})
-	}, withRetrierLogger(rt.app.Logger()))
+	}, retry.WithLogger(rt.app.Logger()))
 	if err != nil {
 		return *new(R), err
 	}
 	if encoded == nil {
 		return *new(R), nil
 	}
-	return decodeJSON[R](encoded)
+	return serialization.DecodeJSON[R](encoded)
 }
 
 // SetValue sets a key-value event for the current workflow.
 func SetValue(ctx Context, key string, value any) error {
 	rt := runtimeFromContext(ctx)
-	encoded, err := encodeJSON[any](value)
+	encoded, err := serialization.EncodeJSON[any](value)
 	if err != nil {
 		return fmt.Errorf("failed to serialize event value: %w", err)
 	}
@@ -1052,20 +1054,20 @@ func SetValue(ctx Context, key string, value any) error {
 // GetValue gets a key-value event from a target workflow.
 func GetValue[R any](ctx Context, targetWorkflowID string, key string, timeout time.Duration) (R, error) {
 	rt := runtimeFromContext(ctx)
-	encoded, err := retryWithResult(ctx, func() (*string, error) {
+	encoded, err := retry.RetryWithResult(ctx, func() (*string, error) {
 		return rt.messages.getEvent(ctx, getEventInput{
 			targetWorkflowUUID: targetWorkflowID,
 			key:                key,
 			timeout:            timeout,
 		})
-	}, withRetrierLogger(rt.app.Logger()))
+	}, retry.WithLogger(rt.app.Logger()))
 	if err != nil {
 		return *new(R), err
 	}
 	if encoded == nil {
 		return *new(R), nil
 	}
-	return decodeJSON[R](encoded)
+	return serialization.DecodeJSON[R](encoded)
 }
 
 // Sleep performs a durable sleep within a workflow.
@@ -1122,14 +1124,14 @@ func Retrieve[R any](rt *Runtime, workflowID string) Handle[R] {
 // Cancel cancels a workflow by ID.
 func (rt *Runtime) Cancel(workflowID string) error {
 	var transitioned bool
-	err := retry(rt.ctx, func() error {
+	err := retry.Retry(rt.ctx, func() error {
 		changed, err := rt.workflows.cancelWorkflow(rt.ctx, cancelWorkflowDBInput{workflowID: workflowID})
 		if err != nil {
 			return err
 		}
 		transitioned = changed
 		return nil
-	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
+	}, retry.WithLogger(rt.app.Logger()), retry.WithMaxRetries(3))
 	if err != nil {
 		return err
 	}
@@ -1149,13 +1151,13 @@ func (rt *Runtime) Cancel(workflowID string) error {
 
 // Resume resumes a cancelled workflow.
 func (rt *Runtime) Resume(workflowID string) error {
-	err := retry(rt.ctx, func() error {
+	err := retry.Retry(rt.ctx, func() error {
 		return rt.workflows.resumeWorkflow(rt.ctx, resumeWorkflowDBInput{
 			workflowID: workflowID,
 			executorID: rt.executorID,
 			appVersion: rt.applicationVersion,
 		})
-	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
+	}, retry.WithLogger(rt.app.Logger()), retry.WithMaxRetries(3))
 	if err != nil {
 		return err
 	}
@@ -1230,16 +1232,16 @@ func (rt *Runtime) List(opts ...ListOption) ([]Status, error) {
 	for _, o := range opts {
 		o.apply(&input)
 	}
-	return retryWithResult(rt.ctx, func() ([]Status, error) {
+	return retry.RetryWithResult(rt.ctx, func() ([]Status, error) {
 		return rt.workflows.listWorkflows(rt.ctx, input)
-	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
+	}, retry.WithLogger(rt.app.Logger()), retry.WithMaxRetries(3))
 }
 
 // Steps returns the execution steps for a workflow.
 func (rt *Runtime) Steps(workflowID string) ([]StepInfo, error) {
-	steps, err := retryWithResult(rt.ctx, func() ([]stepInfo, error) {
+	steps, err := retry.RetryWithResult(rt.ctx, func() ([]stepInfo, error) {
 		return rt.steps.getWorkflowSteps(rt.ctx, getWorkflowStepsInput{workflowID: workflowID})
-	}, withRetrierLogger(rt.app.Logger()), withMaxRetries(3))
+	}, retry.WithLogger(rt.app.Logger()), retry.WithMaxRetries(3))
 	if err != nil {
 		return nil, err
 	}

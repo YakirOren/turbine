@@ -1,4 +1,8 @@
-package turbine
+// Package serialization provides JSON encode/decode helpers shared across
+// turbine's internal subsystems. Nil and zero values are handled so that an
+// empty payload round-trips back to a nil pointer or zero value of the target
+// generic parameter.
+package serialization
 
 import (
 	"encoding/json"
@@ -6,7 +10,7 @@ import (
 	"reflect"
 )
 
-func encodeJSON[T any](data T) (*string, error) {
+func EncodeJSON[T any](data T) (*string, error) {
 	if isNilValue(data) {
 		return nil, nil
 	}
@@ -18,7 +22,7 @@ func encodeJSON[T any](data T) (*string, error) {
 	return &s, nil
 }
 
-func decodeJSON[T any](data *string) (T, error) {
+func DecodeJSON[T any](data *string) (T, error) {
 	if data == nil || *data == "" {
 		return getNilOrZeroValue[T](), nil
 	}

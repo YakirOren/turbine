@@ -111,6 +111,15 @@ func TestWaitForApproval_Webhook(t *testing.T) {
 	rt, cleanup := setupRuntime(t)
 	defer cleanup()
 
+	type webhookPayload struct {
+		Event      string `json:"event"`
+		WorkflowID string `json:"workflow_id"`
+		Name       string `json:"name"`
+		Status     string `json:"status"`
+		Output     any    `json:"output,omitempty"`
+		Error      string `json:"error,omitempty"`
+		Timestamp  string `json:"timestamp"`
+	}
 	received := make(chan webhookPayload, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var p webhookPayload

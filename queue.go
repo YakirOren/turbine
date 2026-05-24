@@ -2,6 +2,8 @@ package turbine
 
 import (
 	"sync"
+
+	"github.com/YakirOren/turbine/internal/retry"
 )
 
 const (
@@ -111,15 +113,15 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 		}
 
 		func() {
-			defer recoverGoroutine(queueLogger, "queue iteration panicked")
+			defer retry.RecoverGoroutine(queueLogger, "queue iteration panicked")
 
 			skipDequeue := false
 
 			partitionKeys := []string{""}
 			if queue.PartitionQueue {
-				parts, err := retryWithResult(rt.ctx, func() ([]string, error) {
+				parts, err := retry.RetryWithResult(rt.ctx, func() ([]string, error) {
 					return rt.workflows.getQueuePartitions(rt.ctx, queue.Name)
-				}, withRetrierLogger(queueLogger))
+				}, retry.WithLogger(queueLogger))
 				if err != nil {
 					skipDequeue = true
 					queueLogger.Error("error getting queue partitions", "error", err)
@@ -138,7 +140,7 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 					limit = defaultMaxTasksPerIteration
 				}
 
-				workflows, err := retryWithResult(rt.ctx, func() ([]dequeuedWorkflow, error) {
+				workflows, err := retry.RetryWithResult(rt.ctx, func() ([]dequeuedWorkflow, error) {
 					return rt.workflows.dequeueWorkflows(rt.ctx, dequeueWorkflowsInput{
 						queueName:         queue.Name,
 						executorID:        rt.executorID,
@@ -151,7 +153,7 @@ func (qr *queueRunner) runQueue(rt *Runtime, queue WorkflowQueue) {
 						partitioned:       queue.PartitionQueue,
 						partitionKey:      partKey,
 					})
-				}, withRetrierLogger(queueLogger))
+				}, retry.WithLogger(queueLogger))
 				if err != nil {
 					queueLogger.Error("error dequeuing workflows", "error", err)
 					continue

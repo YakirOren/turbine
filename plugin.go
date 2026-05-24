@@ -3,9 +3,9 @@ package turbine
 import (
 	"net/url"
 
-	"github.com/nicholas-fedor/shoutrrr"
+	"github.com/YakirOren/turbine/internal/notifications"
+	"github.com/YakirOren/turbine/internal/webhooks"
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/tools/router"
 )
 
 var validDispatchEvents = map[string]bool{
@@ -40,35 +40,11 @@ func Setup(app core.App, config Config) *Runtime {
 	return rt
 }
 
-// validateWebhookRecord validates a webhook record. When allowPrivate is false,
-// it also blocks loopback / link-local / RFC1918 / CGNAT hosts to prevent SSRF
-// reach into internal services (cloud metadata, internal Redis, etc.).
+// validateWebhookRecord delegates to webhooks.ValidateRecord, kept as a thin
+// adapter so the existing PocketBase hooks and tests don't need to thread the
+// allowed-events map through every call site.
 func validateWebhookRecord(r *core.Record, allowPrivate bool) error {
-	raw := r.GetString("url")
-	parsed, err := url.Parse(raw)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return router.NewBadRequestError("invalid webhook URL: must be http or https", nil)
-	}
-	if !allowPrivate {
-		if err := validateOutboundURL(raw); err != nil {
-			return router.NewBadRequestError("invalid webhook URL: "+err.Error(), nil)
-		}
-	}
-
-	// Validate events
-	events := r.GetStringSlice("events")
-
-	if len(events) == 0 {
-		return router.NewBadRequestError("at least one event is required", nil)
-	}
-
-	for _, ev := range events {
-		if !validDispatchEvents[ev] {
-			return router.NewBadRequestError("invalid event type: "+ev, nil)
-		}
-	}
-
-	return nil
+	return webhooks.ValidateRecord(r, allowPrivate, validDispatchEvents)
 }
 
 func registerWebhookHooks(app core.App, allowPrivate bool) {
@@ -94,40 +70,9 @@ func registerWebhookHooks(app core.App, allowPrivate bool) {
 	})
 }
 
+// validateAlertChannelRecord delegates to notifications.ValidateRecord.
 func validateAlertChannelRecord(r *core.Record, allowPrivate bool) error {
-	rawURL := r.GetString("url")
-	if rawURL == "" {
-		return router.NewBadRequestError("URL is required", nil)
-	}
-
-	// Validate URL by attempting to create a Shoutrrr sender
-	_, err := shoutrrr.CreateSender(rawURL)
-	if err != nil {
-		return router.NewBadRequestError("invalid notification URL: "+err.Error(), nil)
-	}
-
-	// shoutrrr's generic:// service is HTTP-backed and accepts arbitrary URLs.
-	// Block SSRF reach into loopback / link-local / RFC1918 ranges.
-	if !allowPrivate {
-		if err := validateShoutrrrSSRF(rawURL); err != nil {
-			return router.NewBadRequestError("invalid notification URL: "+err.Error(), nil)
-		}
-	}
-
-	// Validate events
-	events := r.GetStringSlice("events")
-
-	if len(events) == 0 {
-		return router.NewBadRequestError("at least one event is required", nil)
-	}
-
-	for _, ev := range events {
-		if !validDispatchEvents[ev] {
-			return router.NewBadRequestError("invalid event type: "+ev, nil)
-		}
-	}
-
-	return nil
+	return notifications.ValidateRecord(r, allowPrivate, validDispatchEvents)
 }
 
 func registerAlertChannelHooks(app core.App, allowPrivate bool) {

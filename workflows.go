@@ -10,18 +10,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/YakirOren/turbine/internal/eventbus"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
 
 type workflows struct {
 	app      core.App
-	eventBus *eventBus
+	eventBus *eventbus.Bus
 	logger   *slog.Logger
 	launched bool
 }
 
-func newWorkflows(app core.App, eb *eventBus, logger *slog.Logger) *workflows {
+func newWorkflows(app core.App, eb *eventbus.Bus, logger *slog.Logger) *workflows {
 	return &workflows{
 		app:      app,
 		eventBus: eb,

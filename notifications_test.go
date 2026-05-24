@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/YakirOren/turbine/internal/notifications"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 )
@@ -121,7 +122,7 @@ func TestFormatNotificationMessage(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := formatNotificationMessage(tc.workflowID, tc.wfName, tc.status, tc.errorMsg)
+			got := notifications.FormatMessage(tc.workflowID, tc.wfName, tc.status, tc.errorMsg)
 			if got != tc.want {
 				t.Errorf("formatNotificationMessage() = %q, want %q", got, tc.want)
 			}
@@ -144,7 +145,7 @@ func TestExtractScheme(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.url, func(t *testing.T) {
-			got := extractScheme(tc.url)
+			got := notifications.ExtractScheme(tc.url)
 			if got != tc.want {
 				t.Errorf("extractScheme(%q) = %q, want %q", tc.url, got, tc.want)
 			}

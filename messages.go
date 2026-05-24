@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/YakirOren/turbine/internal/eventbus"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -17,11 +18,11 @@ import (
 // with a subscription, or a DB write with a notification.
 type messages struct {
 	app    core.App
-	eb     *eventBus
+	eb     *eventbus.Bus
 	logger *slog.Logger
 }
 
-func newMessages(app core.App, eb *eventBus, logger *slog.Logger) *messages {
+func newMessages(app core.App, eb *eventbus.Bus, logger *slog.Logger) *messages {
 	return &messages{
 		app:    app,
 		eb:     eb,
@@ -211,7 +212,7 @@ func (m *messages) getEvent(ctx context.Context, input getEventInput) (*string, 
 // Notify between check and Wait would be missed.
 func pollOrWait[T any](
 	ctx context.Context,
-	eb *eventBus,
+	eb *eventbus.Bus,
 	key string,
 	timeout time.Duration,
 	check func() (T, bool, error),

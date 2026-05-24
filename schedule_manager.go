@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/YakirOren/turbine/internal/retry"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -34,7 +35,7 @@ func (sm *scheduleManager) registerOnce(rt *Runtime, recordID string, fqn string
 	sm.mu.Unlock()
 
 	go func() {
-		defer recoverGoroutine(rt.app.Logger(), "one-time schedule goroutine panicked",
+		defer retry.RecoverGoroutine(rt.app.Logger(), "one-time schedule goroutine panicked",
 			"record_id", recordID, "fqn", fqn)
 		timer := time.NewTimer(delay)
 		defer timer.Stop()
@@ -68,7 +69,7 @@ func (sm *scheduleManager) registerOnce(rt *Runtime, recordID string, fqn string
 func (sm *scheduleManager) registerCron(rt *Runtime, recordID string, fqn string, rawInput json.RawMessage, cronExpr string, jitter time.Duration) error {
 	cronJobID := fmt.Sprintf("pt_ui_sched_%s", recordID)
 	return rt.app.Cron().Add(cronJobID, cronExpr, func() {
-		defer recoverGoroutine(rt.app.Logger(), "cron schedule goroutine panicked",
+		defer retry.RecoverGoroutine(rt.app.Logger(), "cron schedule goroutine panicked",
 			"record_id", recordID, "fqn", fqn)
 		if !rt.launched.Load() {
 			return

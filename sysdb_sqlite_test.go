@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/YakirOren/turbine/internal/eventbus"
+	"github.com/YakirOren/turbine/internal/sysdb"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/tests"
 )
@@ -33,7 +35,7 @@ func setupSysDBAndSteps(t *testing.T) (*workflows, *steps, func()) {
 }
 
 // setupSysDBAndKV returns the sysDB plus a *kv bound to the same app.
-func setupSysDBAndKV(t *testing.T) (*workflows, *kv, func()) {
+func setupSysDBAndKV(t *testing.T) (*workflows, *sysdb.KV, func()) {
 	t.Helper()
 	bundle := setupSysDBBundle(t)
 	return bundle.sysDB, bundle.kv, bundle.cleanup
@@ -43,7 +45,7 @@ type sysDBBundle struct {
 	sysDB    *workflows
 	messages *messages
 	steps    *steps
-	kv       *kv
+	kv       *sysdb.KV
 	cleanup  func()
 }
 
@@ -53,14 +55,14 @@ func setupSysDBBundle(t *testing.T) sysDBBundle {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eb := newEventBus()
+	eb := eventbus.NewBus()
 	sysDB := newWorkflows(app, eb, app.Logger())
 	sysDB.launch(context.Background())
 	return sysDBBundle{
 		sysDB:    sysDB,
 		messages: newMessages(app, eb, app.Logger()),
 		steps:    newSteps(app, app.Logger()),
-		kv:       newKV(app, app.Logger()),
+		kv:       sysdb.NewKV(app, app.Logger()),
 		cleanup:  app.Cleanup,
 	}
 }
@@ -582,12 +584,12 @@ func TestKVSetAndGet(t *testing.T) {
 	defer cleanup()
 
 	val := `"hello"`
-	err := kvs.setKV(context.Background(), setKVInput{key: "test-key", value: &val})
+	err := kvs.SetKV(context.Background(), sysdb.SetKVInput{Key: "test-key", Value: &val})
 	if err != nil {
 		t.Fatalf("setKV failed: %v", err)
 	}
 
-	result, err := kvs.getKV(context.Background(), getKVInput{key: "test-key"})
+	result, err := kvs.GetKV(context.Background(), sysdb.GetKVInput{Key: "test-key"})
 	if err != nil {
 		t.Fatalf("getKV failed: %v", err)
 	}
@@ -600,7 +602,7 @@ func TestKVGetMissing(t *testing.T) {
 	_, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	result, err := kvs.getKV(context.Background(), getKVInput{key: "nonexistent"})
+	result, err := kvs.GetKV(context.Background(), sysdb.GetKVInput{Key: "nonexistent"})
 	if err != nil {
 		t.Fatalf("getKV should not error on missing key: %v", err)
 	}
@@ -616,17 +618,17 @@ func TestKVSetOverwrite(t *testing.T) {
 	val1 := `"first"`
 	val2 := `"second"`
 
-	err := kvs.setKV(context.Background(), setKVInput{key: "overwrite-key", value: &val1})
+	err := kvs.SetKV(context.Background(), sysdb.SetKVInput{Key: "overwrite-key", Value: &val1})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = kvs.setKV(context.Background(), setKVInput{key: "overwrite-key", value: &val2})
+	err = kvs.SetKV(context.Background(), sysdb.SetKVInput{Key: "overwrite-key", Value: &val2})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := kvs.getKV(context.Background(), getKVInput{key: "overwrite-key"})
+	result, err := kvs.GetKV(context.Background(), sysdb.GetKVInput{Key: "overwrite-key"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,17 +642,17 @@ func TestKVDelete(t *testing.T) {
 	defer cleanup()
 
 	val := `"to-delete"`
-	err := kvs.setKV(context.Background(), setKVInput{key: "del-key", value: &val})
+	err := kvs.SetKV(context.Background(), sysdb.SetKVInput{Key: "del-key", Value: &val})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = kvs.deleteKV(context.Background(), deleteKVInput{key: "del-key"})
+	err = kvs.DeleteKV(context.Background(), sysdb.DeleteKVInput{Key: "del-key"})
 	if err != nil {
 		t.Fatalf("deleteKV failed: %v", err)
 	}
 
-	result, err := kvs.getKV(context.Background(), getKVInput{key: "del-key"})
+	result, err := kvs.GetKV(context.Background(), sysdb.GetKVInput{Key: "del-key"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -663,7 +665,7 @@ func TestKVDeleteMissing(t *testing.T) {
 	_, kvs, cleanup := setupSysDBAndKV(t)
 	defer cleanup()
 
-	err := kvs.deleteKV(context.Background(), deleteKVInput{key: "never-existed"})
+	err := kvs.DeleteKV(context.Background(), sysdb.DeleteKVInput{Key: "never-existed"})
 	if err != nil {
 		t.Fatalf("deleteKV should not error on missing key: %v", err)
 	}

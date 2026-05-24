@@ -1,29 +1,8 @@
 package turbine
 
 import (
-	"log/slog"
-	"runtime/debug"
+	"github.com/YakirOren/turbine/internal/retry"
 )
-
-// logPanic logs a captured panic value with a stack trace and source=system tag.
-// Use this when the caller already called recover() and needs the panic value
-// for additional handling (e.g. propagating it on a channel).
-func logPanic(logger *slog.Logger, r any, msg string, fields ...any) {
-	args := make([]any, 0, len(fields)+6)
-	args = append(args, fields...)
-	args = append(args, "panic", r, "stack", string(debug.Stack()), "source", "system")
-	logger.Error(msg, args...)
-}
-
-// recoverGoroutine is the standard defer guard for log-only goroutines. Use
-// `defer recoverGoroutine(logger, "X goroutine panicked", "k", v)`. Sites that
-// need the panic value (workflow main goroutine, DoAsync) inline their own
-// recover and pass r to logPanic.
-func recoverGoroutine(logger *slog.Logger, msg string, fields ...any) {
-	if r := recover(); r != nil {
-		logPanic(logger, r, msg, fields...)
-	}
-}
 
 func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]Handle[any], error) {
 	appVersion := []string{}
@@ -31,14 +10,14 @@ func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]Handle[any], 
 		appVersion = []string{rt.applicationVersion}
 	}
 
-	pendingWorkflows, err := retryWithResult(rt.ctx, func() ([]Status, error) {
+	pendingWorkflows, err := retry.RetryWithResult(rt.ctx, func() ([]Status, error) {
 		return rt.workflows.listWorkflows(rt.ctx, listWorkflowsDBInput{
 			status:             []StatusType{StatusPending},
 			executorIDs:        executorIDs,
 			applicationVersion: appVersion,
 			loadInput:          true,
 		})
-	}, withRetrierLogger(rt.app.Logger()))
+	}, retry.WithLogger(rt.app.Logger()))
 	if err != nil {
 		return nil, err
 	}
@@ -47,9 +26,9 @@ func recoverPendingWorkflows(rt *Runtime, executorIDs []string) ([]Handle[any], 
 
 	for _, wf := range pendingWorkflows {
 		if wf.QueueName != "" {
-			cleared, err := retryWithResult(rt.ctx, func() (bool, error) {
+			cleared, err := retry.RetryWithResult(rt.ctx, func() (bool, error) {
 				return rt.workflows.clearQueueAssignment(rt.ctx, wf.ID)
-			}, withRetrierLogger(rt.app.Logger()))
+			}, retry.WithLogger(rt.app.Logger()))
 			if err != nil {
 				rt.app.Logger().Error("error clearing queue assignment", "workflow_id", wf.ID, "error", err)
 				continue
