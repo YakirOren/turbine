@@ -21,11 +21,11 @@ type workflows struct {
 	launched bool
 }
 
-func newWorkflows(app core.App, eb *eventBus) *workflows {
+func newWorkflows(app core.App, eb *eventBus, logger *slog.Logger) *workflows {
 	return &workflows{
 		app:      app,
 		eventBus: eb,
-		logger:   slog.Default().With("service", "sysdb_sqlite"),
+		logger:   logger.With("service", "workflows"),
 	}
 }
 

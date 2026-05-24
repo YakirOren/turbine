@@ -107,7 +107,7 @@ func NewRuntime(app core.App, config Config) *Runtime {
 	drainCtx, drainCancel := context.WithCancel(baseCtx)
 	eb := newEventBus()
 
-	wfs := newWorkflows(app, eb)
+	wfs := newWorkflows(app, eb, app.Logger())
 	msgs := newMessages(app, eb, app.Logger())
 	stp := newSteps(app, app.Logger())
 	kvs := newKV(app, app.Logger())

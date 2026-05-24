@@ -54,7 +54,7 @@ func setupSysDBBundle(t *testing.T) sysDBBundle {
 		t.Fatal(err)
 	}
 	eb := newEventBus()
-	sysDB := newWorkflows(app, eb)
+	sysDB := newWorkflows(app, eb, app.Logger())
 	sysDB.launch(context.Background())
 	return sysDBBundle{
 		sysDB:    sysDB,

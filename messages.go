@@ -29,51 +29,58 @@ func newMessages(app core.App, eb *eventBus, logger *slog.Logger) *messages {
 	}
 }
 
-func (m *messages) awaitWorkflowResult(ctx context.Context, workflowID string, _ time.Duration) (*string, error) {
-	type outcome struct {
-		output *string
-		err    error
+func (m *messages) awaitWorkflowResult(ctx context.Context, workflowID string, pollInterval time.Duration) (*string, error) {
+	if pollInterval <= 0 {
+		pollInterval = dbRetryInterval
 	}
-	res, err := pollOrWait(ctx, m.eb, "workflow::"+workflowID, 0, func() (outcome, bool, error) {
+	key := "workflow::" + workflowID
+	ch := m.eb.Wait(key)
+	defer m.eb.Remove(key, ch)
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
 		var status StatusType
 		var outputString, errorStr sql.NullString
 		var attempts int
 
-		dbErr := m.app.DB().Select("status", "output", "error", "recovery_attempts").
+		err := m.app.DB().Select("status", "output", "error", "recovery_attempts").
 			From("pt_workflow_status").
 			Where(dbx.HashExp{"id": workflowID}).
 			Row(&status, &outputString, &errorStr, &attempts)
 
-		if dbErr != nil {
-			if errors.Is(dbErr, sql.ErrNoRows) {
-				return outcome{}, false, nil
-			}
-			return outcome{}, false, fmt.Errorf("failed to query workflow status: %w", dbErr)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("failed to query workflow status: %w", err)
 		}
 
-		var output *string
-		if outputString.Valid {
-			output = &outputString.String
+		if err == nil {
+			var output *string
+			if outputString.Valid {
+				output = &outputString.String
+			}
+			switch status {
+			case StatusSuccess, StatusError:
+				if !errorStr.Valid || errorStr.String == "" {
+					return output, nil
+				}
+				return output, errors.New(errorStr.String)
+			case StatusCancelled:
+				return output, newErrAwaitCancelled(workflowID)
+			case StatusMaxRecoveryAttemptsExceeded:
+				return output, newErrDeadLetter(workflowID, attempts-2)
+			}
 		}
 
-		switch status {
-		case StatusSuccess, StatusError:
-			if !errorStr.Valid || errorStr.String == "" {
-				return outcome{output: output}, true, nil
-			}
-			return outcome{output: output, err: errors.New(errorStr.String)}, true, nil
-		case StatusCancelled:
-			return outcome{output: output, err: newErrAwaitCancelled(workflowID)}, true, nil
-		case StatusMaxRecoveryAttemptsExceeded:
-			return outcome{output: output, err: newErrDeadLetter(workflowID, attempts-2)}, true, nil
-		default:
-			return outcome{}, false, nil
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+			// periodic re-check as fallback for missed Notify
+		case <-ch:
+			ch = m.eb.Swap(key, ch)
 		}
-	})
-	if err != nil {
-		return nil, err
 	}
-	return res.output, res.err
 }
 
 func (m *messages) send(ctx context.Context, input sendInput) error {
