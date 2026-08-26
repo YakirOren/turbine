@@ -1,3 +1,5 @@
+
+
 # turbine
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/YakirOren/turbine.svg)](https://pkg.go.dev/github.com/YakirOren/turbine)
@@ -52,7 +54,7 @@ Every feature has a runnable example under [`examples/`](examples/). Start with 
 | [`scheduled`](examples/scheduled/) | Cron-scheduled workflows |
 | [`events`](examples/events/) | Key-value events and `Send`/`Receive` |
 | [`lifecycle`](examples/lifecycle/) | Cancel, resume, and inspect workflows |
-| [`app-access`](examples/app-access/) | Serve HTTP routes alongside workflows |
+| [`app-access`](examples/app-access/) | Access the app from within workflow steps |
 | [`products`](examples/products/) | Generate files and deliver them via a `ProductSender` |
 | [`connector`](examples/connector/) | Live connections with `WithoutCheckpoint` |
 | [`dashboard`](examples/dashboard/) | Full demo with the dashboard UI mounted |
