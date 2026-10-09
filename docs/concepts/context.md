@@ -1,6 +1,6 @@
 # Context
 
-Workflows receive `turbine.Context`. Steps receive `context.Context`. This prevents calling `Do` or `Pause` inside a step at compile time.
+Workflows receive `turbine.Context`. Steps receive `context.Context`. This prevents calling `Do` or `Sleep` inside a step at compile time.
 
 ## turbine.Context
 

@@ -45,15 +45,21 @@ result := <-ch
 // result.Result, result.Err
 ```
 
-## Pause
+## Sleep
 
-Durable pause that survives crashes and restarts. The wake-up time is recorded as a step, on recovery, if the time has passed, it returns immediately; otherwise it pauses only the remaining duration.
+Durable sleep that survives crashes and restarts. The wake-up time is recorded as a step, on recovery, if the time has passed, it returns immediately; otherwise it sleeps only the remaining duration.
 
 ```go
-if err := turbine.Pause(ctx, 24*time.Hour); err != nil {
+if err := turbine.Sleep(ctx, 24*time.Hour); err != nil {
     return "", err
 }
 ```
+
+`turbine.Pause` is an alias for `turbine.Sleep`.
+
+On shutdown, a sleeping workflow stops waiting at once and stays `PENDING`. The next launch resumes it with only the remaining time, and the interrupted run doesn't count toward its recovery attempts.
+
+To suspend until something happens rather than for a fixed time, use [`turbine.Recv`](/concepts/communication#waiting-for-an-event).
 
 ## Accessing Context
 

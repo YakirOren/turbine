@@ -3,6 +3,7 @@ package turbine
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/pocketbase/dbx"
@@ -856,4 +857,96 @@ func TestGetQueuePartitionsExcludesTerminal(t *testing.T) {
 	if partitions[0] != "tenant-a" {
 		t.Fatalf("expected partition tenant-a, got %s", partitions[0])
 	}
+}
+
+func TestRecvConsumesLateMessageAtTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sysDB, cleanup := setupSysDB(t)
+		defer cleanup()
+
+		wfID := "wf-recv-late"
+		if _, err := sysDB.insertStatus(context.Background(), insertStatusDBInput{status: makeStatus(wfID)}); err != nil {
+			t.Fatal(err)
+		}
+
+		// Insert just before the deadline without notifying the event bus, so
+		// only a final check before recording the timeout can see it.
+		go func() {
+			time.Sleep(time.Minute - time.Millisecond)
+			_, _ = sysDB.app.DB().NewQuery(`INSERT INTO pt_notifications
+				(id, destination_id, topic, message, created_at_epoch_ms, consumed)
+				VALUES ('late-1', {:dest}, 'late', '"hi"', {:ts}, FALSE)`).Bind(dbx.Params{
+				"dest": wfID, "ts": time.Now().UnixMilli(),
+			}).Execute()
+		}()
+
+		result, err := sysDB.recv(context.Background(), recvInput{
+			workflowUUID: wfID, functionID: 0, topic: "late", timeout: time.Minute,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result == nil || *result != `"hi"` {
+			t.Fatalf("expected the late message, got %v", result)
+		}
+	})
+}
+
+func TestRecvNullMessageIsNotATimeout(t *testing.T) {
+	sysDB, cleanup := setupSysDB(t)
+	defer cleanup()
+
+	wfID := "wf-recv-null"
+	if _, err := sysDB.insertStatus(context.Background(), insertStatusDBInput{status: makeStatus(wfID)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sysDB.app.DB().NewQuery(`INSERT INTO pt_notifications
+		(id, destination_id, topic, message, created_at_epoch_ms, consumed)
+		VALUES ('null-1', {:dest}, 'n', NULL, {:ts}, FALSE)`).Bind(dbx.Params{
+		"dest": wfID, "ts": time.Now().UnixMilli(),
+	}).Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := sysDB.recv(context.Background(), recvInput{
+		workflowUUID: wfID, functionID: 0, topic: "n", timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || *result != "null" {
+		t.Fatalf("expected a JSON null message, got %v", result)
+	}
+}
+
+func TestRecvIgnoresStartOfOtherUnfinishedStep(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sysDB, cleanup := setupSysDB(t)
+		defer cleanup()
+
+		wfID := "wf-recv-stale"
+		if _, err := sysDB.insertStatus(context.Background(), insertStatusDBInput{status: makeStatus(wfID)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := sysDB.recordOperationStart(context.Background(), recordOperationStartDBInput{
+			workflowUUID: wfID, functionID: 0, functionName: "other-step",
+			startedAt: time.Now().Add(-time.Hour).UnixMilli(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		start := time.Now()
+		result, err := sysDB.recv(context.Background(), recvInput{
+			workflowUUID: wfID, functionID: 0, topic: "t", timeout: time.Minute,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != nil {
+			t.Fatalf("expected a timeout, got %v", *result)
+		}
+		if elapsed := time.Since(start); elapsed != time.Minute {
+			t.Fatalf("expected a fresh one-minute wait, returned after %v", elapsed)
+		}
+	})
 }

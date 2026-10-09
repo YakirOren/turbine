@@ -647,6 +647,21 @@ func runWorkflowInternal(rt *Runtime, fn workflowFunc, input any, opts ...Workfl
 			return
 		}
 
+		// Shutdown interrupted a wait or force-cancelled the workflow. Leave it
+		// PENDING so the next launch recovers it, the same as after a crash,
+		// and don't count this run against its recovery attempts.
+		if fnErr != nil && (rt.ctx.Err() != nil || errors.Is(fnErr, errShutdownInterrupt)) {
+			rt.app.Logger().Warn("workflow interrupted by shutdown, left for recovery", "workflow_id", workflowID, "source", "system")
+			if params.isRecovery || params.isDequeue {
+				if err := rt.systemDB.releaseRecoveryAttempt(context.Background(), workflowID); err != nil {
+					rt.app.Logger().Error("release recovery attempt", "workflow_id", workflowID, "error", err)
+				}
+			}
+			outcomeChan <- workflowOutcome[any]{err: fnErr}
+			close(outcomeChan)
+			return
+		}
+
 		outcomeStatus := StatusSuccess
 		if fnErr != nil {
 			outcomeStatus = StatusError
@@ -870,6 +885,12 @@ func runAsStepInternal(ctx context.Context, rt *Runtime, fn stepFunc, opts ...St
 		rt.app.Logger().Info("step completed", "workflow_id", wfState.workflowID, "step", stepOpts.stepName, "step_id", stepID, "duration", dur, "source", "system")
 	}
 
+	// Shutdown force-cancelled the step. Don't checkpoint the cancellation,
+	// so recovery re-runs the step instead of replaying the error.
+	if stepErr != nil && rt.ctx.Err() != nil {
+		return nil, stepErr
+	}
+
 	var encodedOutput *string
 	if !stepOpts.skipCheckpoint {
 		// WithoutCheckpoint steps may return non-serializable values (connections, handles).
@@ -999,7 +1020,17 @@ func Send(ctx Context, destinationID string, message any, topic string) error {
 	}, withRetrierLogger(rt.app.Logger()))
 }
 
-// Recv receives a message within a workflow.
+// Recv suspends the workflow until a message arrives on topic or the timeout
+// expires. Messages are sent with Send, from another workflow or from outside
+// one (for example an HTTP handler using rt.NewContext).
+//
+// The wait is a checkpointed step. On recovery a received message is replayed,
+// and a wait that was interrupted resumes with only the time left. The timeout
+// is measured from the first time the step ran, so resuming a workflow after
+// its deadline returns at once. A timeout <= 0 checks for a message once
+// without waiting, and that result is checkpointed too.
+//
+// If the timeout expires first, Recv returns the zero value of R and a nil error.
 func Recv[R any](ctx Context, topic string, timeout time.Duration) (R, error) {
 	rt := runtimeFromContext(ctx)
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
@@ -1010,20 +1041,67 @@ func Recv[R any](ctx Context, topic string, timeout time.Duration) (R, error) {
 		return *new(R), fmt.Errorf("cannot call Recv within a step")
 	}
 
-	encoded, err := retryWithResult(ctx, func() (*string, error) {
-		return rt.systemDB.recv(ctx, recvInput{
+	stepID := wfState.nextStepID()
+	recorded, err := retryWithResult(ctx, func() (*recordedResult, error) {
+		return rt.systemDB.checkOperationExecution(ctx, checkOperationExecutionDBInput{
 			workflowUUID: wfState.workflowID,
+			functionID:   stepID,
+		})
+	}, withRetrierLogger(rt.app.Logger()))
+	if err != nil {
+		return *new(R), fmt.Errorf("checking step execution: %w", err)
+	}
+	if recorded != nil {
+		wfState.recovering = true
+		return decodeRecvOutput[R](recorded.output)
+	}
+	wfState.recovering = false
+
+	waitCtx, stop := drainAwareContext(ctx, rt)
+	defer stop()
+	encoded, err := retryWithResult(waitCtx, func() (*string, error) {
+		return rt.systemDB.recv(waitCtx, recvInput{
+			workflowUUID: wfState.workflowID,
+			functionID:   stepID,
 			topic:        topic,
 			timeout:      timeout,
 		})
 	}, withRetrierLogger(rt.app.Logger()))
 	if err != nil {
-		return *new(R), err
+		return *new(R), waitError(waitCtx, err)
 	}
-	if encoded == nil {
+	return decodeRecvOutput[R](encoded)
+}
+
+func decodeRecvOutput[R any](encoded *string) (R, error) {
+	if encoded == nil || *encoded == "" {
 		return *new(R), nil
 	}
 	return decodeJSON[R](encoded)
+}
+
+// errShutdownInterrupt is returned by Sleep and Recv when the runtime starts
+// shutting down mid-wait. The workflow is left PENDING and resumes on the
+// next launch.
+var errShutdownInterrupt = errors.New("turbine: wait interrupted by shutdown")
+
+// drainAwareContext returns ctx, also cancelled when the runtime starts
+// shutting down, so waits end at once instead of holding up Shutdown.
+func drainAwareContext(ctx context.Context, rt *Runtime) (context.Context, func()) {
+	waitCtx, cancel := context.WithCancelCause(ctx)
+	stopAfter := context.AfterFunc(rt.drainCtx, func() { cancel(errShutdownInterrupt) })
+	return waitCtx, func() {
+		stopAfter()
+		cancel(nil)
+	}
+}
+
+// waitError maps a wait cancelled by shutdown to errShutdownInterrupt.
+func waitError(waitCtx context.Context, err error) error {
+	if errors.Is(context.Cause(waitCtx), errShutdownInterrupt) {
+		return errShutdownInterrupt
+	}
+	return err
 }
 
 // SetValue sets a key-value event for the current workflow.
@@ -1070,48 +1148,55 @@ func GetValue[R any](ctx Context, targetWorkflowID string, key string, timeout t
 
 // Sleep performs a durable sleep within a workflow.
 // The wake-up time is recorded as a step so that on recovery,
-// if the wake-up time has already passed, Pause returns immediately;
+// if the wake-up time has already passed, Sleep returns immediately;
 // otherwise it sleeps only the remaining time.
-func Pause(ctx Context, duration time.Duration) error {
+//
+// Use it to pace a workflow or wait a fixed delay (for example
+// Sleep(ctx, 24*time.Hour) before a follow-up email). To wait for
+// something to happen instead of a fixed time, use Recv.
+func Sleep(ctx Context, duration time.Duration) error {
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
-		return fmt.Errorf("pause must be called within a workflow")
+		return fmt.Errorf("Sleep must be called within a workflow")
 	}
 	if wfState.isWithinStep {
 		return fmt.Errorf("cannot call Sleep within a step")
 	}
 
-	// The step records the wake-up time in millis. On first run, the step body
-	// executes the sleep. On replay, we get the stored wake-up time back and
-	// sleep only the remaining duration.
-	wakeUpMs, err := Do(ctx, func(ctx context.Context) (int64, error) {
-		wakeUpTime := time.Now().Add(duration)
-		remaining := time.Until(wakeUpTime)
-		if remaining > 0 {
-			select {
-			case <-time.After(remaining):
-			case <-ctx.Done():
-				return 0, ctx.Err()
-			}
-		}
-		return wakeUpTime.UnixMilli(), nil
+	// The step only records the wake-up time in millis, the wait happens
+	// outside it. A shutdown during the wait then never records a cancelled
+	// step, and on replay we get the stored wake-up time back and sleep only
+	// the remaining duration.
+	wakeUpMs, err := Do(ctx, func(context.Context) (int64, error) {
+		return time.Now().Add(duration).UnixMilli(), nil
 	}, WithStepName("pt.sleep"))
 	if err != nil {
 		return err
 	}
+	stepID := int(wfState.stepID.Load())
 
-	// On replay, wakeUpMs is the originally recorded wake-up time.
-	// Sleep only the remaining duration (if any).
-	wakeUpTime := time.UnixMilli(wakeUpMs)
-	remaining := time.Until(wakeUpTime)
-	if remaining > 0 {
+	if remaining := time.Until(time.UnixMilli(wakeUpMs)); remaining > 0 {
+		waitCtx, stop := drainAwareContext(ctx, runtimeFromContext(ctx))
+		defer stop()
+		timer := time.NewTimer(remaining)
+		defer timer.Stop()
 		select {
-		case <-time.After(remaining):
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-timer.C:
+		case <-waitCtx.Done():
+			return waitError(waitCtx, waitCtx.Err())
 		}
 	}
-	return nil
+
+	// Stretch the step to the wake-up time so it shows the real sleep.
+	rt := runtimeFromContext(ctx)
+	return retry(ctx, func() error {
+		return rt.systemDB.recordOperationEnd(ctx, wfState.workflowID, stepID, wakeUpMs)
+	}, withRetrierLogger(rt.app.Logger()))
+}
+
+// Pause is an alias for Sleep.
+func Pause(ctx Context, duration time.Duration) error {
+	return Sleep(ctx, duration)
 }
 
 // Retrieve returns a handle to an existing workflow.

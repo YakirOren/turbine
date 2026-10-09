@@ -10,9 +10,9 @@ import (
 )
 
 // ReminderWorkflow sends a reminder after a durable delay.
-// If the process crashes during the pause, it resumes with only the remaining time.
+// If the process crashes during the sleep, it resumes with only the remaining time.
 func ReminderWorkflow(ctx turbine.Context, userID string) (string, error) {
-	if err := turbine.Pause(ctx, 2*time.Second); err != nil {
+	if err := turbine.Sleep(ctx, 2*time.Second); err != nil {
 		return "", err
 	}
 

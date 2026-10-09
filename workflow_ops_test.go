@@ -2,7 +2,9 @@ package turbine
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -134,6 +136,66 @@ func TestPause(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected pt.sleep step to be recorded")
+	}
+}
+
+func TestSleep(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rt, cleanup := setupRuntime(t)
+		defer cleanup()
+
+		myWF := func(ctx Context, _ string) (string, error) {
+			if err := Sleep(ctx, time.Hour); err != nil {
+				return "", err
+			}
+			return "done", nil
+		}
+
+		Register(rt, myWF)
+		if err := rt.Launch(); err != nil {
+			t.Fatal(err)
+		}
+		defer rt.Shutdown()
+
+		start := time.Now()
+		handle, err := Run(rt, myWF, "", WithID("sleep-test"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := handle.GetResult()
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+		if elapsed := time.Since(start); elapsed < time.Hour {
+			t.Fatalf("expected at least an hour elapsed, got %v", elapsed)
+		}
+		if result != "done" {
+			t.Fatalf("expected 'done', got %q", result)
+		}
+
+		steps, err := rt.Steps(handle.GetWorkflowID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range steps {
+			if s.FunctionName == "pt.sleep" {
+				if d := time.Duration(s.EndedAt-s.StartedAt) * time.Millisecond; d != time.Hour {
+					t.Fatalf("expected pt.sleep to span the hour, got %v", d)
+				}
+				return
+			}
+		}
+		t.Fatal("expected pt.sleep step to be recorded")
+	})
+}
+
+func TestSleepOutsideWorkflow(t *testing.T) {
+	rt, cleanup := setupRuntime(t)
+	defer cleanup()
+
+	err := Sleep(rt.NewContext(context.Background()), time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "Sleep must be called within a workflow") {
+		t.Fatalf("expected outside-workflow error, got %v", err)
 	}
 }
 

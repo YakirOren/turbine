@@ -253,6 +253,7 @@ type sendInput struct {
 
 type recvInput struct {
 	workflowUUID string
+	functionID   int
 	topic        string
 	timeout      time.Duration
 }
@@ -357,6 +358,8 @@ type systemDatabase interface {
 	recordOperationStart(ctx context.Context, input recordOperationStartDBInput) error
 	recordOperationResult(ctx context.Context, input recordOperationResultDBInput) error
 	checkOperationExecution(ctx context.Context, input checkOperationExecutionDBInput) (*recordedResult, error)
+	recordOperationEnd(ctx context.Context, workflowUUID string, functionID int, endedAt int64) error
+	releaseRecoveryAttempt(ctx context.Context, workflowUUID string) error
 	getWorkflowSteps(ctx context.Context, input getWorkflowStepsInput) ([]stepInfo, error)
 
 	send(ctx context.Context, input sendInput) error

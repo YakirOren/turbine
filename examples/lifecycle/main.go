@@ -10,7 +10,7 @@ import (
 
 // LongRunningJob sleeps for a long time. Can be cancelled and resumed.
 func LongRunningJob(ctx turbine.Context, jobID string) (string, error) {
-	if err := turbine.Pause(ctx, 1*time.Hour); err != nil {
+	if err := turbine.Sleep(ctx, 1*time.Hour); err != nil {
 		return "", err
 	}
 
