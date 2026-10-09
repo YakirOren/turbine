@@ -237,6 +237,97 @@ func TestRecvReportsTimeout(t *testing.T) {
 	})
 }
 
+func TestRecvReceivesNilMessage(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rt, cleanup := setupRuntime(t)
+		defer cleanup()
+
+		receiver := func(ctx Context, _ string) (string, error) {
+			got := ""
+			for range 2 {
+				msg, ok, err := Recv[*string](ctx, "nil", time.Hour)
+				if err != nil {
+					return "", err
+				}
+				if !ok {
+					return "", fmt.Errorf("nil message reported as a timeout")
+				}
+				if msg != nil {
+					return "", fmt.Errorf("expected a nil message, got %q", *msg)
+				}
+				got += "nil;"
+			}
+			return got, nil
+		}
+		sender := func(ctx Context, target string) (string, error) {
+			var none *string
+			return "sent", Send(ctx, target, none, "nil")
+		}
+
+		Register(rt, receiver)
+		Register(rt, sender)
+		if err := rt.Launch(); err != nil {
+			t.Fatal(err)
+		}
+		defer rt.Shutdown()
+
+		handle, err := Run(rt, receiver, "", WithID("recv-nil"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rt.SendToWorkflow("recv-nil", nil, "nil"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Run(rt, sender, "recv-nil", WithID("send-nil")); err != nil {
+			t.Fatal(err)
+		}
+		result, err := handle.GetResult()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != "nil;nil;" {
+			t.Fatalf("expected both nil messages, got %q", result)
+		}
+	})
+}
+
+func TestSleepUntilPastTargetKeepsStepOrdered(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rt, cleanup := setupRuntime(t)
+		defer cleanup()
+
+		myWF := func(ctx Context, _ string) (string, error) {
+			return "done", SleepUntil(ctx, time.Now().Add(-time.Hour))
+		}
+		Register(rt, myWF)
+		if err := rt.Launch(); err != nil {
+			t.Fatal(err)
+		}
+		defer rt.Shutdown()
+
+		handle, err := Run(rt, myWF, "", WithID("sleep-until-past"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := handle.GetResult(); err != nil {
+			t.Fatal(err)
+		}
+		steps, err := rt.Steps(handle.GetWorkflowID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range steps {
+			if s.FunctionName == "pt.sleep" {
+				if s.EndedAt < s.StartedAt {
+					t.Fatalf("expected the step to end after it started, got %d < %d", s.EndedAt, s.StartedAt)
+				}
+				return
+			}
+		}
+		t.Fatal("expected pt.sleep step to be recorded")
+	})
+}
+
 func TestSleepUntil(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		rt, cleanup := setupRuntime(t)
