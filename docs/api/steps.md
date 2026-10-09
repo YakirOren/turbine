@@ -27,13 +27,21 @@ func DoAsync[R any](ctx turbine.Context, fn Step[R], opts ...StepOption) (chan A
 
 Execute a step asynchronously. Returns a channel that receives the result.
 
+## `turbine.Sleep`
+
+```go
+func Sleep(ctx turbine.Context, duration time.Duration) error
+```
+
+Durable sleep. Survives crashes and restarts, on recovery, sleeps only the remaining duration. To wait for an event instead of a fixed time, use [`turbine.Recv`](/concepts/communication).
+
 ## `turbine.Pause`
 
 ```go
 func Pause(ctx turbine.Context, duration time.Duration) error
 ```
 
-Durable pause. Survives crashes, on recovery, pauses only the remaining duration.
+Alias for `turbine.Sleep`.
 
 ## `turbine.WaitForApproval`
 

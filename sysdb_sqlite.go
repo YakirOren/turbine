@@ -713,6 +713,37 @@ func (s *sqliteSysDB) recordOperationResult(ctx context.Context, input recordOpe
 	return nil
 }
 
+// recordOperationEnd moves a finished step's end time, used by Sleep so the
+// step spans the whole sleep.
+func (s *sqliteSysDB) recordOperationEnd(ctx context.Context, workflowUUID string, functionID int, endedAt int64) error {
+	_, err := s.app.DB().NewQuery(`UPDATE pt_operation_outputs SET ended_at_epoch_ms = {:ended_at}
+		WHERE workflow_id = {:wf_id} AND function_id = {:func_id} AND ended_at_epoch_ms != 0`).Bind(dbx.Params{
+		"ended_at": endedAt,
+		"wf_id":    workflowUUID,
+		"func_id":  functionID,
+	}).Execute()
+	if err != nil {
+		return fmt.Errorf("failed to record step end: %w", err)
+	}
+	return nil
+}
+
+// releaseRecoveryAttempt undoes the attempt counted for a run that shutdown
+// interrupted, so restarts don't push a waiting workflow toward the dead
+// letter queue.
+func (s *sqliteSysDB) releaseRecoveryAttempt(ctx context.Context, workflowUUID string) error {
+	_, err := s.app.DB().NewQuery(`UPDATE pt_workflow_status
+		SET recovery_attempts = MAX(recovery_attempts - 1, 0)
+		WHERE id = {:id} AND status = {:pending}`).Bind(dbx.Params{
+		"id":      workflowUUID,
+		"pending": string(StatusPending),
+	}).Execute()
+	if err != nil {
+		return fmt.Errorf("failed to release recovery attempt: %w", err)
+	}
+	return nil
+}
+
 func (s *sqliteSysDB) checkOperationExecution(ctx context.Context, input checkOperationExecutionDBInput) (*recordedResult, error) {
 	// Check workflow status first
 	var workflowStatus StatusType
@@ -899,79 +930,149 @@ func (s *sqliteSysDB) send(ctx context.Context, input sendInput) error {
 	return nil
 }
 
+// recv consumes the oldest message for the workflow and topic, waiting up to
+// the timeout for one to arrive. The wait is checkpointed as step
+// input.functionID: the step's start time is kept across recoveries so the
+// timeout is durable, and the consumed message is recorded in the same
+// transaction that consumes it so a recovered workflow replays it.
 func (s *sqliteSysDB) recv(ctx context.Context, input recvInput) (*string, error) {
-	// Try to consume a message directly
-	var message sql.NullString
-	err := s.app.DB().NewQuery(`
-		WITH oldest AS (
-			SELECT id, message
-			FROM pt_notifications
-			WHERE destination_id = {:dest} AND topic = {:topic} AND consumed = FALSE
-			ORDER BY created_at_epoch_ms ASC
-			LIMIT 1
-		)
-		UPDATE pt_notifications SET consumed = TRUE
-		WHERE id = (SELECT id FROM oldest)
-		RETURNING message`).Bind(dbx.Params{
-		"dest":  input.workflowUUID,
-		"topic": input.topic,
-	}).Row(&message)
-
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("failed to consume notification: %w", err)
-	}
-
-	if message.Valid {
-		return &message.String, nil
-	}
-
-	// No message found, wait with event bus
-	if input.timeout <= 0 {
-		return nil, nil
+	deadline, err := s.recvDeadline(input)
+	if err != nil {
+		return nil, err
 	}
 
 	payload := fmt.Sprintf("%s::%s", input.workflowUUID, input.topic)
 	ch := s.eventBus.Wait(payload)
 	defer s.eventBus.Remove(payload, ch)
 
-	timer := time.NewTimer(input.timeout)
+	message, err := s.consumeMessage(input)
+	if err != nil || message != nil {
+		return message, err
+	}
+
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return nil, s.recordRecvTimeout(input)
+	}
+	timer := time.NewTimer(remaining)
 	defer timer.Stop()
 
 	for {
 		select {
 		case <-ch:
 			ch = s.eventBus.Swap(payload, ch)
-
-			// Try again
-			err = s.app.DB().NewQuery(`
-				WITH oldest AS (
-					SELECT id, message
-					FROM pt_notifications
-					WHERE destination_id = {:dest} AND topic = {:topic} AND consumed = FALSE
-					ORDER BY created_at_epoch_ms ASC
-					LIMIT 1
-				)
-				UPDATE pt_notifications SET consumed = TRUE
-				WHERE id = (SELECT id FROM oldest)
-				RETURNING message`).Bind(dbx.Params{
-				"dest":  input.workflowUUID,
-				"topic": input.topic,
-			}).Row(&message)
-
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return nil, fmt.Errorf("failed to consume notification: %w", err)
-			}
-			if message.Valid {
-				return &message.String, nil
+			message, err := s.consumeMessage(input)
+			if err != nil || message != nil {
+				return message, err
 			}
 
 		case <-timer.C:
-			return nil, nil
+			// A message can land right at the deadline with its notification
+			// still pending, so check once more before recording the timeout.
+			message, err := s.consumeMessage(input)
+			if err != nil || message != nil {
+				return message, err
+			}
+			return nil, s.recordRecvTimeout(input)
 
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
 	}
+}
+
+// recvDeadline records the start of the recv step once and returns the
+// deadline measured from it, so a recovered wait only waits the time left.
+func (s *sqliteSysDB) recvDeadline(input recvInput) (time.Time, error) {
+	// Keep the start of an interrupted recv, but not that of an unfinished
+	// row some other step left at this ID.
+	_, err := s.app.DB().NewQuery(`INSERT INTO pt_operation_outputs
+		(id, workflow_id, function_id, function_name, output, error, started_at_epoch_ms, ended_at_epoch_ms)
+		VALUES ({:id}, {:wf_id}, {:func_id}, 'pt.recv', '', '', {:started_at}, 0)
+		ON CONFLICT(workflow_id, function_id) DO UPDATE SET
+			started_at_epoch_ms = CASE
+				WHEN pt_operation_outputs.function_name = 'pt.recv' THEN pt_operation_outputs.started_at_epoch_ms
+				ELSE excluded.started_at_epoch_ms
+			END,
+			function_name = 'pt.recv'`).Bind(dbx.Params{
+		"id":         fmt.Sprintf("%s_%d", input.workflowUUID, input.functionID),
+		"wf_id":      input.workflowUUID,
+		"func_id":    input.functionID,
+		"started_at": time.Now().UnixMilli(),
+	}).Execute()
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to record recv start: %w", err)
+	}
+
+	var startedAt int64
+	err = s.app.DB().Select("started_at_epoch_ms").
+		From("pt_operation_outputs").
+		Where(dbx.HashExp{"workflow_id": input.workflowUUID, "function_id": input.functionID}).
+		Row(&startedAt)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to read recv start: %w", err)
+	}
+	return time.UnixMilli(startedAt).Add(input.timeout), nil
+}
+
+// consumeMessage marks the oldest unconsumed message as consumed and records
+// it as the recv step's output in one transaction. Returns nil if there is no
+// message. A NULL message is returned as JSON null.
+func (s *sqliteSysDB) consumeMessage(input recvInput) (*string, error) {
+	var result *string
+	err := s.app.RunInTransaction(func(txApp core.App) error {
+		var message sql.NullString
+		err := txApp.DB().NewQuery(`
+			WITH oldest AS (
+				SELECT id, message
+				FROM pt_notifications
+				WHERE destination_id = {:dest} AND topic = {:topic} AND consumed = FALSE
+				ORDER BY created_at_epoch_ms ASC
+				LIMIT 1
+			)
+			UPDATE pt_notifications SET consumed = TRUE
+			WHERE id = (SELECT id FROM oldest)
+			RETURNING message`).Bind(dbx.Params{
+			"dest":  input.workflowUUID,
+			"topic": input.topic,
+		}).Row(&message)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		out := "null"
+		if message.Valid {
+			out = message.String
+		}
+		result = &out
+		return recordRecvResult(txApp, input, out)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to consume notification: %w", err)
+	}
+	return result, nil
+}
+
+func (s *sqliteSysDB) recordRecvTimeout(input recvInput) error {
+	if err := recordRecvResult(s.app, input, ""); err != nil {
+		return fmt.Errorf("failed to record recv timeout: %w", err)
+	}
+	return nil
+}
+
+func recordRecvResult(app core.App, input recvInput, output string) error {
+	_, err := app.DB().NewQuery(`UPDATE pt_operation_outputs SET
+			output = {:output},
+			ended_at_epoch_ms = {:ended_at}
+		WHERE workflow_id = {:wf_id} AND function_id = {:func_id}`).Bind(dbx.Params{
+		"output":   output,
+		"ended_at": time.Now().UnixMilli(),
+		"wf_id":    input.workflowUUID,
+		"func_id":  input.functionID,
+	}).Execute()
+	return err
 }
 
 func (s *sqliteSysDB) setEvent(ctx context.Context, input setValueInput) error {

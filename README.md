@@ -22,12 +22,12 @@ go get github.com/YakirOren/turbine
 - **Durable workflows**, survive crashes, restart where they left off
 - **Steps**, record intermediate results, replay on recovery
 - **Step retries**, automatic retries with exponential backoff
-- **Durable pause**, survives restarts
+- **Durable sleep**, `turbine.Sleep` survives restarts and resumes with only the remaining time
 
 **Coordination**
 - **Queues**, concurrency control, priority, rate limiting, partitioning
 - **Scheduled workflows**, cron expressions via the built-in scheduler
-- **Send/Receive**, inter-workflow messaging
+- **Send/Receive**, inter-workflow messaging, or suspend a workflow until an event arrives
 - **Events**, key-value signaling between workflows
 
 **Lifecycle**
@@ -49,10 +49,11 @@ Every feature has a runnable example under [`examples/`](examples/). Start with 
 | [`steps`](examples/steps/) | Multi-step order processing |
 | [`concurrent`](examples/concurrent/) | Parallel steps with `DoAsync` |
 | [`retry`](examples/retry/) | Step retries with exponential backoff |
-| [`sleep`](examples/sleep/) | Durable pause |
+| [`sleep`](examples/sleep/) | Durable sleep |
 | [`queue`](examples/queue/) | Queue with concurrency and rate limiting |
 | [`scheduled`](examples/scheduled/) | Cron-scheduled workflows |
 | [`events`](examples/events/) | Key-value events and `Send`/`Receive` |
+| [`onboarding`](examples/onboarding/) | Event-driven onboarding with `Recv` and `Sleep` |
 | [`lifecycle`](examples/lifecycle/) | Cancel, resume, and inspect workflows |
 | [`app-access`](examples/app-access/) | Access the app from within workflow steps |
 | [`products`](examples/products/) | Generate files and deliver them via a `ProductSender` |

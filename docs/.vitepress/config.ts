@@ -125,6 +125,7 @@ export default defineConfig({
           { text: "Queue", link: "/examples/queue" },
           { text: "Scheduled", link: "/examples/scheduled" },
           { text: "Events", link: "/examples/events" },
+          { text: "Onboarding", link: "/examples/onboarding" },
           { text: "Lifecycle", link: "/examples/lifecycle" },
           { text: "App Access", link: "/examples/app-access" },
           { text: "Connector", link: "/examples/connector" },

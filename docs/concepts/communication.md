@@ -16,7 +16,21 @@ msg, err := turbine.Recv[string](ctx, "my-topic", 30*time.Second)
 
 If the timeout expires before a message arrives, `Recv` returns the zero value.
 
-Messages are recorded as durable steps, on recovery, if the message was already received, the saved result is replayed.
+Messages are recorded as durable steps, on recovery, if the message was already received, the saved result is replayed. The timeout is durable too, a workflow recovered mid-wait waits only for the remaining time. It is measured from the first time the wait ran, so resuming a workflow after its deadline returns at once. A timeout of 0 or less checks for a message once without waiting.
+
+### Waiting for an Event
+
+`Recv` doubles as a durable "suspend until X happens" primitive. Give the workflow a deterministic ID, block on `Recv`, and send to it from wherever the event happens, such as an HTTP handler or a record hook. The workflow can wait for hours or days and survives restarts while it waits.
+
+```go
+// In the workflow: wait up to a day for the user's first todo
+todo, err := turbine.Recv[Todo](ctx, "first-todo", 24*time.Hour)
+
+// In the create-todo handler
+err := turbine.Send(rt.NewContext(re.Request.Context()), "onboarding-"+userID, todo, "first-todo")
+```
+
+See the [onboarding example](/examples/onboarding) for a full flow.
 
 ### Sending from HTTP Handlers
 
