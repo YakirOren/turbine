@@ -43,11 +43,11 @@ func OnboardingWorkflow(ctx turbine.Context, userID string) (string, error) {
 	}
 
 	// Suspend until the create-todo handler sends the first todo.
-	todo, err := turbine.Recv[Todo](ctx, topicFirstTodo, 24*time.Hour)
+	todo, ok, err := turbine.Recv[Todo](ctx, topicFirstTodo, 24*time.Hour)
 	if err != nil {
 		return "", err
 	}
-	if todo.Text == "" {
+	if !ok {
 		_ = turbine.SetValue(ctx, stageKey, "expired")
 		return "onboarding expired for " + userID, nil
 	}

@@ -113,9 +113,32 @@ func (s *RecoverySuite) TestSleepSurvivesForcedShutdown() {
 	})
 }
 
+func (s *RecoverySuite) TestSleepUntilKeepsFirstTarget() {
+	wf := func(ctx Context, _ string) (string, error) {
+		// Recomputed on every run, so only the recorded target is stable.
+		if err := SleepUntil(ctx, time.Now().Add(time.Hour)); err != nil {
+			return "", err
+		}
+		return "done", nil
+	}
+
+	s.bubble(func() {
+		begin := time.Now()
+		s.launch(wf)
+		s.start(wf, "sleep-until")
+		s.parkedAt("sleep-until", "pt.sleep")
+		time.Sleep(20 * time.Minute)
+		s.rt.Shutdown()
+
+		s.launch(wf)
+		s.Equal("done", s.result("sleep-until"))
+		s.Equal(time.Hour, time.Since(begin), "recovery should wake at the first recorded target")
+	})
+}
+
 func (s *RecoverySuite) TestRecvReplaysAfterForcedShutdown() {
 	wf := func(ctx Context, _ string) (string, error) {
-		msg, err := Recv[string](ctx, "greet", time.Hour)
+		msg, _, err := Recv[string](ctx, "greet", time.Hour)
 		if err != nil {
 			return "", err
 		}
@@ -142,11 +165,14 @@ func (s *RecoverySuite) TestRecvReplaysAfterForcedShutdown() {
 func (s *RecoverySuite) TestRecvTimeoutSurvivesForcedShutdown() {
 	const timeout = time.Hour
 	wf := func(ctx Context, _ string) (string, error) {
-		msg, err := Recv[string](ctx, "never", timeout)
+		_, ok, err := Recv[string](ctx, "never", timeout)
 		if err != nil {
 			return "", err
 		}
-		return "timed out:" + msg, nil
+		if ok {
+			return "received", nil
+		}
+		return "timed out", nil
 	}
 
 	s.bubble(func() {
@@ -158,7 +184,7 @@ func (s *RecoverySuite) TestRecvTimeoutSurvivesForcedShutdown() {
 		s.rt.Shutdown()
 
 		s.launch(wf)
-		s.Equal("timed out:", s.result("recv-timeout"))
+		s.Equal("timed out", s.result("recv-timeout"), "the timeout should be replayed as a timeout")
 		s.Equal(timeout, time.Since(begin), "recovery should wait only the remaining timeout")
 	})
 }
@@ -199,7 +225,7 @@ func (s *RecoverySuite) TestRecvClearsRecoveringWhenLive() {
 		if _, err := Do(ctx, func(context.Context) (bool, error) { return true, nil }, WithStepName("before")); err != nil {
 			return "", err
 		}
-		msg, err := Recv[string](ctx, "go", time.Hour)
+		msg, _, err := Recv[string](ctx, "go", time.Hour)
 		if err != nil {
 			return "", err
 		}

@@ -55,6 +55,16 @@ if err := turbine.Sleep(ctx, 24*time.Hour); err != nil {
 }
 ```
 
+To wake at a wall-clock time instead of after a delay, use `turbine.SleepUntil`. The first target is recorded, so recovery wakes at the same time:
+
+```go
+now := time.Now()
+tomorrow9am := time.Date(now.Year(), now.Month(), now.Day()+1, 9, 0, 0, 0, time.Local)
+if err := turbine.SleepUntil(ctx, tomorrow9am); err != nil {
+    return "", err
+}
+```
+
 `turbine.Pause` is an alias for `turbine.Sleep`.
 
 On shutdown, a sleeping workflow stops waiting at once and stays `PENDING`. The next launch resumes it with only the remaining time, and the interrupted run doesn't count toward its recovery attempts.

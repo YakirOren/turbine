@@ -1030,15 +1030,17 @@ func Send(ctx Context, destinationID string, message any, topic string) error {
 // its deadline returns at once. A timeout <= 0 checks for a message once
 // without waiting, and that result is checkpointed too.
 //
-// If the timeout expires first, Recv returns the zero value of R and a nil error.
-func Recv[R any](ctx Context, topic string, timeout time.Duration) (R, error) {
+// ok reports whether a message was received. If the timeout expires first,
+// Recv returns the zero value of R, false and a nil error. A message sent as
+// nil is received with ok true.
+func Recv[R any](ctx Context, topic string, timeout time.Duration) (R, bool, error) {
 	rt := runtimeFromContext(ctx)
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
-		return *new(R), fmt.Errorf("Recv must be called within a workflow")
+		return *new(R), false, fmt.Errorf("Recv must be called within a workflow")
 	}
 	if wfState.isWithinStep {
-		return *new(R), fmt.Errorf("cannot call Recv within a step")
+		return *new(R), false, fmt.Errorf("cannot call Recv within a step")
 	}
 
 	stepID := wfState.nextStepID()
@@ -1049,7 +1051,7 @@ func Recv[R any](ctx Context, topic string, timeout time.Duration) (R, error) {
 		})
 	}, withRetrierLogger(rt.app.Logger()))
 	if err != nil {
-		return *new(R), fmt.Errorf("checking step execution: %w", err)
+		return *new(R), false, fmt.Errorf("checking step execution: %w", err)
 	}
 	if recorded != nil {
 		wfState.recovering = true
@@ -1068,16 +1070,22 @@ func Recv[R any](ctx Context, topic string, timeout time.Duration) (R, error) {
 		})
 	}, withRetrierLogger(rt.app.Logger()))
 	if err != nil {
-		return *new(R), waitError(waitCtx, err)
+		return *new(R), false, waitError(waitCtx, err)
 	}
 	return decodeRecvOutput[R](encoded)
 }
 
-func decodeRecvOutput[R any](encoded *string) (R, error) {
+// decodeRecvOutput decodes a recv step's output. A timeout is recorded as an
+// empty output, a received message always as JSON.
+func decodeRecvOutput[R any](encoded *string) (R, bool, error) {
 	if encoded == nil || *encoded == "" {
-		return *new(R), nil
+		return *new(R), false, nil
 	}
-	return decodeJSON[R](encoded)
+	value, err := decodeJSON[R](encoded)
+	if err != nil {
+		return *new(R), false, err
+	}
+	return value, true, nil
 }
 
 // errShutdownInterrupt is returned by Sleep and Recv when the runtime starts
@@ -1155,12 +1163,26 @@ func GetValue[R any](ctx Context, targetWorkflowID string, key string, timeout t
 // Sleep(ctx, 24*time.Hour) before a follow-up email). To wait for
 // something to happen instead of a fixed time, use Recv.
 func Sleep(ctx Context, duration time.Duration) error {
+	return durableSleep(ctx, "Sleep", func() time.Time { return time.Now().Add(duration) })
+}
+
+// SleepUntil performs a durable sleep until t. If t has already passed it
+// returns immediately.
+//
+// The first target is recorded as a step, so on recovery the workflow wakes
+// at that time even if the code computes t again from time.Now. Use it for
+// wall-clock deadlines, for example a reminder at a fixed time tomorrow.
+func SleepUntil(ctx Context, t time.Time) error {
+	return durableSleep(ctx, "SleepUntil", func() time.Time { return t })
+}
+
+func durableSleep(ctx Context, name string, wakeUpAt func() time.Time) error {
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
 	if !ok || wfState == nil {
-		return fmt.Errorf("Sleep must be called within a workflow")
+		return fmt.Errorf("%s must be called within a workflow", name)
 	}
 	if wfState.isWithinStep {
-		return fmt.Errorf("cannot call Sleep within a step")
+		return fmt.Errorf("cannot call %s within a step", name)
 	}
 
 	// The step only records the wake-up time in millis, the wait happens
@@ -1168,7 +1190,7 @@ func Sleep(ctx Context, duration time.Duration) error {
 	// step, and on replay we get the stored wake-up time back and sleep only
 	// the remaining duration.
 	wakeUpMs, err := Do(ctx, func(context.Context) (int64, error) {
-		return time.Now().Add(duration).UnixMilli(), nil
+		return wakeUpAt().UnixMilli(), nil
 	}, WithStepName("pt.sleep"))
 	if err != nil {
 		return err

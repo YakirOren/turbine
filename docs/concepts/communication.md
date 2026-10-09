@@ -11,10 +11,10 @@ Point-to-point messaging between workflows.
 turbine.Send(ctx, targetWorkflowID, "payload", "my-topic")
 
 // In workflow B: receive (blocks until message arrives or timeout)
-msg, err := turbine.Recv[string](ctx, "my-topic", 30*time.Second)
+msg, ok, err := turbine.Recv[string](ctx, "my-topic", 30*time.Second)
 ```
 
-If the timeout expires before a message arrives, `Recv` returns the zero value.
+`ok` reports whether a message arrived. If the timeout expires first, `Recv` returns the zero value and `ok` is false.
 
 Messages are recorded as durable steps, on recovery, if the message was already received, the saved result is replayed. The timeout is durable too, a workflow recovered mid-wait waits only for the remaining time. It is measured from the first time the wait ran, so resuming a workflow after its deadline returns at once. A timeout of 0 or less checks for a message once without waiting.
 
@@ -24,7 +24,7 @@ Messages are recorded as durable steps, on recovery, if the message was already 
 
 ```go
 // In the workflow: wait up to a day for the user's first todo
-todo, err := turbine.Recv[Todo](ctx, "first-todo", 24*time.Hour)
+todo, ok, err := turbine.Recv[Todo](ctx, "first-todo", 24*time.Hour)
 
 // In the create-todo handler
 err := turbine.Send(rt.NewContext(re.Request.Context()), "onboarding-"+userID, todo, "first-todo")

@@ -2,6 +2,7 @@ package turbine
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -63,13 +64,15 @@ func WaitForApproval(ctx Context, opts ...ApprovalOption) (ApprovalResult, error
 		go rt.dispatchEvent(wfState.workflowID, wfState.workflowName, StatusWaitingForApproval, nil, nil)
 	}
 
-	result, err := Recv[*ApprovalResult](ctx, approvalTopic, timeout)
+	result, ok, err := Recv[*ApprovalResult](ctx, approvalTopic, timeout)
 	if err != nil {
 		return ApprovalResult{}, err
 	}
-
-	if result == nil {
+	if !ok {
 		return ApprovalResult{}, ErrApprovalTimeout
+	}
+	if result == nil {
+		return ApprovalResult{}, fmt.Errorf("received an empty approval")
 	}
 
 	return *result, nil

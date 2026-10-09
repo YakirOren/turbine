@@ -35,6 +35,14 @@ func Sleep(ctx turbine.Context, duration time.Duration) error
 
 Durable sleep. Survives crashes and restarts, on recovery, sleeps only the remaining duration. To wait for an event instead of a fixed time, use [`turbine.Recv`](/concepts/communication).
 
+## `turbine.SleepUntil`
+
+```go
+func SleepUntil(ctx turbine.Context, t time.Time) error
+```
+
+Durable sleep until `t`, returns at once if `t` has passed. The first target is recorded, so a restart wakes at the same time even if `t` is computed again from `time.Now()`.
+
 ## `turbine.Pause`
 
 ```go

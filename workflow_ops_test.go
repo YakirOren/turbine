@@ -2,6 +2,7 @@ package turbine
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -186,6 +187,88 @@ func TestSleep(t *testing.T) {
 			}
 		}
 		t.Fatal("expected pt.sleep step to be recorded")
+	})
+}
+
+func TestRecvReportsTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rt, cleanup := setupRuntime(t)
+		defer cleanup()
+
+		myWF := func(ctx Context, _ string) (string, error) {
+			first, ok, err := Recv[string](ctx, "t", time.Minute)
+			if err != nil {
+				return "", err
+			}
+			if ok {
+				return "", fmt.Errorf("expected a timeout, got %q", first)
+			}
+			second, ok, err := Recv[string](ctx, "t", time.Hour)
+			if err != nil {
+				return "", err
+			}
+			if !ok {
+				return "", fmt.Errorf("expected a message after the timeout")
+			}
+			return second, nil
+		}
+
+		Register(rt, myWF)
+		if err := rt.Launch(); err != nil {
+			t.Fatal(err)
+		}
+		defer rt.Shutdown()
+
+		handle, err := Run(rt, myWF, "", WithID("recv-ok"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Minute)
+		if err := rt.SendToWorkflow("recv-ok", "hello", "t"); err != nil {
+			t.Fatal(err)
+		}
+		result, err := handle.GetResult()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != "hello" {
+			t.Fatalf("expected 'hello', got %q", result)
+		}
+	})
+}
+
+func TestSleepUntil(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rt, cleanup := setupRuntime(t)
+		defer cleanup()
+
+		target := time.Now().Add(2 * time.Hour)
+		myWF := func(ctx Context, _ string) (string, error) {
+			if err := SleepUntil(ctx, target); err != nil {
+				return "", err
+			}
+			if err := SleepUntil(ctx, target.Add(-time.Hour)); err != nil {
+				return "", err
+			}
+			return "done", nil
+		}
+
+		Register(rt, myWF)
+		if err := rt.Launch(); err != nil {
+			t.Fatal(err)
+		}
+		defer rt.Shutdown()
+
+		handle, err := Run(rt, myWF, "", WithID("sleep-until"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := handle.GetResult(); err != nil {
+			t.Fatal(err)
+		}
+		if !time.Now().Equal(target) {
+			t.Fatalf("expected to wake at %v and not sleep for a past time, woke at %v", target, time.Now())
+		}
 	})
 }
 
