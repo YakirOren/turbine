@@ -950,3 +950,26 @@ func TestRecvIgnoresStartOfOtherUnfinishedStep(t *testing.T) {
 		}
 	})
 }
+
+func TestSendNilMessageIsReceivedAsNull(t *testing.T) {
+	sysDB, cleanup := setupSysDB(t)
+	defer cleanup()
+
+	wfID := "wf-send-nil"
+	if _, err := sysDB.insertStatus(context.Background(), insertStatusDBInput{status: makeStatus(wfID)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sysDB.send(context.Background(), sendInput{DestinationUUID: wfID, Topic: "n"}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := sysDB.recv(context.Background(), recvInput{
+		workflowUUID: wfID, functionID: 0, topic: "n", timeout: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || *result != "null" {
+		t.Fatalf("expected a JSON null message, got %v", result)
+	}
+}

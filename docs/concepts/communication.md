@@ -25,6 +25,12 @@ Messages are recorded as durable steps, on recovery, if the message was already 
 ```go
 // In the workflow: wait up to a day for the user's first todo
 todo, ok, err := turbine.Recv[Todo](ctx, "first-todo", 24*time.Hour)
+if err != nil {
+    return "", err
+}
+if !ok {
+    return "no todo within a day", nil
+}
 
 // In the create-todo handler
 err := turbine.Send(rt.NewContext(re.Request.Context()), "onboarding-"+userID, todo, "first-todo")

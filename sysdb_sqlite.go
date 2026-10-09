@@ -908,6 +908,12 @@ func (s *sqliteSysDB) send(ctx context.Context, input sendInput) error {
 	} else {
 		msgID = core.GenerateDefaultRandomId()
 	}
+	// recv reads an empty message as a timeout, so a nil message is stored
+	// as JSON null to be received.
+	message := "null"
+	if input.Message != nil {
+		message = *input.Message
+	}
 	_, err := s.app.DB().NewQuery(`INSERT INTO pt_notifications
 		(id, destination_id, topic, message, created_at_epoch_ms, consumed)
 		VALUES ({:id}, {:dest}, {:topic}, {:msg}, {:ts}, FALSE)
@@ -915,7 +921,7 @@ func (s *sqliteSysDB) send(ctx context.Context, input sendInput) error {
 		"id":    msgID,
 		"dest":  input.DestinationUUID,
 		"topic": input.Topic,
-		"msg":   derefStr(input.Message),
+		"msg":   message,
 		"ts":    time.Now().UnixMilli(),
 	}).Execute()
 

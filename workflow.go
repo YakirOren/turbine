@@ -989,12 +989,6 @@ func Send(ctx Context, destinationID string, message any, topic string) error {
 	if err != nil {
 		return fmt.Errorf("failed to serialize message: %w", err)
 	}
-	// Recv reads an empty message as a timeout, so a nil message must be
-	// stored as JSON null to be received.
-	if encoded == nil {
-		null := "null"
-		encoded = &null
-	}
 
 	// If within a workflow, record as step
 	wfState, ok := ctx.Value(workflowStateKey).(*workflowState)
