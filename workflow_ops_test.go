@@ -2,6 +2,7 @@ package turbine
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -186,6 +187,179 @@ func TestSleep(t *testing.T) {
 			}
 		}
 		t.Fatal("expected pt.sleep step to be recorded")
+	})
+}
+
+func TestRecvReportsTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rt, cleanup := setupRuntime(t)
+		defer cleanup()
+
+		myWF := func(ctx Context, _ string) (string, error) {
+			first, ok, err := Recv[string](ctx, "t", time.Minute)
+			if err != nil {
+				return "", err
+			}
+			if ok {
+				return "", fmt.Errorf("expected a timeout, got %q", first)
+			}
+			second, ok, err := Recv[string](ctx, "t", time.Hour)
+			if err != nil {
+				return "", err
+			}
+			if !ok {
+				return "", fmt.Errorf("expected a message after the timeout")
+			}
+			return second, nil
+		}
+
+		Register(rt, myWF)
+		if err := rt.Launch(); err != nil {
+			t.Fatal(err)
+		}
+		defer rt.Shutdown()
+
+		handle, err := Run(rt, myWF, "", WithID("recv-ok"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Minute)
+		if err := rt.SendToWorkflow("recv-ok", "hello", "t"); err != nil {
+			t.Fatal(err)
+		}
+		result, err := handle.GetResult()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != "hello" {
+			t.Fatalf("expected 'hello', got %q", result)
+		}
+	})
+}
+
+func TestRecvReceivesNilMessage(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rt, cleanup := setupRuntime(t)
+		defer cleanup()
+
+		receiver := func(ctx Context, _ string) (string, error) {
+			got := ""
+			for range 2 {
+				msg, ok, err := Recv[*string](ctx, "nil", time.Hour)
+				if err != nil {
+					return "", err
+				}
+				if !ok {
+					return "", fmt.Errorf("nil message reported as a timeout")
+				}
+				if msg != nil {
+					return "", fmt.Errorf("expected a nil message, got %q", *msg)
+				}
+				got += "nil;"
+			}
+			return got, nil
+		}
+		sender := func(ctx Context, target string) (string, error) {
+			var none *string
+			return "sent", Send(ctx, target, none, "nil")
+		}
+
+		Register(rt, receiver)
+		Register(rt, sender)
+		if err := rt.Launch(); err != nil {
+			t.Fatal(err)
+		}
+		defer rt.Shutdown()
+
+		handle, err := Run(rt, receiver, "", WithID("recv-nil"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rt.SendToWorkflow("recv-nil", nil, "nil"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Run(rt, sender, "recv-nil", WithID("send-nil")); err != nil {
+			t.Fatal(err)
+		}
+		result, err := handle.GetResult()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != "nil;nil;" {
+			t.Fatalf("expected both nil messages, got %q", result)
+		}
+	})
+}
+
+func TestSleepUntilPastTargetKeepsStepOrdered(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rt, cleanup := setupRuntime(t)
+		defer cleanup()
+
+		myWF := func(ctx Context, _ string) (string, error) {
+			return "done", SleepUntil(ctx, time.Now().Add(-time.Hour))
+		}
+		Register(rt, myWF)
+		if err := rt.Launch(); err != nil {
+			t.Fatal(err)
+		}
+		defer rt.Shutdown()
+
+		handle, err := Run(rt, myWF, "", WithID("sleep-until-past"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := handle.GetResult(); err != nil {
+			t.Fatal(err)
+		}
+		steps, err := rt.Steps(handle.GetWorkflowID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range steps {
+			if s.FunctionName == "pt.sleep" {
+				if s.EndedAt < s.StartedAt {
+					t.Fatalf("expected the step to end after it started, got %d < %d", s.EndedAt, s.StartedAt)
+				}
+				return
+			}
+		}
+		t.Fatal("expected pt.sleep step to be recorded")
+	})
+}
+
+func TestSleepUntil(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rt, cleanup := setupRuntime(t)
+		defer cleanup()
+
+		target := time.Now().Add(2 * time.Hour)
+		myWF := func(ctx Context, _ string) (string, error) {
+			if err := SleepUntil(ctx, target); err != nil {
+				return "", err
+			}
+			if err := SleepUntil(ctx, target.Add(-time.Hour)); err != nil {
+				return "", err
+			}
+			return "done", nil
+		}
+
+		Register(rt, myWF)
+		if err := rt.Launch(); err != nil {
+			t.Fatal(err)
+		}
+		defer rt.Shutdown()
+
+		handle, err := Run(rt, myWF, "", WithID("sleep-until"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := handle.GetResult(); err != nil {
+			t.Fatal(err)
+		}
+		if !time.Now().Equal(target) {
+			t.Fatalf("expected to wake at %v and not sleep for a past time, woke at %v", target, time.Now())
+		}
 	})
 }
 

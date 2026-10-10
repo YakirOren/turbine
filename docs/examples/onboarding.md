@@ -8,7 +8,7 @@ An event-driven onboarding flow in a single workflow. It starts when a user logs
 - `turbine.Sleep` is durable, a restart during the minute sleeps only the time left
 - The handler sends while the onboarding workflow is `PENDING`. Messages wait until `Recv` consumes them, so a todo created before the workflow reaches `Recv` is not lost, and only the first todo is read
 - `turbine.SetValue` exposes the current stage, so the UI can render a stepper from `GET /onboarding`
-- If no todo arrives within 24 hours, `Recv` returns the zero value and the workflow ends as expired
+- If no todo arrives within 24 hours, `Recv` returns `ok == false` and the workflow ends as expired
 
 **Try it:**
 

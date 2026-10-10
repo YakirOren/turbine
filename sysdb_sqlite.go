@@ -713,10 +713,10 @@ func (s *sqliteSysDB) recordOperationResult(ctx context.Context, input recordOpe
 	return nil
 }
 
-// recordOperationEnd moves a finished step's end time, used by Sleep so the
-// step spans the whole sleep.
+// recordOperationEnd moves a finished step's end time later, used by Sleep so
+// the step spans the whole sleep. A wake-up time in the past is ignored.
 func (s *sqliteSysDB) recordOperationEnd(ctx context.Context, workflowUUID string, functionID int, endedAt int64) error {
-	_, err := s.app.DB().NewQuery(`UPDATE pt_operation_outputs SET ended_at_epoch_ms = {:ended_at}
+	_, err := s.app.DB().NewQuery(`UPDATE pt_operation_outputs SET ended_at_epoch_ms = MAX(ended_at_epoch_ms, {:ended_at})
 		WHERE workflow_id = {:wf_id} AND function_id = {:func_id} AND ended_at_epoch_ms != 0`).Bind(dbx.Params{
 		"ended_at": endedAt,
 		"wf_id":    workflowUUID,
@@ -908,6 +908,12 @@ func (s *sqliteSysDB) send(ctx context.Context, input sendInput) error {
 	} else {
 		msgID = core.GenerateDefaultRandomId()
 	}
+	// recv reads an empty message as a timeout, so a nil message is stored
+	// as JSON null to be received.
+	message := "null"
+	if input.Message != nil {
+		message = *input.Message
+	}
 	_, err := s.app.DB().NewQuery(`INSERT INTO pt_notifications
 		(id, destination_id, topic, message, created_at_epoch_ms, consumed)
 		VALUES ({:id}, {:dest}, {:topic}, {:msg}, {:ts}, FALSE)
@@ -915,7 +921,7 @@ func (s *sqliteSysDB) send(ctx context.Context, input sendInput) error {
 		"id":    msgID,
 		"dest":  input.DestinationUUID,
 		"topic": input.Topic,
-		"msg":   derefStr(input.Message),
+		"msg":   message,
 		"ts":    time.Now().UnixMilli(),
 	}).Execute()
 

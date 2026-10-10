@@ -21,9 +21,14 @@ func ApprovalWorkflow(ctx turbine.Context, requestID string) (string, error) {
 	}
 
 	// Wait up to 1 hour for approval
-	approved, err := turbine.Recv[bool](ctx, "approval", 1*time.Hour)
+	approved, ok, err := turbine.Recv[bool](ctx, "approval", 1*time.Hour)
 	if err != nil {
 		return "", err
+	}
+
+	if !ok {
+		_ = turbine.SetValue(ctx, "status", "expired")
+		return fmt.Sprintf("request %s expired", requestID), nil
 	}
 
 	if !approved {
